@@ -12,7 +12,7 @@ GGTG — это Telegram-клиент для работы со множеств�
 | Платформа | Что это | Язык | Исходники |
 |---|---|---|---|
 | macOS | форк Telegram Desktop 7.3.1 (через Nicegram) | C++20, Qt 6 | `desktop/nicegram-desktop` |
-| Windows | **тот же исходник**, что и macOS, собирается на Windows (Qt 5) | C++ | `desktop/nicegram-desktop` → архив в `APP/` |
+| Windows | **тот же исходник**, что и macOS, собирается в облаке GitHub Actions (Qt 5) | C++ | `desktop/nicegram-desktop` → `.exe` в Actions Artifacts |
 | Android | форк Telegram Android 12.10.6 | Java (Telegram) + Kotlin (GGTG) | `android/Telegram-GGTG` |
 
 Mac и Android повторяют друг друга по функциям и форматам данных (паритет). Новую
@@ -67,7 +67,7 @@ GGTG/
 │   ├── jdk/              ← JDK 17 для сборки
 │   └── keys/             ← ключи подписи (не публиковать)
 ├── windows/
-│   ├── BUILD_WINDOWS_RU.md ← пошаговая сборка exe на Windows-машине
+│   ├── BUILD_WINDOWS_RU.md ← инструкция по облачной сборке exe в GitHub Actions
 │   └── patch/            ← патч совместимости
 ├── APP/                  ← все сборки: GGTG.dmg, GGTG-Android.apk,
 │                           GGTG-windows-src.zip; прошлые версии в previous/
@@ -90,7 +90,7 @@ GGTG/
 | Mac, DMG | `desktop/nicegram-desktop/Telegram/build/ggtg/make_dmg.sh` | `APP/GGTG.dmg` (удаляет отладочные символы, подписывает, рисует окно) |
 | Установить на этот Mac | закрыть GGTG, `ditto out/Release/GGTG.app /Applications/GGTG.app` | |
 | Android APK (3–5 мин) | `android/build_release.sh` | `APP/GGTG-Android.apk` (проверяет testOnly, подпись, пакет) |
-| Windows | `desktop/nicegram-desktop/Telegram/build/ggtg/make_windows_zip.sh`, дальше на Windows по `windows/BUILD_WINDOWS_RU.md` | `APP/GGTG-windows-src.zip` |
+| Windows | GitHub Actions workflow `Build Windows EXE` | `GGTG-Windows-x64.zip` в Artifacts (готовый `GGTG.exe`) |
 | Тесты логики | `desktop/ggtg-tests/run.sh` | |
 
 Не запускайте Debug-сборку Mac: она пересобирает всё для двух архитектур.
