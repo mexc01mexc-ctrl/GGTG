@@ -15,6 +15,9 @@ jobs:
     name: Build Windows (x64)
     runs-on: windows-latest
 
+    env:
+      Platform: x64
+
     defaults:
       run:
         shell: cmd
@@ -33,21 +36,26 @@ jobs:
         with:
           python-version: '3.10'
 
+      - name: Set up Ninja
+        uses: seanmiddleditch/gha-setup-ninja@v5
+
       - name: Cache ThirdParty and Libraries
         uses: actions/cache@v4
         with:
           path: |
             D:\TBuild\ThirdParty
             D:\TBuild\Libraries
-          key: ${{ runner.os }}-x64-tdesktop-libs
+          key: ${{ runner.os }}-x64-tdesktop-libs-v2
           restore-keys: |
-            ${{ runner.os }}-x64-tdesktop-libs
+            ${{ runner.os }}-x64-tdesktop-libs-
 
       - name: Prepare build tree
+        shell: pwsh
         run: |
-          mkdir D:\TBuild\Libraries 2>nul
-          mkdir D:\TBuild\ThirdParty 2>nul
-          robocopy desktop\nicegram-desktop D:\TBuild\tdesktop /E /IS /IT /NFL /NDL /NJH /NJS || exit 0
+          New-Item -ItemType Directory -Force -Path D:\TBuild\Libraries | Out-Null
+          New-Item -ItemType Directory -Force -Path D:\TBuild\ThirdParty | Out-Null
+          robocopy desktop\nicegram-desktop D:\TBuild\tdesktop /E /IS /IT /NFL /NDL /NJH /NJS
+          if ($LASTEXITCODE -le 7) { exit 0 } else { exit $LASTEXITCODE }
 
       - name: Prepare dependencies
         working-directory: D:\TBuild\tdesktop\Telegram
@@ -64,9 +72,12 @@ jobs:
         run: |
           cmake --build . --config Release --target Telegram
 
-      - name: Upload GGTG.exe Artifact
+      - name: Locate and Upload Artifact
         uses: actions/upload-artifact@v4
         with:
           name: GGTG-Windows-x64
-          path: D:\TBuild\tdesktop\out\Release\Telegram.exe
+          path: |
+            D:\TBuild\tdesktop\out\Release\*.exe
+            D:\TBuild\tdesktop\out\Release\GGTG.exe
+            D:\TBuild\tdesktop\out\Release\Telegram.exe
           retention-days: 14

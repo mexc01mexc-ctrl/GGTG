@@ -13,33 +13,35 @@
 APP/
 backups/
 
-# Precompiled dependencies & toolchains (Mac / Windows / Android)
+# Precompiled local dependencies & toolchains (Mac / Windows / Android)
 desktop/Libraries/
 desktop/ThirdParty/
 **/jdk/
 **/keys/
 
-# Build outputs (anywhere in tree)
-**/build/
-**/.gradle/
-**/out/
-**/DerivedData/
-**/GeneratedFiles/
-**/*.a
-**/*.so
-**/*.dylib
-**/*.dbg
-**/*.o
-**/*.gch
-**/*.rlib
-**/*.rmeta
+# Build outputs
+desktop/nicegram-desktop/desktop/
+desktop/nicegram-desktop/out/
+desktop/nicegram-desktop/build/
+desktop/nicegram-desktop/Telegram/GeneratedFiles/
+desktop/nicegram-desktop/Telegram/Telegram.xcodeproj/xcuserdata/
+desktop/nicegram-desktop/Telegram/Telegram.xcodeproj/project.xcworkspace/xcuserdata/
 
-# IDE & local user files
-**/.idea/
-**/*.iml
-**/local.properties
-**/xcuserdata/
-**/project.xcworkspace/xcuserdata/
+android/Telegram-GGTG/build/
+android/Telegram-GGTG/**/build/
+android/Telegram-GGTG/.gradle/
+android/Telegram-GGTG/**/.gradle/
+android/Telegram-GGTG/.idea/
+android/Telegram-GGTG/local.properties
+android/Telegram-GGTG/*.iml
+android/Telegram-GGTG/**/*.iml
+
+# Intermediates
+*.o
+*.gch
+*.rlib
+*.rmeta
+*.dbg
 
 # Local session data
 **/tdata/

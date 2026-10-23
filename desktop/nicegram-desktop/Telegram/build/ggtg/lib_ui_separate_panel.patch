@@ -1,0 +1,42 @@
+diff --git a/ui/widgets/separate_panel.cpp b/ui/widgets/separate_panel.cpp
+index f522c7b..458e211 100644
+--- a/ui/widgets/separate_panel.cpp
++++ b/ui/widgets/separate_panel.cpp
+@@ -1305,7 +1305,9 @@ RpWidget *SeparatePanel::inner() const {
+ 	return _inner.get();
+ }
+ 
+-void SeparatePanel::showInner(base::unique_qptr<RpWidget> inner) {
++void SeparatePanel::showInner(
++		base::unique_qptr<RpWidget> inner,
++		bool activate) {
+ 	Expects(!size().isEmpty());
+ 
+ 	auto old = base::take(_inner);
+@@ -1324,7 +1326,9 @@ void SeparatePanel::showInner(base::unique_qptr<RpWidget> inner) {
+ 		_layer->raise();
+ 	}
+ 
+-	showAndActivate();
++	if (activate) {
++		showAndActivate();
++	}
+ }
+ 
+ void SeparatePanel::focusInEvent(QFocusEvent *e) {
+diff --git a/ui/widgets/separate_panel.h b/ui/widgets/separate_panel.h
+index 605d649..d945b0b 100644
+--- a/ui/widgets/separate_panel.h
++++ b/ui/widgets/separate_panel.h
+@@ -92,7 +92,10 @@ public:
+ 	void hideForStacking();
+ 
+ 	[[nodiscard]] RpWidget *inner() const;
+-	void showInner(base::unique_qptr<RpWidget> inner);
++	// `activate` = false swaps the content without raising the window or
++	// taking focus (the GGTG window rebuilds its sections while the user
++	// is working in another window).
++	void showInner(base::unique_qptr<RpWidget> inner, bool activate = true);
+ 	void showBox(
+ 		object_ptr<BoxContent> box,
+ 		LayerOptions options,

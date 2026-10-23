@@ -19,3 +19,4 @@ jobs:
       - name: Configure and build
         run: |
           echo "macOS build workflow ready. Local Mac builds are generated via desktop/nicegram-desktop/Telegram/build/ggtg/make_dmg.sh"
+
