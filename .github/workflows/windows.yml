@@ -17,6 +17,8 @@ jobs:
 
     env:
       Platform: x64
+      TBUILD: D:\TBuild
+      LibrariesPath: D:\TBuild\Libraries\win64
 
     defaults:
       run:
@@ -26,10 +28,12 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
 
-      - name: Set up MSVC
-        uses: ilammy/msvc-dev-cmd@v1
+      - name: Set up MSVC (Native Tools x64)
+        uses: Eden-CI/msvc-dev-cmd@master
         with:
           arch: x64
+          sdk: '10.0.26100.0'
+          toolset: '14.44'
 
       - name: Set up Python
         uses: actions/setup-python@v5
@@ -39,28 +43,40 @@ jobs:
       - name: Set up Ninja
         uses: seanmiddleditch/gha-setup-ninja@v5
 
-      - name: Cache ThirdParty and Libraries
-        uses: actions/cache@v4
-        with:
-          path: |
-            D:\TBuild\ThirdParty
-            D:\TBuild\Libraries
-          key: ${{ runner.os }}-x64-tdesktop-libs-v2
-          restore-keys: |
-            ${{ runner.os }}-x64-tdesktop-libs-
+      - name: NuGet sources
+        run: |
+          nuget sources Disable -Name "Microsoft Visual Studio Offline Packages" 2>nul & exit 0
+          nuget sources Add -Source https://api.nuget.org/v3/index.json 2>nul & exit 0
 
       - name: Prepare build tree
         shell: pwsh
         run: |
-          New-Item -ItemType Directory -Force -Path D:\TBuild\Libraries | Out-Null
+          New-Item -ItemType Directory -Force -Path D:\TBuild\Libraries\win64 | Out-Null
           New-Item -ItemType Directory -Force -Path D:\TBuild\ThirdParty | Out-Null
           robocopy desktop\nicegram-desktop D:\TBuild\tdesktop /E /IS /IT /NFL /NDL /NJH /NJS
           if ($LASTEXITCODE -le 7) { exit 0 } else { exit $LASTEXITCODE }
 
-      - name: Prepare dependencies
+      - name: ThirdParty Cache
+        uses: actions/cache@v4
+        with:
+          path: D:\TBuild\ThirdParty
+          key: ${{ runner.os }}-x64-third-party-v1
+          restore-keys: |
+            ${{ runner.os }}-x64-third-party-
+
+      - name: Libraries Cache
+        uses: actions/cache@v4
+        with:
+          path: D:\TBuild\Libraries\win64
+          key: ${{ runner.os }}-x64-libraries-v1
+          restore-keys: |
+            ${{ runner.os }}-x64-libraries-
+
+      - name: Prepare dependencies (tg_angle, avif, zlib)
         working-directory: D:\TBuild\tdesktop\Telegram
         run: |
-          call build\prepare\win.bat skip-release silent || exit 0
+          set Platform=x64
+          call build\prepare\win.bat silent
 
       - name: Configure CMake
         working-directory: D:\TBuild\tdesktop\Telegram
@@ -76,9 +92,9 @@ jobs:
         if: failure()
         shell: pwsh
         run: |
-          Write-Host "=== C++ COMPILATION ERRORS ===" -ForegroundColor Red
+          Write-Host "=== BUILD ERRORS ===" -ForegroundColor Red
           if (Test-Path D:\TBuild\tdesktop\out\build.log) {
-            Get-Content D:\TBuild\tdesktop\out\build.log | Select-String -Pattern "error C", ": error:", "FAILED:" -Context 2,2 | Select-Object -First 40
+            Get-Content D:\TBuild\tdesktop\out\build.log | Select-String -Pattern "error LNK", "error C", ": error:", "FAILED:" -Context 1,1 | Select-Object -First 40
           }
 
       - name: Upload build log on failure
