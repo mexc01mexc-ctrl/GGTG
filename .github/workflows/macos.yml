@@ -1,0 +1,21 @@
+name: Build macOS DMG
+
+on:
+  workflow_dispatch:
+
+jobs:
+  build:
+    name: Build macOS
+    runs-on: macos-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Homebrew dependencies
+        run: |
+          brew install automake libtool meson nasm ninja pkg-config cmake
+
+      - name: Configure and build
+        run: |
+          echo "macOS build workflow ready. Local Mac builds are generated via desktop/nicegram-desktop/Telegram/build/ggtg/make_dmg.sh"
