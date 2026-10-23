@@ -1,0 +1,60 @@
+name: Build Android APK
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+    paths:
+      - 'android/**'
+      - '.github/workflows/android.yml'
+
+jobs:
+  build:
+    name: Build Android APK
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '17'
+
+      - name: Setup Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Cache Gradle packages
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.gradle/caches
+            ~/.gradle/wrapper
+          key: ${{ runner.os }}-gradle-${{ hashFiles('android/Telegram-GGTG/**/*.gradle*', 'android/Telegram-GGTG/gradle/wrapper/gradle-wrapper.properties') }}
+          restore-keys: |
+            ${{ runner.os }}-gradle-
+
+      - name: Build Standalone APK
+        working-directory: android/Telegram-GGTG
+        run: |
+          chmod +x gradlew
+          ./gradlew --no-daemon \
+            -Pandroid.injected.build.abi=arm64-v8a \
+            -Pandroid.injected.testOnly=false \
+            :TMessagesProj_AppStandalone:assembleAfatStandalone
+
+      - name: Find generated APK
+        id: find-apk
+        run: |
+          APK_PATH=$(find android/Telegram-GGTG/TMessagesProj_AppStandalone/build -name "*.apk" | head -n 1)
+          echo "Found APK at: $APK_PATH"
+          echo "apk_path=$APK_PATH" >> $GITHUB_OUTPUT
+
+      - name: Upload APK Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: GGTG-Android
+          path: ${{ steps.find-apk.outputs.apk_path }}
+          retention-days: 14

@@ -1,0 +1,72 @@
+name: Build Windows EXE
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+    paths:
+      - 'desktop/**'
+      - 'windows/**'
+      - '.github/workflows/windows.yml'
+
+jobs:
+  build:
+    name: Build Windows (x64)
+    runs-on: windows-latest
+
+    defaults:
+      run:
+        shell: cmd
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up MSVC
+        uses: ilammy/msvc-dev-cmd@v1
+        with:
+          arch: x64
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.10'
+
+      - name: Cache ThirdParty and Libraries
+        uses: actions/cache@v4
+        with:
+          path: |
+            D:\TBuild\ThirdParty
+            D:\TBuild\Libraries
+          key: ${{ runner.os }}-x64-tdesktop-libs
+          restore-keys: |
+            ${{ runner.os }}-x64-tdesktop-libs
+
+      - name: Prepare build tree
+        run: |
+          mkdir D:\TBuild\Libraries 2>nul
+          mkdir D:\TBuild\ThirdParty 2>nul
+          robocopy desktop\nicegram-desktop D:\TBuild\tdesktop /E /IS /IT /NFL /NDL /NJH /NJS || exit 0
+
+      - name: Prepare dependencies
+        working-directory: D:\TBuild\tdesktop\Telegram
+        run: |
+          call build\prepare\win.bat skip-release silent || exit 0
+
+      - name: Configure CMake
+        working-directory: D:\TBuild\tdesktop\Telegram
+        run: |
+          call configure.bat x64 -D TDESKTOP_API_ID=2040 -D TDESKTOP_API_HASH=b18441a1ff607e10a989891a5462e627
+
+      - name: Build GGTG EXE
+        working-directory: D:\TBuild\tdesktop\out
+        run: |
+          cmake --build . --config Release --target Telegram
+
+      - name: Upload GGTG.exe Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: GGTG-Windows-x64
+          path: D:\TBuild\tdesktop\out\Release\Telegram.exe
+          retention-days: 14
