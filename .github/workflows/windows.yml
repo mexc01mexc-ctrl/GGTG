@@ -28,6 +28,27 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
 
+      - name: Visual Studio ATL component
+        shell: pwsh
+        run: |
+          $installer = Join-Path ${env:ProgramFiles(x86)} 'Microsoft Visual Studio\Installer'
+          $vswhere = Join-Path $installer 'vswhere.exe'
+          $setup = Join-Path $installer 'setup.exe'
+          if ((Test-Path $vswhere) -and (Test-Path $setup)) {
+            $toolsComponent = 'Microsoft.VisualStudio.Component.VC.14.44.17.14.x86.x64'
+            $atlComponent = 'Microsoft.VisualStudio.Component.VC.14.44.17.14.ATL'
+            $path = @(& $vswhere -latest -products '*' -requires $toolsComponent -property installationPath)[0]
+            if ($path) {
+              Write-Host "Installing $atlComponent..."
+              $process = Start-Process -FilePath $setup -Wait -PassThru -ArgumentList @(
+                'modify',
+                '--installPath', "`"$path`"",
+                '--add', $atlComponent,
+                '--quiet', '--norestart', '--nocache'
+              )
+            }
+          }
+
       - name: Set up MSVC (Native Tools x64)
         uses: Eden-CI/msvc-dev-cmd@master
         with:
@@ -56,27 +77,43 @@ jobs:
           robocopy desktop\nicegram-desktop D:\TBuild\tdesktop /E /IS /IT /NFL /NDL /NJH /NJS
           if ($LASTEXITCODE -le 7) { exit 0 } else { exit $LASTEXITCODE }
 
-      - name: ThirdParty Cache
-        uses: actions/cache@v4
+      - name: Restore ThirdParty Cache
+        id: restore-thirdparty
+        uses: actions/cache/restore@v4
         with:
           path: D:\TBuild\ThirdParty
-          key: ${{ runner.os }}-x64-third-party-v1
+          key: ${{ runner.os }}-x64-thirdparty-v2
           restore-keys: |
-            ${{ runner.os }}-x64-third-party-
+            ${{ runner.os }}-x64-thirdparty-
 
-      - name: Libraries Cache
-        uses: actions/cache@v4
+      - name: Restore Libraries Cache
+        id: restore-libraries
+        uses: actions/cache/restore@v4
         with:
           path: D:\TBuild\Libraries\win64
-          key: ${{ runner.os }}-x64-libraries-v1
+          key: ${{ runner.os }}-x64-libraries-v2
           restore-keys: |
             ${{ runner.os }}-x64-libraries-
 
-      - name: Prepare dependencies (tg_angle, avif, zlib)
+      - name: Prepare dependencies
         working-directory: D:\TBuild\tdesktop\Telegram
         run: |
           set Platform=x64
           call build\prepare\win.bat silent
+
+      - name: Save ThirdParty Cache (Immediate)
+        if: always()
+        uses: actions/cache/save@v4
+        with:
+          path: D:\TBuild\ThirdParty
+          key: ${{ runner.os }}-x64-thirdparty-v2
+
+      - name: Save Libraries Cache (Immediate)
+        if: always()
+        uses: actions/cache/save@v4
+        with:
+          path: D:\TBuild\Libraries\win64
+          key: ${{ runner.os }}-x64-libraries-v2
 
       - name: Configure CMake
         working-directory: D:\TBuild\tdesktop\Telegram
