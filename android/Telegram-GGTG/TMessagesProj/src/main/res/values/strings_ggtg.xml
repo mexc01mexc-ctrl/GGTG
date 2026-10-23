@@ -1,0 +1,37 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="NicegramChooseProxySource">Выберите источник прокси</string>
+    <string name="NicegramCreateProxyList">Создать список прокси</string>
+    <string name="NicegramDeleteFolder">Удалить папку</string>
+    <string name="NicegramEnterProxyManually">Ввести прокси вручную</string>
+    <string name="NicegramMoveToFolder">Переместить в папку</string>
+    <string name="NicegramNewFolder">Новая папка</string>
+    <string name="NicegramPin">Закрепить</string>
+    <string name="NicegramUnpin">Открепить</string>
+    <string name="NicegramProxyInvalidFormat">Неверный формат. Нужно: host:port:логин:пароль</string>
+    <string name="NicegramProxyListNamePlaceholder">Название списка</string>
+    <string name="NicegramProxyListNoneParsed">Не найдено ни одного корректного прокси</string>
+    <string name="NicegramProxyListPastePlaceholder">host:port:логин:пароль, по одному в строке</string>
+    <string name="NicegramProxyListRow">%1$s (%2$d прокси)</string>
+    <string name="NicegramProxyManualPlaceholder">host:port:логин:пароль</string>
+    <string name="NicegramRemoveFromFolder">Убрать из папки</string>
+    <string name="NicegramRenameFolder">Переименовать папку</string>
+    <string name="NicegramImportTdata">Импорт из Desktop (tdata)</string>
+    <string name="NicegramImportTdataArchive">Импорт из архива (zip/rar/.ggtg)</string>
+    <string name="NicegramTdataImported">Импортировано аккаунтов: %1$d.</string>
+    <string name="NicegramTdataAlreadyLoggedIn">Уже были залогинены на этом устройстве: %1$d.</string>
+    <string name="NicegramTdataNoFreeSlot">Не импортировано (нет свободных слотов): %1$d.</string>
+    <string name="NicegramTdataNoFreeProxy">Не подключено (не хватило прокси в списке): %1$d. Добавьте прокси и попробуйте снова.</string>
+    <string name="NicegramTdataNoneFound">В выбранной папке не найдено сессий Telegram Desktop.</string>
+    <string name="NicegramTdataImportFailed">Ошибка импорта: %1$s</string>
+    <string name="NicegramTdataFailed">Не удалось дублировать аккаунтов: %1$d (%2$s)</string>
+    <string name="NicegramTdataPasswordSkipped">Пропущено (не введён пароль 2FA): %1$d.</string>
+    <string name="NicegramTdataImportingAccount">Импорт %1$s (%2$d из %3$d)…</string>
+    <string name="NicegramTdataPasswordNeededTitle">Нужен пароль 2FA</string>
+    <string name="NicegramTdataPasswordNeededText">Введите облачный пароль для %1$s</string>
+    <string name="NicegramTdataPasswordWrong">Неверный пароль, попробуйте снова.</string>
+    <string name="NicegramTdataPasswordChecking">Проверка пароля…</string>
+    <string name="NicegramTdataNoteFailed">Пароль из twoFA.txt отклонён (%1$s). Введите вручную.</string>
+    <string name="NicegramTdataCheckFailed">Не удалось проверить пароль (%1$s). Попробуйте снова или пропустите.</string>
+    <string name="NicegramSkip">Пропустить</string>
+</resources>

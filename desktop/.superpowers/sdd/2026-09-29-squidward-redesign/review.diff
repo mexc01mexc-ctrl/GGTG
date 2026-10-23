@@ -1,0 +1,3728 @@
+--- .superpowers/sdd/2026-09-29-squidward-redesign/backup/ggtg_squidward.cpp	2026-09-29 15:39:12
++++ nicegram-desktop/Telegram/SourceFiles/window/ggtg_squidward.cpp	2026-09-29 15:42:03
+@@ -6,1286 +6,699 @@
+ */
+ #include "window/ggtg_squidward.h"
+ 
+-#include "window/window_main_menu.h"
+-#include "apiwrap.h"
+-#include "base/event_filter.h"
+-#include "base/flat_set.h"
+-#include "base/qt_signal_producer.h"
+-#include "base/timer.h"
+-#include "mainwindow.h"
+-#include "settings/process_box.h"
+-#include "boxes/about_box.h"
+-#include "core/update_channel.h"
+-#include "boxes/peer_list_controllers.h"
+-#include "boxes/premium_preview_box.h"
+-#include "calls/group/calls_group_common.h"
+-#include "calls/calls_box_controller.h"
+-#include "calls/calls_instance.h"
+-#include "core/application.h"
+-#include "core/click_handler_types.h"
+-#include "data/data_changes.h"
+-#include "data/data_document_media.h"
+-#include "data/data_folder.h"
+-#include "data/data_group_call.h"
+-#include "data/data_channel.h"
+-#include "base/call_delayed.h"
+-#include "data/data_session.h"
+-#include "data/data_stories.h"
+-#include "data/data_user.h"
+-#include "info/info_memento.h"
+-#include "info/profile/info_profile_badge.h"
++#include "data/scraped_members_db.h"
++#include "settings.h"
++#include "settings/bulk_accounts_actions.h"
+ #include "settings/settings_common.h"
+-#include "info/profile/info_profile_emoji_status_panel.h"
+-#include "info/profile/info_profile_icon.h"
+-#include "info/stories/info_stories_widget.h"
+-#include "lang/lang_keys.h"
+-#include "main/main_account.h"
+-#include "main/main_domain.h"
+-#include "main/main_session.h"
+-#include "main/main_session_settings.h"
+-#include "mtproto/mtproto_config.h"
+-#include "settings/sections/settings_advanced.h"
+-#include "settings/sections/settings_calls.h"
+-#include "settings/sections/settings_information.h"
+-#include "settings/sections/settings_processes.h"
+-#include "core/ggtg_log.h"
+-#include "core/process_manager.h"
+-#include "storage/localstorage.h"
+-#include "storage/storage_account.h"
+-#include "support/support_templates.h"
+-#include "tde2e/tde2e_api.h"
+-#include "tde2e/tde2e_integration.h"
+ #include "ui/boxes/confirm_box.h"
+-#include "ui/chat/chat_theme.h"
+-#include "ui/controls/swipe_handler.h"
+-#include "ui/controls/userpic_button.h"
+-#include "ui/effects/snowflakes.h"
+-#include "ui/effects/toggle_arrow.h"
+-#include "ui/painter.h"
+-#include "ui/text/text_options.h"
++#include "ui/layers/generic_box.h"
+ #include "ui/text/text_utilities.h"
+-#include "ui/ui_utility.h"
+-#include "ui/unread_badge_paint.h"
+ #include "ui/vertical_list.h"
+-#include "ui/widgets/menu/menu_add_action_callback_factory.h"
+-#include "ui/widgets/popup_menu.h"
+-#include "ui/widgets/scroll_area.h"
+-#include "ui/widgets/shadow.h"
+-#include "ui/wrap/slide_wrap.h"
+-#include "window/themes/window_theme.h"
+-#include "window/window_controller.h"
+-#include "window/window_main_menu_helpers.h"
+-#include "boxes/connection_box.h"
+-#include "settings/bulk_accounts_actions.h"
+-#include "data/scraped_members_db.h"
+-#include "settings/sms_campaign.h"
+-#include "ui/layers/generic_box.h"
+-#include "ui/widgets/labels.h"
+-#include "api/api_bot.h"
+-#include "api/api_common.h"
+-#include "base/weak_ptr.h"
+-#include "base/weak_qptr.h"
+-#include "data/data_peer_id.h"
+-#include "history/history.h"
+-#include "history/history_item.h"
+-#include "history/history_item_components.h"
+-#include "history/history_item_reply_markup.h"
+-#include "mtproto/sender.h"
+-#include "ui/abstract_button.h"
+ #include "ui/widgets/buttons.h"
+ #include "ui/widgets/fields/input_field.h"
+-#include "ui/widgets/separate_panel.h"
++#include "ui/widgets/labels.h"
++#include "ui/wrap/slide_wrap.h"
+ #include "ui/wrap/vertical_layout.h"
+-#include "styles/style_layers.h"
+-#include "window/window_peer_menu.h"
++#include "window/ggtg_squidward_parse.h"
++#include "window/ggtg_squidward_session.h"
++#include "window/ggtg_widgets.h"
+ #include "window/window_session_controller.h"
+-#include "styles/style_chat.h" // popupMenuExpandedSeparator
+-#include "styles/style_dialogs.h" // dialogsMenuToggle, for the sidebar collapse button
+-#include "styles/style_menu_icons.h"
+ #include "styles/style_boxes.h"
++#include "styles/style_layers.h"
+ #include "styles/style_settings.h"
+ #include "styles/style_widgets.h"
+-#include "styles/style_window.h"
+-#include "styles/style_window_main_menu.h"
+-#include <QtGui/QWindow>
+-#include <QtGui/QScreen>
+-#include <QtGui/QGuiApplication>
+-#include <QtGui/QClipboard>
+-#include <QtCore/QRegularExpression>
++
++#include <QtCore/QFile>
++#include <QtCore/QJsonArray>
++#include <QtCore/QJsonDocument>
+ #include <QtCore/QPointer>
+-#include "ui/text/text_entity.h"
++#include <QtCore/QSaveFile>
++#include <QtGui/QClipboard>
++#include <QtGui/QGuiApplication>
+ 
+ namespace Window {
+ namespace {
+ 
+-// "Сквидвард": a curated front end for two of @skvidvarde_bot's lookup
+-// functions (by-user and by-group/channel) - resolves the bot, sends
+-// exactly what typing the identifier by hand would, and mirrors the
+-// exchange (including any keyboard the bot replies with, e.g. pagination
+-// on a result) as it would look in a normal chat. The bot has several
+-// other lookup kinds (by sticker, by forwarded message/post, text/name
+-// search) and its own paid-extras menu (tokens, invites, incognito,
+-// mirrors) - deliberately left unexposed here rather than mirrored as a
+-// free-text chat, so this box only ever does the two things it's for.
+-// Results of both lookups can be saved into "База" (see
+-// SquidwardShowGroupsResult / SquidwardShowUsersResult).
+-constexpr auto kSquidwardBotUsername = "skvidvarde_bot";
+-constexpr auto kSquidwardLogHeight = 260;
+-// The on-screen log keeps only its newest rows (each is a widget); the
+-// full history goes to ggtg.log.
+-constexpr auto kSquidwardMaxLogRows = 200;
++using namespace Squidward;
+ 
+-struct SquidwardBotState {
+-	UserData *bot = nullptr;
+-	Ui::VerticalLayout *log = nullptr;
+-	Ui::FlatLabel *status = nullptr;
+-	mtpRequestId resolveRequestId = 0;
+-	// Set right before sending a group/channel identifier (see
+-	// promptAndSend's group case below), consumed by the very next bot
+-	// message: that reply is the group's own profile card, and this is
+-	// what makes this box auto-click its "Топ, люди" button (free) itself
+-	// instead of making the user find and press it - see
+-	// SquidwardCollectNextPage's callers.
+-	bool autoFetchTopPeopleNext = false;
+-	// Same idea for a user lookup: the profile card's "Группы" button.
+-	bool autoFetchGroupsNext = false;
+-	// Whatever was last typed into either prompt - used as the new base's
+-	// name if a collected list is saved to "База" (see
+-	// SquidwardShowGroupsResult/SquidwardShowUsersResult): the looked-up
+-	// user's own identifier for a "Группы" collection, or the looked-up
+-	// group's identifier for a "Топ, люди" one, exactly per the ask that
+-	// each base be named after whichever one it came from.
+-	QString lastLookupIdentifier;
+-	// A group to look up as soon as the bot is connected (see
+-	// MakeSquidwardBox's `lookupGroup`); cleared once sent.
+-	QString pendingGroupLookup;
+-	// Guards SquidwardStartCollection's wait for the bot's response to a
+-	// button click (new message or edit, see its own comment) - reset
+-	// (replacing, so destroying, whatever the previous attempt's own
+-	// timer was) on every fresh attempt, so a click that genuinely never
+-	// gets any answer still ends in a clear status instead of leaving
+-	// "Запрашиваем список..." on screen forever with nothing to show.
+-	std::shared_ptr<base::Timer> pendingCollectionTimeout;
+-};
++constexpr auto kRecentLimit = 8;
++constexpr auto kPreviewCount = 8;
+ 
+-constexpr auto kSquidwardResultBoxWidth = 540;
++[[nodiscard]] QString RecentPath() {
++	return cWorkingDir() + u"tdata/ggtg_squidward_recent.json"_q;
++}
+ 
+-[[nodiscard]] not_null<Ui::VerticalLayout*> SquidwardAddLogArea(
+-		not_null<Ui::VerticalLayout*> container) {
+-	auto wrapOwned = object_ptr<Ui::RpWidget>(container);
++[[nodiscard]] QStringList LoadRecent() {
++	auto file = QFile(RecentPath());
++	if (!file.open(QIODevice::ReadOnly)) {
++		return {};
++	}
++	auto result = QStringList();
++	for (const auto &value : QJsonDocument::fromJson(file.readAll()).array()) {
++		const auto text = value.toString().trimmed();
++		if (!text.isEmpty()) {
++			result.push_back(text);
++		}
++	}
++	return result.mid(0, kRecentLimit);
++}
++
++void SaveRecent(const QStringList &list) {
++	auto file = QSaveFile(RecentPath());
++	if (file.open(QIODevice::WriteOnly)) {
++		file.write(QJsonDocument(QJsonArray::fromStringList(list)).toJson(
++			QJsonDocument::Compact));
++		file.commit();
++	}
++}
++
++not_null<Ui::FlatLabel*> AddLabel(
++		not_null<Ui::VerticalLayout*> to,
++		const QString &text) {
++	const auto label = to->add(
++		object_ptr<Ui::FlatLabel>(to, text, st::boxLabel),
++		st::boxRowPadding);
++	label->setSelectable(true);
++	return label;
++}
++
++// One or two buttons sharing a row.
++void AddButtons(
++		not_null<Ui::VerticalLayout*> to,
++		std::vector<std::tuple<QString, const style::RoundButton*, Fn<void()>>> list) {
++	auto wrapOwned = object_ptr<Ui::RpWidget>(to);
+ 	const auto wrap = wrapOwned.data();
+-	const auto scroll = Ui::CreateChild<Ui::ScrollArea>(wrap, st::boxScroll);
++	auto buttons = std::vector<not_null<Ui::RoundButton*>>();
++	for (auto &[text, st, callback] : list) {
++		const auto button = Ui::CreateChild<Ui::RoundButton>(
++			wrap,
++			rpl::single(text),
++			*st);
++		button->setTextTransform(Ui::RoundButtonTextTransform::NoTransform);
++		button->setClickedCallback(std::move(callback));
++		buttons.push_back(button);
++	}
++	wrap->resize(wrap->width(), buttons.front()->height());
+ 	wrap->widthValue(
+ 	) | rpl::on_next([=](int width) {
+-		scroll->setGeometry(0, 0, width, kSquidwardLogHeight);
+-	}, wrap->lifetime());
+-	wrap->resize(wrap->width(), kSquidwardLogHeight);
+-	container->add(std::move(wrapOwned), st::boxRowPadding);
++		const auto skip = st::boxRowPadding.left() / 2;
++		const auto count = int(buttons.size());
++		const auto each = (width - skip * (count - 1)) / count;
++		for (auto i = 0; i != count; ++i) {
++			buttons[i]->setFullWidth(each);
++			buttons[i]->moveToLeft(i * (each + skip), 0, width);
++		}
++	}, wrap->lifetime());
++	to->add(std::move(wrapOwned), st::boxRowPadding);
++}
+ 
+-	const auto inner = scroll->setOwnedWidget(
+-		object_ptr<Ui::VerticalLayout>(scroll)).data();
+-	scroll->widthValue(
+-	) | rpl::on_next([=](int width) {
+-		inner->resizeToWidth(width);
+-	}, inner->lifetime());
+-	return inner;
++// "▸ Title" that opens `body` below it.
++void AddExpander(
++		not_null<Ui::VerticalLayout*> to,
++		const QString &title,
++		const QString &body) {
++	const auto shown = to->lifetime().make_state<rpl::variable<bool>>(false);
++	const auto button = to->add(object_ptr<Ui::SettingsButton>(
++		to,
++		shown->value() | rpl::map([=](bool open) {
++			return (open ? u"▾ "_q : u"▸ "_q) + title;
++		})));
++	const auto wrap = to->add(
++		object_ptr<Ui::SlideWrap<Ui::FlatLabel>>(
++			to,
++			object_ptr<Ui::FlatLabel>(to, body, st::boxLabel),
++			st::boxRowPadding));
++	wrap->entity()->setSelectable(true);
++	wrap->toggleOn(shown->value());
++	wrap->finishAnimating();
++	button->setClickedCallback([=] {
++		*shown = !shown->current();
++	});
+ }
+ 
+-void SquidwardAppendLogLine(
+-		not_null<Ui::VerticalLayout*> log,
+-		const QString &text) {
+-	Core::GgtgLog::Info(u"Сквидвард"_q, text);
+-	log->add(
+-		object_ptr<Ui::FlatLabel>(log, text, st::boxLabel),
+-		st::boxRowPadding);
+-	while (log->count() > kSquidwardMaxLogRows) {
+-		delete log->widgetAt(0).get();
++[[nodiscard]] QString GroupName(const Data::ScrapedGroupEntry &entry) {
++	if (!entry.link.isEmpty()) {
++		return u"🔒 "_q + (entry.title.isEmpty() ? entry.link : entry.title);
+ 	}
++	return entry.title.isEmpty() ? (u"@"_q + entry.username) : entry.title;
+ }
+ 
+-// Every "what's happening right now" update (bot connected, sending,
+-// paginating, done, or nothing found) goes through here instead of only
+-// the one-line status label above the log - that label is easy to miss
+-// mid-flow, so every update it gets is also dropped into the scrollable
+-// log itself, which is what "нет лога" (the automation runs with no
+-// visible trace of what it's doing) was actually asking for.
+-void SquidwardSetStatus(
+-		not_null<SquidwardBotState*> state,
+-		const QString &text) {
+-	state->status->setText(text);
+-	SquidwardAppendLogLine(state->log, u"• "_q + text);
++[[nodiscard]] QString GroupLine(const Data::ScrapedGroupEntry &entry) {
++	return !entry.username.isEmpty()
++		? (u"@"_q + entry.username)
++		: !entry.link.isEmpty()
++		? entry.link
++		: entry.title;
+ }
+ 
+-// ---- auto-paginated collection: "Группы" (a user's own chats) and
+-// "Топ, люди" (a group's members) both come back as a bot message with an
+-// "N из M" page counter and a "➡" button to advance it - one manual click
+-// per page (each one free after the listing's own one-time cost, if any)
+-// is the tedious part this automates away, not the cost itself.
++class Screen final {
++public:
++	Screen(
++		not_null<Ui::GenericBox*> box,
++		not_null<Window::SessionController*> controller,
++		const QString &autoQuery);
+ 
+-// A markup button's own label, once any leading icon/cost prefix
+-// ("15💎 ", "🏆 ", ...) is stripped down to its last word - matched
+-// against by exact equality so e.g. "Группы" doesn't also match "Похожие
+-// группы", and "Топ, люди" matches on "люди" specifically.
+-[[nodiscard]] QString SquidwardButtonLastWord(const QString &text) {
+-	const auto parts = text.simplified().split(' ', Qt::SkipEmptyParts);
+-	if (parts.isEmpty()) {
+-		return QString();
++private:
++	void setupHeader();
++	void setupSearch();
++	void setupEvents();
++	void submit();
++	void start(const QString &query);
++	void renderRecent();
++	void renderIdle();
++	void renderSearching(const QString &text);
++	void renderLookupError(const QString &text);
++	void renderCard(const Card &card);
++	void renderUser(const Card &card);
++	void renderGroup(const Card &card);
++	void addHeader(
++		const QString &title,
++		const QString &subtitle,
++		const QString &id);
++	void renderCollectIdle();
++	void renderProgress(const Progress &progress);
++	void renderGroups(const GroupsResult &result);
++	void renderUsers(const UsersResult &result);
++	void renderSaved(
++		uint64 id,
++		const QString &title,
++		int saved,
++		int collected);
++	void saveGroups();
++	void saveUsers();
++
++	const not_null<Ui::GenericBox*> _box;
++	const std::unique_ptr<Session> _session;
++	// 🦑 from «База»: looked up, collected and saved without any clicks.
++	const QString _autoQuery;
++	bool _autoCollect = false;
++	Ui::FlatLabel *_status = nullptr;
++	Ui::InputField *_field = nullptr;
++	Ui::SlideWrap<Ui::FlatLabel> *_recent = nullptr;
++	Ui::VerticalLayout *_card = nullptr;
++	Ui::VerticalLayout *_collect = nullptr;
++	QStringList _recentList;
++	QString _lastQuery;
++	QString _pending; // waiting for the bot to connect
++	std::optional<Card> _current;
++	std::optional<GroupsResult> _groups;
++	std::optional<UsersResult> _users;
++
++};
++
++Screen::Screen(
++	not_null<Ui::GenericBox*> box,
++	not_null<Window::SessionController*> controller,
++	const QString &autoQuery)
++: _box(box)
++, _session(std::make_unique<Session>(controller))
++, _autoQuery(autoQuery.trimmed())
++, _recentList(LoadRecent()) {
++	setupHeader();
++	setupSearch();
++	Ui::AddDivider(_box->verticalLayout());
++	_card = _box->addRow(
++		object_ptr<Ui::VerticalLayout>(_box),
++		style::margins());
++	_collect = _box->addRow(
++		object_ptr<Ui::VerticalLayout>(_box),
++		style::margins());
++	setupEvents();
++	renderRecent();
++	renderIdle();
++	if (!_autoQuery.isEmpty()) {
++		_autoCollect = true;
++		_field->setText(_autoQuery);
++		start(_autoQuery);
+ 	}
+-	// The bot sprinkles Latin/Greek lookalikes into its own texts, so
+-	// fold the common ones back to Cyrillic before comparing.
+-	static const auto fold = QHash<QChar, QChar>{
+-		{ QChar(u'a'), QChar(u'а') }, { QChar(u'c'), QChar(u'с') },
+-		{ QChar(u'e'), QChar(u'е') }, { QChar(u'o'), QChar(u'о') },
+-		{ QChar(u'p'), QChar(u'р') }, { QChar(u'x'), QChar(u'х') },
+-		{ QChar(u'y'), QChar(u'у') }, { QChar(u'r'), QChar(u'г') },
+-		{ QChar(0x03BF), QChar(u'о') }, { QChar(0x03B3), QChar(u'у') }, { QChar(0x03C1), QChar(u'р') },
+-		{ QChar(0x03B1), QChar(u'а') }, { QChar(0x03C0), QChar(u'п') },
+-		{ QChar(0x03B7), QChar(u'н') }, { QChar(0x03BD), QChar(u'н') },
+-		{ QChar(0x1D0F), QChar(u'о') }, { QChar(0x2113), QChar(u'л') },
+-	};
+-	auto word = parts.back().toLower();
+-	for (auto &ch : word) {
+-		ch = fold.value(ch, ch);
+-	}
+-	return word;
+ }
+ 
+-[[nodiscard]] std::optional<std::pair<int, int>> SquidwardFindButton(
+-		const HistoryMessageMarkupData &markup,
+-		Fn<bool(const QString &text)> match) {
+-	for (auto row = 0; row != int(markup.rows.size()); ++row) {
+-		const auto &buttons = markup.rows[row];
+-		for (auto column = 0; column != int(buttons.size()); ++column) {
+-			if (match(buttons[column].text)) {
+-				return std::make_pair(row, column);
++void Screen::setupHeader() {
++	_box->setTitle(rpl::single(u"Сквидвард"_q));
++	_status = _box->addRow(object_ptr<Ui::FlatLabel>(
++		_box,
++		u"🟡 Подключаемся к боту…"_q,
++		st::boxLabel));
++}
++
++void Screen::setupSearch() {
++	auto wrapOwned = object_ptr<Ui::RpWidget>(_box);
++	const auto wrap = wrapOwned.data();
++	_field = Ui::CreateChild<Ui::InputField>(
++		wrap,
++		st::defaultInputField,
++		rpl::single(u"@username, ID или ссылка"_q));
++	const auto button = Ui::CreateChild<Ui::RoundButton>(
++		wrap,
++		rpl::single(u"Пробить"_q),
++		st::defaultActiveButton);
++	button->setTextTransform(Ui::RoundButtonTextTransform::NoTransform);
++	wrap->widthValue(
++	) | rpl::on_next([=](int width) {
++		const auto skip = st::boxRowPadding.left() / 2;
++		_field->resizeToWidth(width - button->width() - skip);
++		const auto height = std::max(_field->height(), button->height());
++		_field->moveToLeft(0, height - _field->height(), width);
++		button->moveToRight(0, height - button->height(), width);
++		wrap->resize(width, height);
++	}, wrap->lifetime());
++	_box->addRow(std::move(wrapOwned));
++	button->setClickedCallback([=] { submit(); });
++	_field->submits(
++	) | rpl::on_next([=](Qt::KeyboardModifiers) {
++		submit();
++	}, _field->lifetime());
++	_box->setFocusCallback([=] { _field->setFocusFast(); });
++
++	_recent = _box->addRow(
++		object_ptr<Ui::SlideWrap<Ui::FlatLabel>>(
++			_box,
++			object_ptr<Ui::FlatLabel>(_box, QString(), st::boxLabel)),
++		st::boxRowPadding);
++	_recent->entity()->setClickHandlerFilter([=](
++			const ClickHandlerPtr &handler,
++			Qt::MouseButton) {
++		const auto url = handler ? handler->url() : QString();
++		const auto prefix = u"squid:"_q;
++		if (url.startsWith(prefix)) {
++			const auto index = url.mid(prefix.size()).toInt();
++			if (index >= 0 && index < _recentList.size()) {
++				_field->setText(_recentList[index]);
++				submit();
+ 			}
+ 		}
+-	}
+-	return std::nullopt;
++		return false;
++	});
+ }
+ 
+-// Never matches a button that itself carries a "💎" price, so this can
+-// never be tricked into auto-clicking a paid action - only ever the bot's
+-// own plain "➡" page-advance buttons are free navigation in both listings
+-// this is used for.
+-[[nodiscard]] std::optional<std::pair<int, int>> SquidwardFindNextPageButton(
+-		const HistoryMessageMarkupData &markup) {
+-	return SquidwardFindButton(markup, [](const QString &text) {
+-		return text.simplified().startsWith(u"➡"_q)
+-			&& !text.contains(u"💎"_q);
+-	});
++void Screen::setupEvents() {
++	const auto lifetime = &_box->lifetime();
++	_session->status(
++	) | rpl::on_next([=](BotStatus status) {
++		_status->setText(status == BotStatus::Ready
++			? u"🟢 Бот @skvidvarde_bot подключён"_q
++			: status == BotStatus::Failed
++			? u"🔴 Бот недоступен — проверьте сеть и откройте раздел заново"_q
++			: u"🟡 Подключаемся к боту…"_q);
++		if (status == BotStatus::Ready && !_pending.isEmpty()) {
++			start(base::take(_pending));
++		}
++	}, *lifetime);
++	_session->cards(
++	) | rpl::on_next([=](const Card &card) {
++		renderCard(card);
++		if (_autoCollect && card.kind == CardKind::Group) {
++			_session->collect();
++		}
++	}, *lifetime);
++	_session->progress(
++	) | rpl::on_next([=](const Progress &progress) {
++		renderProgress(progress);
++	}, *lifetime);
++	_session->groupsCollected(
++	) | rpl::on_next([=](const GroupsResult &result) {
++		_groups = result;
++		renderGroups(result);
++	}, *lifetime);
++	_session->usersCollected(
++	) | rpl::on_next([=](const UsersResult &result) {
++		_users = result;
++		if (std::exchange(_autoCollect, false)
++			&& !result.usernames.isEmpty()) {
++			saveUsers();
++		} else {
++			renderUsers(result);
++		}
++	}, *lifetime);
++	_session->errors(
++	) | rpl::on_next([=](const QString &text) {
++		if (!_current) {
++			renderLookupError(text);
++		} else {
++			_box->uiShow()->showToast(text);
++		}
++	}, *lifetime);
+ }
+ 
+-// The bot's own "страница N из M" counter, wherever it sits in the text.
+-[[nodiscard]] std::optional<std::pair<int, int>> SquidwardParsePageInfo(
+-		const QString &text) {
+-	static const auto expression = QRegularExpression(
+-		u"страниц\\D*(\\d+)\\D+(\\d+)"_q);
+-	const auto match = expression.match(text);
+-	if (!match.hasMatch()) {
+-		return std::nullopt;
++void Screen::submit() {
++	const auto query = _field->getLastText().trimmed();
++	if (query.isEmpty()) {
++		return;
+ 	}
+-	return std::make_pair(
+-		match.capturedView(1).toInt(),
+-		match.capturedView(2).toInt());
++	if (!_session->collecting()) {
++		start(query);
++		return;
++	}
++	const auto weak = QPointer<Ui::GenericBox>(_box.get());
++	_box->uiShow()->showBox(Ui::MakeConfirmBox({
++		.text = u"Идёт сбор списка. Остановить его и пробить новое?"_q,
++		.confirmed = [=](Fn<void()> &&close) {
++			close();
++			if (weak) {
++				_session->stop();
++				start(query);
++			}
++		},
++		.confirmText = u"Остановить"_q,
++	}));
+ }
+ 
+-template <typename Entry>
+-using SquidwardExtractFn = Fn<void(
+-	not_null<HistoryItem*>,
+-	std::vector<Entry>&)>;
++void Screen::start(const QString &query) {
++	_lastQuery = query;
++	_recentList = PushRecent(_recentList, query, kRecentLimit);
++	SaveRecent(_recentList);
++	renderRecent();
++	_current.reset();
++	_groups.reset();
++	_users.reset();
++	_collect->clear();
++	if (!_session->ready()) {
++		_pending = query;
++		renderSearching(u"Подключаемся к боту…"_q);
++		return;
++	}
++	renderSearching(u"Пробиваем "_q + query + u"…"_q);
++	_session->lookup(query);
++}
+ 
+-// A plain public "t.me/name" (or "telegram.me/name") link's bare username,
+-// or empty for anything else.
+-[[nodiscard]] QString SquidwardUsernameFromLink(const QString &link) {
+-	static const auto expression = QRegularExpression(
+-		u"^(?:https?://)?t(?:elegram)?\\.me/([A-Za-z0-9_]{4,32})/?$"_q);
+-	const auto match = expression.match(link.trimmed());
+-	return match.hasMatch() ? match.captured(1) : QString();
++void Screen::renderRecent() {
++	auto text = TextWithEntities{ u"Недавние: "_q };
++	for (auto i = 0; i != int(_recentList.size()); ++i) {
++		if (i) {
++			text.append(u"  ·  "_q);
++		}
++		text.append(Ui::Text::Link(
++			_recentList[i],
++			u"squid:"_q + QString::number(i)));
++	}
++	_recent->entity()->setMarkedText(text);
++	_recent->toggle(!_recentList.isEmpty(), anim::type::instant);
+ }
+ 
+-// A closed group's link: "t.me/c/<id>[/<message>]", or a private invite
+-// ("t.me/+AbCdEf", "t.me/joinchat/..."). Empty for anything else.
+-[[nodiscard]] QString SquidwardPrivateLink(const QString &link) {
+-	static const auto expression = QRegularExpression(
+-		u"^(?:https?://)?t(?:elegram)?\\.me/(?:c/\\d+(?:/\\d+)?|\\+[A-Za-z0-9_-]+|joinchat/[A-Za-z0-9_-]+)/?$"_q);
+-	const auto trimmed = link.trimmed();
+-	return expression.match(trimmed).hasMatch() ? trimmed : QString();
++void Screen::renderIdle() {
++	_card->clear();
++	_card->add(object_ptr<Ggtg::EmptyState>(
++		_card,
++		u"Введите @username, ID или ссылку на группу — "
++			"здесь появится досье."_q));
+ }
+ 
+-// "Группы": each line is a chat name shown as a clickable link - a plain
+-// "@username" mention, a bare t.me/username URL, or a closed group's link
+-// (t.me/c/... or an invite), either as bare text or as a CustomUrl whose
+-// *display text* is the chat's title and whose own data() is the link. The
+-// closed ones are kept with that link (ScrapedGroupEntry::link) so "База"
+-// can mark them with a 🔒 and look them up through Сквидвард.
+-void SquidwardExtractGroupEntries(
+-		not_null<HistoryItem*> item,
+-		std::vector<Data::ScrapedGroupEntry> &into) {
+-	const auto text = item->originalText();
+-	const auto addLink = [&](const QString &shown, const QString &link) {
+-		const auto username = SquidwardUsernameFromLink(link);
+-		if (!username.isEmpty()) {
+-			into.push_back({ .username = username });
+-			return;
+-		}
+-		const auto closed = SquidwardPrivateLink(link);
+-		into.push_back(closed.isEmpty()
+-			? Data::ScrapedGroupEntry{ .title = shown }
+-			: Data::ScrapedGroupEntry{
+-				.title = (shown == closed) ? QString() : shown,
+-				.link = closed,
+-			});
+-	};
+-	for (const auto &entity : text.entities) {
+-		const auto substr = text.text.mid(entity.offset(), entity.length());
+-		if (entity.type() == EntityType::Mention) {
+-			into.push_back({ .username = substr.mid(1) });
+-		} else if (entity.type() == EntityType::Url) {
+-			addLink(substr, substr);
+-		} else if (entity.type() == EntityType::CustomUrl) {
+-			addLink(substr, entity.data());
+-		}
+-	}
++void Screen::renderSearching(const QString &text) {
++	_card->clear();
++	Ui::AddSkip(_card);
++	AddLabel(_card, text);
+ }
+ 
+-// "Топ, люди": each line names a member two different ways depending on
+-// the bot's mood, it turns out - most commonly as a plain "t.me/username"
+-// link (same shape as "Группы", see SquidwardExtractGroupEntries below and
+-// SquidwardUsernameFromLink's own comment), sometimes instead as a
+-// MentionName entity (a Bot API "text_mention" - display text plus a
+-// hidden user id+access hash, decoded via MentionNameDataToFields) for
+-// someone this account has never interacted with and so can't resolve
+-// locally - see SquidwardResolveMentionedUsers, which is what turns *that*
+-// case into a username (or "no public username", left out same as always)
+-// once the pages are all in. `username` is already known outright for the
+-// link case, empty (with `userId` set instead) for the id-only case.
+-struct SquidwardMentionedUser {
+-	QString username;
+-	uint64 userId = 0;
+-	uint64 accessHash = 0;
+-};
++void Screen::renderLookupError(const QString &text) {
++	_card->clear();
++	Ui::AddSkip(_card);
++	AddLabel(_card, text);
++	const auto query = _lastQuery;
++	AddButtons(_card, {
++		{ u"Повторить"_q, &st::defaultLightButton, [=] { start(query); } },
++	});
++}
+ 
+-void SquidwardExtractUsernames(
+-		not_null<HistoryItem*> item,
+-		std::vector<SquidwardMentionedUser> &into) {
+-	const auto text = item->originalText();
+-	for (const auto &entity : text.entities) {
+-		if (entity.type() == EntityType::MentionName) {
+-			const auto fields = TextUtilities::MentionNameDataToFields(
+-				entity.data());
+-			if (fields.userId) {
+-				into.push_back({
+-					.userId = fields.userId,
+-					.accessHash = fields.accessHash,
+-				});
+-			}
+-		} else if (entity.type() == EntityType::Url) {
+-			const auto substr = text.text.mid(
+-				entity.offset(),
+-				entity.length());
+-			const auto username = SquidwardUsernameFromLink(substr);
+-			if (!username.isEmpty()) {
+-				into.push_back({ .username = username });
+-			}
+-		} else if (entity.type() == EntityType::CustomUrl) {
+-			const auto username = SquidwardUsernameFromLink(entity.data());
+-			if (!username.isEmpty()) {
+-				into.push_back({ .username = username });
+-			}
+-		}
++void Screen::addHeader(
++		const QString &title,
++		const QString &subtitle,
++		const QString &id) {
++	const auto row = _card->add(
++		object_ptr<Ggtg::InfoRow>(
++			_card,
++			rpl::single(Ggtg::InfoRowData{
++				.title = title,
++				.subtitle = subtitle,
++				.chip = id.isEmpty() ? QString() : (u"ID "_q + id),
++			})),
++		st::boxRowPadding);
++	if (!id.isEmpty()) {
++		row->setClickedCallback([=] {
++			QGuiApplication::clipboard()->setText(id);
++			_box->uiShow()->showToast(u"ID скопирован"_q);
++		});
+ 	}
+ }
+ 
+-// Batch-fetches whichever of `pending` aren't already loaded locally (100
+-// per request, sequentially - the API limits how many inputUsers a single
+-// users.getUsers can take) so their username (or lack of one) can actually
+-// be read, then hands the deduplicated, resolved list to
+-// SquidwardShowUsersResult. A chunk that fails is skipped rather than
+-// aborting the rest - a handful of stale access hashes shouldn't lose
+-// everyone else's already-successful pages.
+-void SquidwardResolveMentionedUsers(
+-		not_null<Main::Session*> session,
+-		QVector<MTPInputUser> pending,
+-		Fn<void()> done) {
+-	if (pending.isEmpty()) {
+-		done();
++void Screen::renderCard(const Card &card) {
++	_current = card;
++	_card->clear();
++	_collect->clear();
++	Ui::AddSkip(_card);
++	if (card.kind == CardKind::User) {
++		renderUser(card);
++	} else if (card.kind == CardKind::Group) {
++		renderGroup(card);
++	} else {
++		AddLabel(_card, u"Бот ответил:"_q);
++		AddLabel(_card, card.rawText);
+ 		return;
+ 	}
+-	constexpr auto kChunk = 100;
+-	const auto count = std::min<int>(kChunk, pending.size());
+-	auto chunk = pending.mid(0, count);
+-	auto rest = pending.mid(count);
+-	session->api().request(MTPusers_GetUsers(
+-		MTP_vector<MTPInputUser>(std::move(chunk))
+-	)).done([=](const MTPVector<MTPUser> &result) {
+-		session->data().processUsers(result);
+-		SquidwardResolveMentionedUsers(session, std::move(rest), done);
+-	}).fail([=] {
+-		SquidwardResolveMentionedUsers(session, std::move(rest), done);
+-	}).send();
++	AddExpander(_card, u"Исходный ответ бота"_q, card.rawText);
++	renderCollectIdle();
+ }
+ 
+-// `baseTitle` is whatever the user typed into "Пробить пользователя" that
+-// led here (see SquidwardBotState::lastLookupIdentifier) - saved as-is as
+-// the new base's name, per the explicit ask: name the groups base after
+-// whose groups they are.
+-void SquidwardShowGroupsResult(
+-		std::shared_ptr<Ui::Show> show,
+-		const QString &baseTitle,
+-		std::vector<Data::ScrapedGroupEntry> entries) {
+-	show->showBox(Box([=](not_null<Ui::GenericBox*> box) {
+-		// Wide enough for all three buttons in one row; at the default
+-		// width the middle one was clipped.
+-		box->setWidth(kSquidwardResultBoxWidth);
+-		box->setTitle(rpl::single(
+-			u"Группы ("_q + QString::number(entries.size()) + ')'));
++void Screen::renderUser(const Card &card) {
++	const auto &user = *card.user;
++	const auto handle = user.usernames.isEmpty()
++		? card.query
++		: (u"@"_q + user.usernames.front());
++	addHeader(
++		u"👤 "_q + (user.name.isEmpty() ? handle : user.name),
++		handle,
++		user.id);
++	const auto details = FormatUserDetails(user);
++	if (!details.isEmpty()) {
++		AddLabel(_card, details.join(u'\n'));
++	}
++	if (!user.names.empty()) {
+ 		auto lines = QStringList();
+-		for (const auto &entry : entries) {
+-			lines.push_back(!entry.username.isEmpty()
+-				? ('@' + entry.username)
+-				: (!entry.link.isEmpty() ? entry.link : entry.title));
++		for (const auto &change : user.names) {
++			lines.push_back(change.date + u" — "_q + change.name);
+ 		}
+-		const auto joined = lines.join('\n');
+-		const auto area = SquidwardAddLogArea(box->verticalLayout());
+-		SquidwardAppendLogLine(
+-			area,
+-			entries.empty() ? u"Ничего не найдено."_q : joined);
+-		box->addButton(rpl::single(u"Копировать всё"_q), [=] {
+-			QGuiApplication::clipboard()->setText(joined);
+-		});
+-		box->addButton(rpl::single(u"В базу (Группы)"_q), [=] {
+-			Data::SaveScrapedGroupEntries(
+-				Data::GenerateManualBaseId(),
+-				baseTitle,
+-				entries);
+-			show->showToast(u"Сохранено в базу групп: "_q + baseTitle);
+-		});
+-		// addLeftButton, not addButton: with two action buttons already
+-		// on the right, a third one there could get squeezed past the
+-		// box's left edge and become unreachable - the far-left slot is
+-		// always clear regardless of how the other two wrap.
+-		box->addLeftButton(rpl::single(u"Закрыть"_q), [=] { box->closeBox(); });
+-	}), Ui::LayerOption::KeepOther);
++		AddExpander(
++			_card,
++			u"Имена: "_q + QString::number(user.names.size()) + u" изм."_q,
++			lines.join(u'\n'));
++	}
+ }
+ 
+-// The bot's "Группы" list mixes groups with broadcast channels, and channels
+-// are of no use as a recipients source. Every named entry is looked up (the
+-// local cache first, then contacts.resolveUsername, one at a time with a
+-// pause so the lookups don't trip a flood limit); broadcast channels are
+-// dropped, and the found group's title and size fill in what the bot's text
+-// didn't carry. An entry that can't be resolved right now is kept as it is -
+-// better one channel too many than a real group lost to a network hiccup.
+-void SquidwardFilterAndShowGroups(
+-		not_null<Window::SessionController*> controller,
+-		std::shared_ptr<Ui::Show> show,
+-		const QString &baseTitle,
+-		std::vector<Data::ScrapedGroupEntry> entries) {
+-	struct State {
+-		std::vector<Data::ScrapedGroupEntry> source;
+-		std::vector<Data::ScrapedGroupEntry> kept;
+-		size_t next = 0;
+-		int channels = 0;
+-	};
+-	const auto session = &controller->session();
+-	const auto state = std::make_shared<State>();
+-	state->source = std::move(entries);
+-	if (!state->source.empty()) {
+-		show->showToast(u"Отделяем группы от каналов..."_q);
++void Screen::renderGroup(const Card &card) {
++	const auto &group = *card.group;
++	const auto username = UsernameFromQuery(card.query);
++	addHeader(
++		u"👥 "_q + (group.name.isEmpty() ? card.query : group.name),
++		username.isEmpty() ? card.query : (u"@"_q + username),
++		group.id);
++	const auto details = FormatGroupDetails(group);
++	if (!details.isEmpty()) {
++		AddLabel(_card, details.join(u'\n'));
+ 	}
+-	const auto step = std::make_shared<Fn<void()>>();
+-	const auto advance = [=](crl::time delay) {
+-		base::call_delayed(delay, session, [=] { (*step)(); });
+-	};
+-	// `peer` null: unknown, keep the entry untouched.
+-	const auto settle = [=](
+-			Data::ScrapedGroupEntry entry,
+-			PeerData *peer,
+-			crl::time delay) {
+-		const auto channel = peer ? peer->asChannel() : nullptr;
+-		if (channel && !channel->isMegagroup()) {
+-			++state->channels;
+-		} else {
+-			if (channel) {
+-				if (entry.title.isEmpty()) {
+-					entry.title = channel->name();
+-				}
+-				entry.membersCount = std::max(
+-					entry.membersCount,
+-					channel->membersCount());
+-			}
+-			state->kept.push_back(std::move(entry));
+-		}
+-		advance(delay);
+-	};
+-	*step = [=] {
+-		if (state->next >= state->source.size()) {
+-			const auto channels = state->channels;
+-			auto result = std::move(state->kept);
+-			// Break the step <-> closure cycle now that the work is done -
+-			// not from inside the very function being destroyed.
+-			base::call_delayed(0, session, [=] { *step = nullptr; });
+-			if (channels) {
+-				show->showToast(
+-					u"Каналов убрано: "_q + QString::number(channels));
+-			}
+-			SquidwardShowGroupsResult(show, baseTitle, std::move(result));
+-			return;
+-		}
+-		auto entry = state->source[state->next++];
+-		if (entry.username.isEmpty()) {
+-			state->kept.push_back(std::move(entry));
+-			advance(0);
+-			return;
+-		}
+-		if (const auto peer = session->data().peerByUsername(
+-				entry.username)) {
+-			settle(std::move(entry), peer, 0);
+-			return;
++	if (!group.description.isEmpty()) {
++		AddExpander(_card, u"Описание"_q, group.description);
++	}
++	if (!group.topDay.empty()) {
++		auto lines = QStringList();
++		for (auto i = 0; i != int(group.topDay.size()); ++i) {
++			lines.push_back(QString::number(i + 1) + u". "_q
++				+ group.topDay[i].name + u" — "_q
++				+ FormatCount(group.topDay[i].messages));
+ 		}
+-		session->api().request(MTPcontacts_ResolveUsername(
+-			MTP_flags(MTPcontacts_ResolveUsername::Flags(0)),
+-			MTP_string(entry.username),
+-			MTP_string(QString())
+-		)).done([=](const MTPcontacts_ResolvedPeer &result) {
+-			auto peer = (PeerData*)nullptr;
+-			result.match([&](const MTPDcontacts_resolvedPeer &data) {
+-				session->data().processUsers(data.vusers());
+-				session->data().processChats(data.vchats());
+-				const auto peerId = peerFromMTP(data.vpeer());
+-				peer = peerId ? session->data().peer(peerId).get() : nullptr;
+-			});
+-			settle(entry, peer, 400);
+-		}).fail([=] {
+-			settle(entry, nullptr, 800);
+-		}).send();
+-	};
+-	(*step)();
++		AddExpander(_card, u"Топ за сутки"_q, lines.join(u'\n'));
++	}
+ }
+ 
+-// `baseTitle` is whatever group/channel identifier led here (see
+-// SquidwardBotState::lastLookupIdentifier) - saved as the new recipients
+-// base's name, per the explicit ask: name it after the group the people
+-// were pulled from.
+-// The looked-up group's own name plus "(@username)", so the saved base reads
+-// the same as one scraped from the group itself and is matched with it in
+-// "База"; falls back to whatever was typed if it can't be resolved.
+-void SquidwardGroupTitle(
+-		not_null<Main::Session*> session,
+-		const QString &typed,
+-		Fn<void(QString)> done) {
+-	const auto parsed = Data::ParseUsernames({ typed });
+-	if (parsed.valid.isEmpty()) {
+-		done(typed);
++void Screen::renderCollectIdle() {
++	_collect->clear();
++	if (!_current || _current->kind == CardKind::Unknown) {
+ 		return;
+ 	}
+-	const auto username = parsed.valid.front();
+-	if (const auto peer = session->data().peerByUsername(username)) {
+-		done(Data::GroupBaseTitle(peer->name(), username));
+-		return;
+-	}
+-	session->api().request(MTPcontacts_ResolveUsername(
+-		MTP_flags(MTPcontacts_ResolveUsername::Flags(0)),
+-		MTP_string(username),
+-		MTP_string(QString())
+-	)).done([=](const MTPcontacts_ResolvedPeer &result) {
+-		result.match([&](const MTPDcontacts_resolvedPeer &data) {
+-			session->data().processUsers(data.vusers());
+-			session->data().processChats(data.vchats());
+-			const auto peerId = peerFromMTP(data.vpeer());
+-			const auto peer = peerId
+-				? session->data().peer(peerId).get()
+-				: nullptr;
+-			done(peer ? Data::GroupBaseTitle(peer->name(), username) : typed);
+-		});
+-	}).fail([=] {
+-		done(typed);
+-	}).send();
++	const auto isUser = (_current->kind == CardKind::User);
++	Ui::AddSkip(_collect);
++	AddButtons(_collect, {
++		{
++			isUser ? u"👁 Собрать группы"_q : u"👥 Собрать участников"_q,
++			&st::defaultActiveButton,
++			[=] { _session->collect(); },
++		},
++	});
+ }
+ 
+-void SquidwardShowUsersResult(
+-		not_null<Main::Session*> session,
+-		std::shared_ptr<Ui::Show> show,
+-		const QString &baseTitle,
+-		std::vector<QString> usernames) {
+-	show->showBox(Box([=](not_null<Ui::GenericBox*> box) {
+-		// Wide enough for all three buttons in one row; at the default
+-		// width the middle one was clipped.
+-		box->setWidth(kSquidwardResultBoxWidth);
+-		box->setTitle(rpl::single(
+-			u"Топ, люди ("_q + QString::number(usernames.size()) + ')'));
+-		const auto joined = QStringList(usernames.begin(), usernames.end())
+-			.join('\n');
+-		const auto area = SquidwardAddLogArea(box->verticalLayout());
+-		SquidwardAppendLogLine(
+-			area,
+-			usernames.empty() ? u"Ничего не найдено."_q : joined);
+-		box->addButton(rpl::single(u"Копировать всё"_q), [=] {
+-			QGuiApplication::clipboard()->setText(joined);
++void Screen::renderProgress(const Progress &progress) {
++	_collect->clear();
++	const auto isUser = _current && (_current->kind == CardKind::User);
++	Ui::AddSkip(_collect);
++	const auto bar = _collect->add(
++		object_ptr<Ggtg::ProgressBar>(_collect),
++		st::boxRowPadding);
++	bar->setValue(progress.checking
++		? 1.
++		: (progress.pages > 0)
++		? (double(progress.page) / progress.pages)
++		: 0.);
++	const auto found = FormatCount(progress.found);
++	AddLabel(_collect, progress.checking
++		? (isUser
++			? u"Отделяем группы от каналов… оставлено "_q + found
++			: u"Уточняем участников… найдено "_q + found)
++		: (progress.pages > 0)
++		? (u"Страница "_q + FormatCount(progress.page) + u" из "_q
++			+ FormatCount(progress.pages) + u" · найдено "_q + found)
++		: u"Запрашиваем список у бота…"_q);
++	if (!progress.checking) {
++		AddButtons(_collect, {
++			{ u"Стоп"_q, &st::defaultLightButton, [=] { _session->stop(); } },
+ 		});
+-		box->addButton(rpl::single(u"В базу (Получатели)"_q), [=] {
+-			auto stripped = QStringList();
+-			for (const auto &name : usernames) {
+-				stripped.push_back(
+-					name.startsWith('@') ? name.mid(1) : name);
+-			}
+-			SquidwardGroupTitle(session, baseTitle, [=](QString title) {
+-				Data::SaveScrapedGroupUsernames(
+-					Data::GenerateManualBaseId(),
+-					title,
+-					stripped);
+-				show->showToast(u"Сохранено в базу получателей: "_q + title);
+-			});
+-		});
+-		// See SquidwardShowGroupsResult's identical comment: addLeftButton
+-		// keeps this reachable regardless of how wide the other two are.
+-		box->addLeftButton(rpl::single(u"Закрыть"_q), [=] { box->closeBox(); });
+-	}), Ui::LayerOption::KeepOther);
++	}
+ }
+ 
+-void SquidwardResolveAndShowUsers(
+-		not_null<Window::SessionController*> controller,
+-		not_null<SquidwardBotState*> state,
+-		std::shared_ptr<Ui::Show> show,
+-		const QString &baseTitle,
+-		std::vector<SquidwardMentionedUser> mentioned) {
+-	const auto session = &controller->session();
+-	// Only the id-only entries (see SquidwardMentionedUser's own comment)
+-	// need resolving at all - anything that already came with a username
+-	// straight off its link goes through `mentioned` again, untouched, once
+-	// `finish` runs below.
+-	auto seenIds = base::flat_set<uint64>();
+-	auto pendingIds = std::vector<SquidwardMentionedUser>();
+-	auto toResolve = QVector<MTPInputUser>();
+-	for (const auto &entry : mentioned) {
+-		if (!entry.username.isEmpty() || !entry.userId) {
+-			continue;
+-		}
+-		if (!seenIds.insert(entry.userId).second) {
+-			continue;
+-		}
+-		pendingIds.push_back(entry);
+-		if (!session->data().userLoaded(UserId(entry.userId))) {
+-			toResolve.push_back(MTP_inputUser(
+-				MTP_long(entry.userId),
+-				MTP_long(entry.accessHash)));
+-		}
++void Screen::renderGroups(const GroupsResult &result) {
++	_collect->clear();
++	Ui::AddSkip(_collect);
++	if (result.groups.empty()) {
++		AddLabel(_collect, result.stopped
++			? u"Сбор остановлен, групп не собрано."_q
++			: u"Групп не найдено."_q);
++		AddButtons(_collect, {
++			{ u"Собрать заново"_q, &st::defaultLightButton, [=] {
++				_session->collect();
++			} },
++		});
++		return;
+ 	}
+-	const auto finish = [=] {
+-		auto seen = base::flat_set<QString>();
+-		auto usernames = std::vector<QString>();
+-		const auto add = [&](const QString &raw) {
+-			if (raw.isEmpty()
+-					|| raw.endsWith(u"bot"_q, Qt::CaseInsensitive)
+-					|| !seen.insert(raw.toLower()).second) {
+-				return;
+-			}
+-			usernames.push_back('@' + raw);
+-		};
+-		for (const auto &entry : mentioned) {
+-			if (!entry.username.isEmpty()) {
+-				add(entry.username);
+-			}
++	auto summary = u"✓ Групп: "_q + FormatCount(result.groups.size());
++	if (result.channelsRemoved) {
++		summary += u" · каналов убрано: "_q
++			+ FormatCount(result.channelsRemoved);
++	}
++	if (result.closed) {
++		summary += u" · 🔒 закрытых: "_q + FormatCount(result.closed);
++	}
++	if (result.stopped) {
++		summary += u" · сбор остановлен"_q;
++	}
++	AddLabel(_collect, summary);
++	auto names = QStringList();
++	auto lines = QStringList();
++	for (const auto &entry : result.groups) {
++		if (names.size() < kPreviewCount) {
++			names.push_back(GroupName(entry));
+ 		}
+-		for (const auto &entry : pendingIds) {
+-			const auto user = session->data().userLoaded(
+-				UserId(entry.userId));
+-			if (user) {
+-				add(user->username());
+-			}
+-		}
+-		SquidwardShowUsersResult(
+-			session,
+-			show,
+-			baseTitle,
+-			std::move(usernames));
+-	};
+-	if (toResolve.isEmpty()) {
+-		finish();
++		lines.push_back(GroupLine(entry));
++	}
++	AddLabel(
++		_collect,
++		names.join(u" · "_q)
++			+ (int(result.groups.size()) > kPreviewCount ? u" …"_q : QString()));
++	const auto joined = lines.join(u'\n');
++	AddButtons(_collect, {
++		{ u"Сохранить в базу"_q, &st::defaultActiveButton, [=] {
++			saveGroups();
++		} },
++		{ u"Копировать"_q, &st::defaultLightButton, [=] {
++			QGuiApplication::clipboard()->setText(joined);
++			_box->uiShow()->showToast(u"Скопировано"_q);
++		} },
++	});
++}
++
++void Screen::renderUsers(const UsersResult &result) {
++	_collect->clear();
++	Ui::AddSkip(_collect);
++	if (result.usernames.isEmpty()) {
++		AddLabel(_collect, result.stopped
++			? u"Сбор остановлен, юзернеймов не собрано."_q
++			: u"Участников с юзернеймом не найдено."_q);
++		AddButtons(_collect, {
++			{ u"Собрать заново"_q, &st::defaultLightButton, [=] {
++				_session->collect();
++			} },
++		});
+ 		return;
+ 	}
+-	SquidwardSetStatus(
+-		state,
+-		u"Уточняем %1 участников без данных..."_q.arg(
+-			int(toResolve.size())));
+-	SquidwardResolveMentionedUsers(session, std::move(toResolve), finish);
++	AddLabel(
++		_collect,
++		u"✓ Юзернеймов: "_q + FormatCount(result.usernames.size())
++			+ (result.stopped ? u" · сбор остановлен"_q : QString()));
++	auto handles = QStringList();
++	for (const auto &name : result.usernames) {
++		handles.push_back(u"@"_q + name);
++	}
++	AddLabel(
++		_collect,
++		handles.mid(0, kPreviewCount).join(u" · "_q)
++			+ (handles.size() > kPreviewCount ? u" …"_q : QString()));
++	const auto joined = handles.join(u'\n');
++	AddButtons(_collect, {
++		{ u"Сохранить в базу"_q, &st::defaultActiveButton, [=] {
++			saveUsers();
++		} },
++		{ u"Копировать"_q, &st::defaultLightButton, [=] {
++			QGuiApplication::clipboard()->setText(joined);
++			_box->uiShow()->showToast(u"Скопировано"_q);
++		} },
++	});
+ }
+ 
+-// Recurses one page at a time (never in parallel - the same account has to
+-// wait for each edit before the next click makes sense anyway), extracting
+-// from every page it sees along the way, until the bot's own page counter
+-// says this was the last one, no further "➡" button can be found, or the
+-// safety cap is spent (a bug in that counter's parsing must never turn
+-// into an unbounded click loop).
+-template <typename Entry>
+-void SquidwardCollectNextPage(
+-		not_null<Window::SessionController*> controller,
+-		not_null<SquidwardBotState*> state,
+-		not_null<HistoryItem*> item,
+-		SquidwardExtractFn<Entry> extract,
+-		std::shared_ptr<std::vector<Entry>> collected,
+-		int pagesLeftSafety,
+-		Fn<void(std::vector<Entry>)> done) {
+-	extract(item, *collected);
+-	const auto pageInfo = SquidwardParsePageInfo(item->originalText().text);
+-	if (pageInfo) {
+-		SquidwardSetStatus(state, u"Собираем... страница %1 из %2 (найдено %3)"_q
+-			.arg(pageInfo->first)
+-			.arg(pageInfo->second)
+-			.arg(int(collected->size())));
++void Screen::saveGroups() {
++	if (!_groups || !_current) {
++		return;
+ 	}
+-	const auto markup = item->Get<HistoryMessageReplyMarkup>();
+-	const auto next = (pagesLeftSafety > 0 && markup)
+-		? SquidwardFindNextPageButton(markup->data)
+-		: std::nullopt;
+-	if (!next || (pageInfo && pageInfo->first >= pageInfo->second)) {
+-		SquidwardSetStatus(
+-			state,
+-			u"Готово, собрано: %1."_q.arg(int(collected->size())));
+-		done(std::move(*collected));
++	const auto id = Data::GenerateManualBaseId();
++	Data::SaveScrapedGroupEntries(id, _current->baseTitle, _groups->groups);
++	renderSaved(
++		id,
++		_current->baseTitle,
++		int(Data::LoadScrapedGroupEntries(id).size()),
++		int(_groups->groups.size()));
++}
++
++void Screen::saveUsers() {
++	if (!_users || !_current) {
+ 		return;
+ 	}
+-	const auto itemId = item->fullId();
+-	const auto lifetime = std::make_shared<rpl::lifetime>();
+-	const auto settled = std::make_shared<bool>(false);
+-	controller->session().changes().messageUpdates(
+-		Data::MessageUpdate::Flag::Edited
+-	) | rpl::filter([=](const Data::MessageUpdate &update) {
+-		return update.item->fullId() == itemId;
+-	}) | rpl::on_next([=](const Data::MessageUpdate &update) {
+-		if (std::exchange(*settled, true)) {
+-			return;
+-		}
+-		lifetime->destroy();
+-		SquidwardCollectNextPage(
+-			controller,
+-			state,
+-			update.item,
+-			extract,
+-			collected,
+-			pagesLeftSafety - 1,
+-			done);
+-	}, *lifetime);
+-	Api::ActivateBotCommand(ClickHandlerContext{
+-		.itemId = itemId,
+-		.sessionWindow = base::make_weak(controller),
+-	}, next->first, next->second);
++	const auto id = Data::GenerateManualBaseId();
++	Data::SaveScrapedGroupUsernames(
++		id,
++		_current->baseTitle,
++		_users->usernames);
++	renderSaved(
++		id,
++		_current->baseTitle,
++		int(Data::LoadScrapedGroupUsernames(id).size()),
++		int(_users->usernames.size()));
+ }
+ 
+-// Clicks a button that starts a fresh listing (row/column on `source`, the
+-// message showing it) and waits for page 1 - which, in practice, arrives
+-// either as the bot's *new* message, or as an edit of `source` itself (the
+-// profile card turning into the listing in place) - the bot mixes both
+-// patterns for its own initial replies (see handleBotItem's "⏳
+-// Вычисляю..." placeholder comment), so both are covered here; only page-
+-// to-page navigation *after* this is reliably always an edit, handled by
+-// SquidwardCollectNextPage.
+-template <typename Entry>
+-void SquidwardStartCollection(
+-		not_null<Window::SessionController*> controller,
+-		not_null<SquidwardBotState*> state,
+-		not_null<HistoryItem*> source,
+-		int row,
+-		int column,
+-		SquidwardExtractFn<Entry> extract,
+-		Fn<void(std::vector<Entry>)> done) {
+-	const auto sourceId = source->fullId();
+-	const auto lifetime = std::make_shared<rpl::lifetime>();
+-	const auto settled = std::make_shared<bool>(false);
+-	const auto attempts = std::make_shared<int>(0);
+-	const auto click = [=] {
+-		Api::ActivateBotCommand(ClickHandlerContext{
+-			.itemId = sourceId,
+-			.sessionWindow = base::make_weak(controller),
+-		}, row, column);
+-	};
+-	// The bot first answers with a "⏳ Вычисляю..." placeholder (no
+-	// keyboard) that only later becomes the real page by an edit, so a
+-	// placeholder is never taken as page 1 - the wait continues until an
+-	// edit (or a new message) brings a real page.
+-	const auto isPlaceholder = [](not_null<HistoryItem*> candidate) {
+-		return candidate->originalText().text.contains(u"ычисля"_q)
+-			&& !candidate->Get<HistoryMessageReplyMarkup>();
+-	};
+-	const auto begin = [=](not_null<HistoryItem*> first) {
+-		if (*settled || first->out() || isPlaceholder(first)) {
+-			return;
+-		}
+-		*settled = true;
+-		lifetime->destroy();
+-		SquidwardCollectNextPage<Entry>(
+-			controller,
+-			state,
+-			first,
+-			extract,
+-			std::make_shared<std::vector<Entry>>(),
+-			2000,
+-			done);
+-	};
+-	controller->session().data().newItemAdded(
+-	) | rpl::filter([=](not_null<HistoryItem*> added) {
+-		return state->bot && added->history()->peer == state->bot;
+-	}) | rpl::on_next(begin, *lifetime);
+-	controller->session().changes().messageUpdates(
+-		Data::MessageUpdate::Flag::Edited
+-	) | rpl::filter([=](const Data::MessageUpdate &update) {
+-		return state->bot && update.item->history()->peer == state->bot;
+-	}) | rpl::on_next([=](const Data::MessageUpdate &update) {
+-		begin(update.item);
+-	}, *lifetime);
+-	// Replacing (so destroying) whatever the previous attempt's own timer
+-	// was. The bot can take a good while on a fresh (paid) lookup, so wait
+-	// 40 s per attempt and click again (up to twice more) if nothing at
+-	// all came back; a repeat click on an already-paid lookup is free.
+-	state->pendingCollectionTimeout = std::make_shared<base::Timer>();
+-	const auto timer = state->pendingCollectionTimeout.get();
+-	timer->setCallback([=] {
+-		if (*settled) {
+-			return;
+-		}
+-		if (++*attempts > 2) {
+-			*settled = true;
+-			lifetime->destroy();
+-			SquidwardSetStatus(
+-				state,
+-				u"Не дождались ответа бота на клик - попробуй вручную."_q);
+-			return;
+-		}
+-		SquidwardSetStatus(
+-			state,
+-			u"Бот молчит, нажимаем ещё раз (%1/2)..."_q.arg(*attempts));
+-		click();
+-		timer->callOnce(40000);
+-	});
+-	timer->callOnce(40000);
+-	SquidwardSetStatus(state, u"Запрашиваем список..."_q);
+-	click();
++void Screen::renderSaved(
++		uint64 id,
++		const QString &title,
++		int saved,
++		int collected) {
++	_collect->clear();
++	Ui::AddSkip(_collect);
++	auto text = u"✓ Сохранено в «"_q + title + u"»: "_q + FormatCount(saved);
++	if (saved < collected) {
++		text += u" (ещё "_q + FormatCount(collected - saved)
++			+ u" уже есть в других базах)"_q;
++	}
++	AddLabel(_collect, text);
++	const auto show = _box->uiShow();
++	AddButtons(_collect, {
++		{ u"Открыть базу"_q, &st::defaultLightButton, [=] {
++			Settings::ShowSavedBase(show, id);
++		} },
++	});
++	show->showToast(text);
+ }
+ 
+-// One clickable row per keyboard row - reuses Api::ActivateBotCommand so a
+-// click behaves exactly as it would on a real keyboard button (sends the
+-// callback query / plain text / opens the url, depending on button type).
+-// The one exception is "Группы" (see SquidwardStartCollection's comment).
+-void SquidwardAppendButtonsRow(
+-		not_null<Ui::VerticalLayout*> log,
+-		not_null<Window::SessionController*> controller,
+-		std::shared_ptr<Ui::Show> show,
+-		not_null<SquidwardBotState*> state,
+-		not_null<HistoryItem*> item,
+-		int row,
+-		const std::vector<HistoryMessageMarkupButton> &buttons) {
+-	auto wrapOwned = object_ptr<Ui::RpWidget>(log);
+-	const auto wrap = wrapOwned.data();
+-	// Paid actions of the bot aren't offered here at all - a misclick on
+-	// one would spend the user's tokens. `column` stays the button's real
+-	// index in the bot's keyboard (that's what gets activated), `slot` is
+-	// its position among the ones actually shown.
+-	auto shown = std::vector<int>();
+-	for (auto i = 0; i != int(buttons.size()); ++i) {
+-		if (!buttons[i].text.contains(u"💎"_q)
+-			|| SquidwardButtonLastWord(buttons[i].text) == u"группы"_q) {
+-			shown.push_back(i);
+-		}
+-	}
+-	if (shown.empty()) {
+-		return;
+-	}
+-	const auto columns = int(shown.size());
+-	wrap->resize(wrap->width(), st::defaultBoxButton.height);
+-	for (auto slot = 0; slot != columns; ++slot) {
+-		const auto column = shown[slot];
+-		const auto button = Ui::CreateChild<Ui::RoundButton>(
+-			wrap,
+-			rpl::single(buttons[column].text),
+-			st::defaultBoxButton);
+-		const auto itemId = item->fullId();
+-		const auto isGroupsButton = (SquidwardButtonLastWord(
+-			buttons[column].text) == u"группы"_q);
+-		button->setClickedCallback([=] {
+-			if (isGroupsButton) {
+-				const auto baseTitle = state->lastLookupIdentifier;
+-				SquidwardStartCollection<Data::ScrapedGroupEntry>(
+-					controller,
+-					state,
+-					item,
+-					row,
+-					column,
+-					&SquidwardExtractGroupEntries,
+-					[=](std::vector<Data::ScrapedGroupEntry> entries) {
+-						SquidwardFilterAndShowGroups(
+-							controller,
+-							show,
+-							baseTitle,
+-							std::move(entries));
+-					});
+-				return;
+-			}
+-			Api::ActivateBotCommand(ClickHandlerContext{
+-				.itemId = itemId,
+-				.sessionWindow = base::make_weak(controller),
+-			}, row, column);
+-		});
+-		wrap->widthValue(
+-		) | rpl::on_next([=](int width) {
+-			const auto skip = st::boxRowPadding.left();
+-			const auto buttonWidth = (width - skip * (columns - 1))
+-				/ columns;
+-			button->setFullWidth(buttonWidth);
+-			button->moveToLeft(slot * (buttonWidth + skip), 0, width);
+-		}, wrap->lifetime());
+-	}
+-	log->add(std::move(wrapOwned), st::boxRowPadding);
+-}
+-
+-void SquidwardSendText(
+-		not_null<Window::SessionController*> controller,
+-		not_null<UserData*> bot,
+-		const QString &text) {
+-	auto message = Api::MessageToSend(Api::SendAction(
+-		controller->session().data().history(bot)));
+-	message.textWithTags = { text, TextWithTags::Tags() };
+-	controller->session().api().sendMessage(std::move(message));
+-}
+-
+-// Deliberately doesn't nudge the bot with "/start" here - its reply to
+-// that is the full generic help text listing every lookup kind and its
+-// whole paid-extras menu, exactly the "лишнее" (extra clutter) this
+-// curated box exists to avoid. The log starts empty; the first thing in
+-// it is whatever the bot says about an actual lookup once one of the two
+-// buttons below is used.
+-void SquidwardBotConnected(
+-		not_null<Window::SessionController*> controller,
+-		not_null<SquidwardBotState*> state,
+-		not_null<UserData*> bot,
+-		const QString &username) {
+-	state->bot = bot;
+-	state->status->setText(u"Бот @%1 подключен."_q.arg(username));
+-	if (const auto group = std::exchange(state->pendingGroupLookup, {});
+-		!group.isEmpty()) {
+-		// Exactly what "Пробить группу" does after the prompt is filled in.
+-		state->autoFetchTopPeopleNext = true;
+-		state->autoFetchGroupsNext = false;
+-		state->lastLookupIdentifier = group;
+-		SquidwardSetStatus(state, u"→ Отправляем боту: "_q + group);
+-		SquidwardSendText(controller, bot, group);
+-	}
+-}
+-
+-void SquidwardResolveBot(
+-		not_null<Window::SessionController*> controller,
+-		not_null<SquidwardBotState*> state,
+-		base::weak_qptr<Ui::GenericBox> weak) {
+-	const auto username = QString::fromLatin1(kSquidwardBotUsername);
+-	if (const auto peer = controller->session().data().peerByUsername(
+-			username)) {
+-		if (const auto user = peer->asUser()) {
+-			SquidwardBotConnected(controller, state, user, username);
+-		}
+-		return;
+-	}
+-	state->status->setText(u"Ищем @%1..."_q.arg(username));
+-	state->resolveRequestId = controller->session().api().request(
+-		MTPcontacts_ResolveUsername(
+-			MTP_flags(MTPcontacts_ResolveUsername::Flags(0)),
+-			MTP_string(username),
+-			MTP_string(QString()))
+-	).done([=](const MTPcontacts_ResolvedPeer &result) {
+-		if (!weak) {
+-			return;
+-		}
+-		result.match([&](const MTPDcontacts_resolvedPeer &data) {
+-			controller->session().data().processUsers(data.vusers());
+-			controller->session().data().processChats(data.vchats());
+-			const auto peerId = peerFromMTP(data.vpeer());
+-			const auto user = peerId
+-				? controller->session().data().peer(peerId)->asUser()
+-				: nullptr;
+-			if (user) {
+-				SquidwardBotConnected(controller, state, user, username);
+-			} else {
+-				SquidwardSetStatus(
+-					state,
+-					u"@%1 не найден или не является пользователем."_q.arg(
+-						username));
+-			}
+-		});
+-	}).fail([=](const MTP::Error &error) {
+-		if (!weak) {
+-			return;
+-		}
+-		SquidwardSetStatus(
+-			state,
+-			u"Ошибка поиска @%1: %2"_q.arg(username, error.type()));
+-	}).send();
+-}
+-
+-// The "Сквидвард" section of the GGTG window (see OpenGgtgShell below).
+-
+ } // namespace
+ 
+-[[nodiscard]] object_ptr<Ui::BoxContent> MakeSquidwardBox(
+-		not_null<Window::SessionController*> controller,
++object_ptr<Ui::BoxContent> MakeSquidwardBox(
++		not_null<SessionController*> controller,
+ 		const QString &lookupGroup) {
+ 	return Box([=](not_null<Ui::GenericBox*> box) {
+-		box->setTitle(rpl::single(u"Сквидвард"_q));
+-
+-		const auto state = box->lifetime().make_state<
+-			SquidwardBotState>();
+-		state->pendingGroupLookup = lookupGroup;
+-
+-		Ui::AddSubsectionTitle(
+-			box->verticalLayout(),
+-			rpl::single(u"Состояние"_q));
+-		state->status = box->addRow(object_ptr<Ui::FlatLabel>(
+-			box,
+-			u"Подключение..."_q,
+-			st::boxLabel));
+-		Ui::AddSkip(box->verticalLayout());
+-		Ui::AddDivider(box->verticalLayout());
+-		Ui::AddSkip(box->verticalLayout());
+-		Ui::AddSubsectionTitle(
+-			box->verticalLayout(),
+-			rpl::single(u"Что пробить"_q));
+-
+-		const auto sendText = [=](const QString &text) {
+-			if (!state->bot) {
+-				SquidwardSetStatus(
+-					state,
+-					u"Бот ещё не подключен, подождите."_q);
+-				return;
+-			}
+-			if (text.trimmed().isEmpty()) {
+-				return;
+-			}
+-			SquidwardSetStatus(state, u"→ Отправляем боту: "_q + text.trimmed());
+-			SquidwardSendText(
+-				controller,
+-				not_null<UserData*>(state->bot),
+-				text.trimmed());
+-		};
+-
+-		// A focused prompt for just the one value each lookup needs,
+-		// instead of a free-text field the bot's own /start help has
+-		// to be read to figure out how to use - sends exactly what
+-		// typing it by hand would. Only these two of the bot's
+-		// several lookup kinds are exposed here on purpose (see
+-		// AGENTS-facing task notes); its own menu of paid extras
+-		// (tokens, invites, incognito, mirrors - the /menu screen)
+-		// is never reached from this box.
+-		const auto promptAndSend = [=](
+-				const QString &title,
+-				const QString &placeholder,
+-				bool autoFetchTopPeople,
+-				bool autoFetchGroups = false) {
+-			// box->uiShow(), not controller->show(): this box may be
+-			// hosted inside a floating panel (see FloatingBoxHost above)
+-			// rather than the main window, and this prompt needs to open
+-			// wherever *that* box is, or the user ends up typing into a
+-			// dialog hidden behind the wrong window - see the "Сквидвард"
+-			// investigation this comment was added for.
+-			box->uiShow()->showBox(Box([=](not_null<Ui::GenericBox*> prompt) {
+-				prompt->setTitle(rpl::single(title));
+-				const auto field = prompt->addRow(
+-					object_ptr<Ui::InputField>(
+-						prompt,
+-						st::defaultInputField,
+-						rpl::single(placeholder)));
+-				const auto submit = [=] {
+-					const auto text = field->getLastText().trimmed();
+-					if (text.isEmpty()) {
+-						return;
+-					}
+-					// Consumed by the box's own newItemAdded mirror
+-					// below, on whatever the bot sends back next.
+-					state->autoFetchTopPeopleNext = autoFetchTopPeople;
+-					state->autoFetchGroupsNext = autoFetchGroups;
+-					state->lastLookupIdentifier = text;
+-					sendText(text);
+-					prompt->closeBox();
+-				};
+-				field->submits(
+-				) | rpl::on_next([=](Qt::KeyboardModifiers) {
+-					submit();
+-				}, prompt->lifetime());
+-				prompt->addButton(rpl::single(u"Пробить"_q), submit);
+-				prompt->addButton(
+-					rpl::single(u"Отмена"_q),
+-					[=] { prompt->closeBox(); });
+-			}), Ui::LayerOption::KeepOther);
+-		};
+-
+-		box->addRow(object_ptr<Ui::SettingsButton>(
+-			box,
+-			rpl::single(u"🔎 Пробить пользователя"_q))
+-		)->setClickedCallback([=] {
+-			promptAndSend(
+-				u"Пробить пользователя"_q,
+-				u"@username или ID"_q,
+-				false,
+-				true);
+-		});
+-		box->addRow(object_ptr<Ui::SettingsButton>(
+-			box,
+-			rpl::single(u"🔎 Пробить группу/канал"_q))
+-		)->setClickedCallback([=] {
+-			promptAndSend(
+-				u"Пробить группу/канал"_q,
+-				u"@username, ID или ссылка"_q,
+-				true);
+-		});
+-		Ui::AddDividerText(
+-			box->verticalLayout(),
+-			rpl::single(
+-				u"Пользователь: покажет его группы, их можно сохранить в "
+-				"«Базу». Группа или канал: соберёт участников с "
+-				"юзернеймами в «Базу». Платные действия бота скрыты."_q));
+-		Ui::AddSkip(box->verticalLayout());
+-		Ui::AddSubsectionTitle(
+-			box->verticalLayout(),
+-			rpl::single(u"Ход выполнения"_q));
+-
+-		// The log sits below the two lookup buttons (not between them and
+-		// the status line) so the buttons are always at the top.
+-		state->log = SquidwardAddLogArea(box->verticalLayout());
+-
+-		// Some of the bot's replies (this profile card among them, per
+-		// the "⏳ Вычисляю..." placeholder actually seen from it) start
+-		// as bare text with no keyboard yet and only turn into the real
+-		// answer - buttons included - once it edits that same message
+-		// in place, the same way page turns already do (see
+-		// SquidwardCollectNextPage). So this can't just process the
+-		// *first* reply and stop: it has to watch for an edit of that
+-		// placeholder too, and only actually consume
+-		// autoFetchTopPeopleNext once it sees a message that has a
+-		// keyboard - a markup-less reply leaves the flag untouched for
+-		// whatever comes next instead of wrongly giving up on it.
+-		const auto handleBotItem = [=](not_null<HistoryItem*> item) {
+-			if (item->out()) {
+-				// What was sent is already logged as "→ Отправляем боту".
+-				return;
+-			}
+-			SquidwardAppendLogLine(
+-				state->log,
+-				u"Бот: "_q + item->originalText().text);
+-			const auto markup = item->Get<HistoryMessageReplyMarkup>();
+-			if (!markup) {
+-				return;
+-			}
+-			const auto &rows = markup->data.rows;
+-			for (auto row = 0; row != int(rows.size()); ++row) {
+-				SquidwardAppendButtonsRow(
+-					state->log,
+-					controller,
+-					box->uiShow(),
+-					state,
+-					item,
+-					row,
+-					rows[row]);
+-			}
+-			for (const auto &row : rows) {
+-				auto labels = QStringList();
+-				for (const auto &b : row) {
+-					labels.push_back(b.text);
+-				}
+-				Core::GgtgLog::Info(
+-					u"Сквидвард"_q,
+-					u"Кнопки: "_q + labels.join(u" | "_q));
+-			}
+-			if (state->autoFetchGroupsNext) {
+-				const auto groups = SquidwardFindButton(
+-					markup->data,
+-					[](const QString &text) {
+-						return SquidwardButtonLastWord(text) == u"группы"_q;
+-					});
+-				if (groups) {
+-					state->autoFetchGroupsNext = false;
+-					const auto baseTitle = state->lastLookupIdentifier;
+-					const auto show = box->uiShow();
+-					SquidwardStartCollection<Data::ScrapedGroupEntry>(
+-						controller,
+-						state,
+-						item,
+-						groups->first,
+-						groups->second,
+-						&SquidwardExtractGroupEntries,
+-						[=](std::vector<Data::ScrapedGroupEntry> entries) {
+-							SquidwardFilterAndShowGroups(
+-								controller,
+-								show,
+-								baseTitle,
+-								std::move(entries));
+-						});
+-				}
+-			}
+-			// See promptAndSend's group case and
+-			// SquidwardBotState::autoFetchTopPeopleNext's own comment:
+-			// this reply is that group's profile card - auto-click its
+-			// "Топ, люди" (free) for the user instead of making them
+-			// find it.
+-			if (std::exchange(state->autoFetchTopPeopleNext, false)) {
+-				const auto topPeople = SquidwardFindButton(
+-					markup->data,
+-					[](const QString &text) {
+-						return SquidwardButtonLastWord(text) == u"люди"_q
+-							&& !text.contains(u"💎"_q);
+-					});
+-				if (topPeople) {
+-					const auto baseTitle = state->lastLookupIdentifier;
+-					SquidwardStartCollection<SquidwardMentionedUser>(
+-						controller,
+-						state,
+-						item,
+-						topPeople->first,
+-						topPeople->second,
+-						[=](
+-								not_null<HistoryItem*> page,
+-								std::vector<SquidwardMentionedUser> &into) {
+-							SquidwardExtractUsernames(page, into);
+-						},
+-						[=](std::vector<SquidwardMentionedUser> mentioned) {
+-							SquidwardResolveAndShowUsers(
+-								controller,
+-								state,
+-								box->uiShow(),
+-								baseTitle,
+-								std::move(mentioned));
+-						});
+-				} else {
+-					// Otherwise this would fail completely silently -
+-					// exactly the "ничего не происходит" this was
+-					// reported as: the reply came back, it just didn't
+-					// have a button whose last word is exactly "люди"
+-					// (see SquidwardButtonLastWord's own comment on why
+-					// it's an exact match).
+-					SquidwardSetStatus(
+-						state,
+-						u"В ответе бота не нашлась кнопка «Топ, люди» - открой список вручную."_q);
+-				}
+-			}
+-		};
+-
+-		controller->session().data().newItemAdded(
+-		) | rpl::filter([=](not_null<HistoryItem*> item) {
+-			return state->bot && item->history()->peer == state->bot;
+-		}) | rpl::on_next([=](not_null<HistoryItem*> item) {
+-			handleBotItem(item);
+-			if (item->out() || item->Get<HistoryMessageReplyMarkup>()) {
+-				return;
+-			}
+-			const auto itemId = item->fullId();
+-			const auto lifetime = std::make_shared<rpl::lifetime>();
+-			controller->session().changes().messageUpdates(
+-				Data::MessageUpdate::Flag::Edited
+-			) | rpl::filter([=](const Data::MessageUpdate &update) {
+-				return update.item->fullId() == itemId;
+-			}) | rpl::on_next([=](const Data::MessageUpdate &update) {
+-				lifetime->destroy();
+-				handleBotItem(update.item);
+-			}, *lifetime);
+-		}, box->lifetime());
+-
+-		SquidwardResolveBot(controller, state, base::make_weak(box));
+-
++		box->setWidth(st::boxWideWidth);
++		box->lifetime().make_state<Screen>(box, controller, lookupGroup);
+ 		box->addButton(rpl::single(u"Закрыть"_q), [=] { box->closeBox(); });
+ 	});
+ }
+--- .superpowers/sdd/2026-09-29-squidward-redesign/backup/ggtg_widgets.h	2026-09-29 15:39:12
++++ nicegram-desktop/Telegram/SourceFiles/window/ggtg_widgets.h	2026-09-29 15:42:03
+@@ -14,6 +14,7 @@
+ #include "ui/rp_widget.h"
+ 
+ #include <QtGui/QPainter>
++#include <algorithm>
+ #include <QtGui/QTextOption>
+ 
+ namespace Ggtg {
+@@ -293,7 +294,42 @@
+ 
+ private:
+ 	QString _glyph;
++
++};
++
++// A thin rounded progress line.
++class ProgressBar final : public Ui::RpWidget {
++public:
++	explicit ProgressBar(not_null<QWidget*> parent)
++	: RpWidget(parent.get()) {
++		resize(width(), style::ConvertScale(6));
++	}
++
++	void setValue(double value) {
++		_value = std::clamp(value, 0., 1.);
++		update();
++	}
++
++protected:
++	void paintEvent(QPaintEvent *e) override {
++		auto p = QPainter(this);
++		auto hq = PainterHighQualityEnabler(p);
++		const auto radius = height() / 2.;
++		p.setPen(Qt::NoPen);
++		p.setBrush(st::windowBgOver);
++		p.drawRoundedRect(rect(), radius, radius);
++		if (_value > 0.) {
++			p.setBrush(st::windowActiveTextFg);
++			p.drawRoundedRect(
++				QRectF(0, 0, width() * _value, height()),
++				radius,
++				radius);
++		}
++	}
+ 
++private:
++	double _value = 0.;
++
+ };
+ 
+ } // namespace Ggtg
+--- .superpowers/sdd/2026-09-29-squidward-redesign/backup/bulk_accounts_actions.h	2026-09-29 15:39:12
++++ nicegram-desktop/Telegram/SourceFiles/settings/bulk_accounts_actions.h	2026-09-29 15:42:03
+@@ -103,6 +103,10 @@
+ 	std::shared_ptr<Ui::Show> show,
+ 	BasesActions actions = {});
+ 
++// Opens a saved base's editor (users or groups) over `show` - the same one
++// a click on it in «База» opens.
++void ShowSavedBase(std::shared_ptr<Ui::Show> show, uint64 id);
++
+ // Below: shared with settings/sms_campaign.cpp - kept here (not anonymous-
+ // namespace-local in the .cpp) purely so that sibling file can reuse them
+ // instead of duplicating account-row rendering / the guarded-callback
+--- .superpowers/sdd/2026-09-29-squidward-redesign/backup/bulk_accounts_actions.cpp	2026-09-29 15:39:12
++++ nicegram-desktop/Telegram/SourceFiles/settings/bulk_accounts_actions.cpp	2026-09-29 15:42:03
+@@ -4352,4 +4352,31 @@
+ 	controller->show(MakeBulkFoldersBox(controller));
+ }
+ 
++void ShowSavedBase(std::shared_ptr<Ui::Show> show, uint64 id) {
++	for (const auto &meta : Data::LoadScrapedGroupsIndex()) {
++		if (meta.id != id) {
++			continue;
++		}
++		if (meta.kind == Data::BaseKind::Users) {
++			ShowEditBaseBox(
++				show,
++				BasesActions(),
++				id,
++				meta.title,
++				Data::LoadScrapedGroupUsernames(id),
++				false);
++		} else {
++			ShowEditGroupsBaseBox(
++				show,
++				BasesActions(),
++				id,
++				meta.title,
++				Data::LoadScrapedGroupEntries(id),
++				false);
++		}
++		return;
++	}
++	show->showToast(u"База не найдена"_q);
++}
++
+ } // namespace Settings
+--- .superpowers/sdd/2026-09-29-squidward-redesign/backup/window_main_menu.cpp	2026-09-29 15:39:12
++++ nicegram-desktop/Telegram/SourceFiles/window/window_main_menu.cpp	2026-09-29 15:42:03
+@@ -1479,7 +1479,7 @@
+ 		.icon = &st::menuIconSquidward,
+ 		.label = rpl::single(u"Сквидвард"_q),
+ 		.title = u"Сквидвард"_q,
+-		.description = u"Отправляет ссылку боту @skvidvarde_bot с вашего аккаунта, сам проходит нужную кнопку и листает все страницы ответа. Пользователь - его группы. Группа - её участники (кнопка «Топ, люди», бесплатно): собирает публичные @юзернеймы."_q,
++		.description = u"Пробивает человека или группу через бота @skvidvarde_bot и показывает аккуратное досье. По кнопке собирает группы человека или участников группы и сохраняет их в «Базу»."_q,
+ 		.makeBox = [=](not_null<Ui::SeparatePanel*>) {
+ 			return MakeSquidwardBox(controller);
+ 		},
+--- /dev/null	2026-09-29 15:42:53
++++ nicegram-desktop/Telegram/SourceFiles/window/ggtg_squidward_parse.h	2026-09-29 15:39:20
+@@ -0,0 +1,150 @@
++/*
++This file is part of Telegram Desktop,
++the official desktop application for the Telegram messaging service.
++
++For license and exceptions, see https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
++*/
++#pragma once
++
++#include <QtCore/QString>
++#include <QtCore/QStringList>
++
++#include <optional>
++#include <vector>
++
++// Reading @skvidvarde_bot's replies into plain data. Depends on Qt Core only
++// (see Telegram/build/ggtg/test_squidward_parse.sh, which builds its test
++// without the rest of the app).
++namespace Window::Squidward {
++
++struct Entity {
++	enum class Type {
++		Bold,
++		Url,
++		CustomUrl,
++		Mention,
++		MentionName,
++		Other,
++	};
++	Type type = Type::Other;
++	int offset = 0;
++	int length = 0;
++	QString data;
++};
++
++// A bot message's text and its formatting/link entities.
++struct Message {
++	QString text;
++	std::vector<Entity> entities;
++};
++
++struct NameChange {
++	QString date; // "2026-09-17"
++	QString name;
++};
++
++// A person's card. Numbers are -1 and strings empty when the bot didn't say.
++struct UserCard {
++	QString name;
++	QString id;
++	QString activeSince; // "13.06.2018"
++	QString activeUntil; // "сегодня 12:06"
++	int messages = -1;
++	int chats = -1;
++	QString diversity; // "67,15%"
++	QString replies; // "96,16%"
++	QString media; // "85,85%"
++	int roundVideos = -1;
++	int voices = -1;
++	QString favoriteChat;
++	QString channel;
++	int searched = -1;
++	QStringList usernames; // without '@'
++	std::vector<NameChange> names;
++};
++
++struct TopMember {
++	QString name;
++	int messages = 0;
++};
++
++// A group's card. Same "not said" convention as UserCard.
++struct GroupCard {
++	QString name;
++	QString id;
++	int topPlace = -1;
++	int topOf = -1;
++	int peopleDay = -1;
++	int messagesDay = -1;
++	int mediaDay = -1;
++	QString mediaDayPercent; // "98,99%"
++	int roundVideosDay = -1;
++	int voicesDay = -1;
++	QString diversity;
++	QString description;
++	std::vector<TopMember> topDay;
++};
++
++struct PageInfo {
++	int page = 0;
++	int pages = 0;
++	int total = -1; // "Всего N", -1 when absent
++};
++
++// One line of a user's groups list: a public group (username), or a closed
++// one (link to t.me/c/..., t.me/+..., t.me/joinchat/...).
++struct GroupRow {
++	QString username;
++	QString title;
++	QString link;
++};
++
++// One line of a group's members list: a username straight from a t.me link,
++// or a text-mention's raw data to be resolved by the caller.
++struct UserRow {
++	QString username;
++	QString mentionData;
++};
++
++// Lower-cases and folds the bot's look-alike letters (Latin/Greek/small caps
++// in Russian words, "İD", "ɪᴅ"...) one character to one character, so
++// positions in the result match positions in `text`.
++[[nodiscard]] QString Fold(const QString &text);
++// A keyboard button's last word, folded ("🎖 Топ, люди" -> "люди").
++[[nodiscard]] QString ButtonLastWord(const QString &text);
++[[nodiscard]] std::optional<PageInfo> ParsePageInfo(const QString &text);
++// "t.me/name" -> "name"; empty for anything else.
++[[nodiscard]] QString UsernameFromLink(const QString &link);
++// The link itself if it's a closed group's link; empty otherwise.
++[[nodiscard]] QString PrivateLink(const QString &link);
++// The public username a lookup query names ("@name", "name", t.me link);
++// empty for ids, closed links and anything invalid.
++[[nodiscard]] QString UsernameFromQuery(const QString &query);
++// The bot's "⏳ Вычисляю..." stand-in before the real answer.
++[[nodiscard]] bool IsPlaceholder(const QString &text);
++// Trims lines, keeps at most one empty line in a row, trims the result.
++[[nodiscard]] QString CleanText(const QString &text);
++// 30707 -> "30 707".
++[[nodiscard]] QString FormatCount(int value);
++// `query` first, no case-insensitive repeats, at most `limit` entries.
++[[nodiscard]] QStringList PushRecent(
++	QStringList list,
++	const QString &query,
++	int limit);
++
++[[nodiscard]] std::vector<GroupRow> ExtractGroupRows(const Message &message);
++[[nodiscard]] std::vector<UserRow> ExtractUserRows(const Message &message);
++// Keeps the first of each username / link (case-insensitive).
++[[nodiscard]] std::vector<GroupRow> DedupeGroupRows(
++	std::vector<GroupRow> rows);
++// Strips '@', drops empty names and bots ("...bot"), keeps the first of each
++// (case-insensitive).
++[[nodiscard]] QStringList DedupeUsernames(const QStringList &usernames);
++
++[[nodiscard]] std::optional<UserCard> ParseUserCard(const Message &message);
++[[nodiscard]] std::optional<GroupCard> ParseGroupCard(const Message &message);
++// Human-readable lines for a card; fields the bot didn't give are left out.
++[[nodiscard]] QStringList FormatUserDetails(const UserCard &card);
++[[nodiscard]] QStringList FormatGroupDetails(const GroupCard &card);
++
++} // namespace Window::Squidward
+--- /dev/null	2026-09-29 15:42:53
++++ nicegram-desktop/Telegram/SourceFiles/window/ggtg_squidward_parse.cpp	2026-09-29 15:40:48
+@@ -0,0 +1,569 @@
++/*
++This file is part of Telegram Desktop,
++the official desktop application for the Telegram messaging service.
++
++For license and exceptions, see https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
++*/
++#include "window/ggtg_squidward_parse.h"
++
++#include <QtCore/QHash>
++#include <QtCore/QLocale>
++#include <QtCore/QRegularExpression>
++#include <QtCore/QSet>
++
++namespace Window::Squidward {
++
++using namespace Qt::StringLiterals;
++
++namespace {
++
++[[nodiscard]] QChar FoldChar(QChar ch) {
++	// Look-alikes the bot mixes into Russian words, and the odd letters of
++	// its "ID" labels; one character to one character, always.
++	static const auto table = QHash<char16_t, char16_t>{
++		{ u'a', u'а' }, { u'c', u'с' }, { u'e', u'е' }, { u'o', u'о' },
++		{ u'p', u'р' }, { u'x', u'х' }, { u'y', u'у' }, { u'r', u'г' },
++		{ u'k', u'к' },
++		{ 0x03BF, u'о' }, { 0x03B3, u'у' }, { 0x03C1, u'р' },
++		{ 0x03B1, u'а' }, { 0x03C0, u'п' }, { 0x03B7, u'н' },
++		{ 0x03BD, u'н' }, { 0x1D0F, u'о' }, { 0x2113, u'л' },
++		{ 0x0251, u'а' }, { 0x04A1, u'к' }, { 0x0142, u'л' },
++		{ 0x01EB, u'о' },
++		{ 0x026A, u'i' }, { 0x0131, u'i' }, { 0x0130, u'i' }, { 0x1D05, u'd' },
++		{ 0x014B, u'n' }, { 0x0273, u'n' }, { 0x0192, u'f' },
++	};
++	const auto lower = ch.toLower().unicode();
++	return QChar(table.value(lower, lower));
++}
++
++QString L(const QString &label) {
++	return QRegularExpression::escape(Fold(label));
++}
++
++[[nodiscard]] QString Capitalized(QString text) {
++	if (!text.isEmpty()) {
++		text[0] = text[0].toUpper();
++	}
++	return text;
++}
++
++[[nodiscard]] QString DiversityPattern() {
++	return L(u"разнообразие сообщ"_s) + uR"(\S*\s*([\d.,]+\s*%))"_s;
++}
++
++// Line-by-line matching on the folded text; captures are cut from the
++// original line at the same positions (Fold keeps them aligned).
++class Reader final {
++public:
++	explicit Reader(const QString &text) {
++		for (const auto &line : text.split(u'\n')) {
++			_lines.push_back({ line, Fold(line) });
++		}
++	}
++
++	[[nodiscard]] int size() const {
++		return int(_lines.size());
++	}
++	[[nodiscard]] const QString &original(int index) const {
++		return _lines[index].original;
++	}
++
++	// Captures of the first line at or after `from` matching `pattern`.
++	[[nodiscard]] std::optional<QStringList> find(
++			const QString &pattern,
++			int *index = nullptr,
++			int from = 0) const {
++		const auto re = QRegularExpression(pattern);
++		for (auto i = from; i < size(); ++i) {
++			const auto match = re.match(_lines[i].folded);
++			if (!match.hasMatch()) {
++				continue;
++			}
++			if (index) {
++				*index = i;
++			}
++			auto result = QStringList();
++			for (auto n = 1; n <= match.lastCapturedIndex(); ++n) {
++				result.push_back(_lines[i].original.mid(
++					match.capturedStart(n),
++					match.capturedLength(n)).trimmed());
++			}
++			return result;
++		}
++		return std::nullopt;
++	}
++
++	[[nodiscard]] bool has(const QString &pattern) const {
++		return find(pattern).has_value();
++	}
++
++private:
++	struct Line {
++		QString original;
++		QString folded;
++	};
++	std::vector<Line> _lines;
++
++};
++
++[[nodiscard]] int ToInt(const QString &text) {
++	auto digits = QString();
++	for (const auto ch : text) {
++		if (ch.isDigit()) {
++			digits.push_back(ch);
++		}
++	}
++	return digits.isEmpty() ? -1 : digits.toInt();
++}
++
++// Shared by both cards.
++constexpr auto kNamePattern = u"^\\s*это\\s+(.+)$";
++constexpr auto kIdPattern = u"^\\s*id\\s*:\\s*(\\d+)";
++
++} // namespace
++
++QString Fold(const QString &text) {
++	auto result = text;
++	for (auto i = 0; i != result.size(); ++i) {
++		result[i] = FoldChar(text[i]);
++	}
++	return result;
++}
++
++QString ButtonLastWord(const QString &text) {
++	const auto parts = text.simplified().split(u' ', Qt::SkipEmptyParts);
++	return parts.isEmpty() ? QString() : Fold(parts.back());
++}
++
++std::optional<PageInfo> ParsePageInfo(const QString &text) {
++	const auto folded = Fold(text);
++	static const auto pages = QRegularExpression(
++		QRegularExpression::escape(Fold(u"страниц"_s))
++			+ uR"(\D*(\d+)\D+(\d+))"_s);
++	static const auto total = QRegularExpression(
++		QRegularExpression::escape(Fold(u"всего"_s)) + uR"(\D*?(\d+))"_s);
++	const auto match = pages.match(folded);
++	if (!match.hasMatch()) {
++		return std::nullopt;
++	}
++	auto result = PageInfo{
++		.page = match.captured(1).toInt(),
++		.pages = match.captured(2).toInt(),
++	};
++	if (const auto all = total.match(folded); all.hasMatch()) {
++		result.total = all.captured(1).toInt();
++	}
++	return result;
++}
++
++QString UsernameFromLink(const QString &link) {
++	static const auto expression = QRegularExpression(
++		uR"(^(?:https?://)?t(?:elegram)?\.me/([A-Za-z0-9_]{4,32})/?$)"_s);
++	const auto match = expression.match(link.trimmed());
++	return match.hasMatch() ? match.captured(1) : QString();
++}
++
++QString PrivateLink(const QString &link) {
++	static const auto expression = QRegularExpression(
++		uR"(^(?:https?://)?t(?:elegram)?\.me/(?:c/\d+(?:/\d+)?|\+[A-Za-z0-9_-]+|joinchat/[A-Za-z0-9_-]+)/?$)"_s);
++	const auto trimmed = link.trimmed();
++	return expression.match(trimmed).hasMatch() ? trimmed : QString();
++}
++
++QString UsernameFromQuery(const QString &query) {
++	const auto trimmed = query.trimmed();
++	if (!PrivateLink(trimmed).isEmpty()) {
++		return QString();
++	}
++	if (const auto fromLink = UsernameFromLink(trimmed); !fromLink.isEmpty()) {
++		return fromLink;
++	}
++	static const auto valid = QRegularExpression(
++		uR"(^@?([A-Za-z][A-Za-z0-9_]{3,31})$)"_s);
++	const auto match = valid.match(trimmed);
++	return match.hasMatch() ? match.captured(1) : QString();
++}
++
++bool IsPlaceholder(const QString &text) {
++	return Fold(text).contains(Fold(u"вычисля"_s));
++}
++
++QString CleanText(const QString &text) {
++	auto lines = QStringList();
++	for (auto line : text.split(u'\n')) {
++		while (!line.isEmpty() && line.back().isSpace()) {
++			line.chop(1);
++		}
++		if (line.trimmed().isEmpty()
++			&& (lines.isEmpty() || lines.back().isEmpty())) {
++			continue;
++		}
++		lines.push_back(line.trimmed().isEmpty() ? QString() : line);
++	}
++	return lines.join(u'\n').trimmed();
++}
++
++QString FormatCount(int value) {
++	return QLocale(QLocale::Russian).toString(value);
++}
++
++QStringList PushRecent(QStringList list, const QString &query, int limit) {
++	const auto trimmed = query.trimmed();
++	list.removeIf([&](const QString &entry) {
++		return entry.compare(trimmed, Qt::CaseInsensitive) == 0;
++	});
++	list.prepend(trimmed);
++	return list.mid(0, limit);
++}
++
++std::vector<GroupRow> ExtractGroupRows(const Message &message) {
++	auto result = std::vector<GroupRow>();
++	const auto addLink = [&](const QString &shown, const QString &link) {
++		const auto title = (shown == link) ? QString() : shown.trimmed();
++		if (const auto username = UsernameFromLink(link); !username.isEmpty()) {
++			result.push_back({ .username = username, .title = title });
++		} else if (const auto closed = PrivateLink(link); !closed.isEmpty()) {
++			result.push_back({ .title = title, .link = closed });
++		}
++		// Anything else (tg://user?id=... in the header, etc.) isn't a group.
++	};
++	for (const auto &entity : message.entities) {
++		const auto shown = message.text.mid(entity.offset, entity.length);
++		switch (entity.type) {
++		case Entity::Type::Mention:
++			result.push_back({ .username = shown.mid(1) });
++			break;
++		case Entity::Type::Url:
++			addLink(shown, shown);
++			break;
++		case Entity::Type::CustomUrl:
++			addLink(shown, entity.data);
++			break;
++		default:
++			break;
++		}
++	}
++	return result;
++}
++
++std::vector<UserRow> ExtractUserRows(const Message &message) {
++	auto result = std::vector<UserRow>();
++	for (const auto &entity : message.entities) {
++		const auto shown = message.text.mid(entity.offset, entity.length);
++		if (entity.type == Entity::Type::MentionName) {
++			result.push_back({ .mentionData = entity.data });
++		} else if (entity.type == Entity::Type::Url
++			|| entity.type == Entity::Type::CustomUrl) {
++			const auto username = UsernameFromLink(
++				entity.type == Entity::Type::Url ? shown : entity.data);
++			if (!username.isEmpty()) {
++				result.push_back({ .username = username });
++			}
++		}
++	}
++	return result;
++}
++
++std::vector<GroupRow> DedupeGroupRows(std::vector<GroupRow> rows) {
++	auto seen = QSet<QString>();
++	auto result = std::vector<GroupRow>();
++	for (auto &row : rows) {
++		const auto key = !row.username.isEmpty()
++			? (u"@"_s + row.username.toLower())
++			: row.link.toLower();
++		if (key.isEmpty() || seen.contains(key)) {
++			continue;
++		}
++		seen.insert(key);
++		result.push_back(std::move(row));
++	}
++	return result;
++}
++
++QStringList DedupeUsernames(const QStringList &usernames) {
++	auto seen = QSet<QString>();
++	auto result = QStringList();
++	for (const auto &raw : usernames) {
++		auto name = raw.trimmed();
++		if (name.startsWith(u'@')) {
++			name.remove(0, 1);
++		}
++		const auto key = name.toLower();
++		if (name.isEmpty()
++			|| key.endsWith(u"bot"_s)
++			|| seen.contains(key)) {
++			continue;
++		}
++		seen.insert(key);
++		result.push_back(name);
++	}
++	return result;
++}
++
++std::optional<UserCard> ParseUserCard(const Message &message) {
++	const auto reader = Reader(message.text);
++	const auto isGroup = reader.has(L(u"в топе"_s));
++	const auto activity = reader.find(uR"((\d+)\s+)"_s
++		+ L(u"сообщени"_s) + uR"(\S*\s+)"_s
++		+ L(u"в"_s) + uR"(\s+(\d+)\s+)"_s + L(u"чат"_s));
++	const auto style = reader.find(uR"(([\d.,]+\s*%)\s*)"_s
++		+ L(u"реплаи"_s) + uR"(\s*([\d.,]+\s*%)\s*)"_s + L(u"медиа"_s));
++	if (isGroup || (!activity && !style)) {
++		return std::nullopt;
++	}
++	auto card = UserCard();
++	if (const auto name = reader.find(QString::fromUtf16(kNamePattern))) {
++		card.name = name->value(0);
++	}
++	if (const auto id = reader.find(QString::fromUtf16(kIdPattern))) {
++		card.id = id->value(0);
++	}
++	if (activity) {
++		card.messages = ToInt(activity->value(0));
++		card.chats = ToInt(activity->value(1));
++	}
++	if (style) {
++		card.replies = style->value(0);
++		card.media = style->value(1);
++	}
++	if (const auto diversity = reader.find(DiversityPattern())) {
++		card.diversity = diversity->value(0);
++	}
++	if (const auto period = reader.find(uR"(^\s*)"_s + L(u"с"_s)
++			+ uR"(\s+(\d{2}\.\d{2}\.\d{4})\s+)"_s + L(u"по"_s)
++			+ uR"(\s+(.+)$)"_s)) {
++		card.activeSince = period->value(0);
++		card.activeUntil = period->value(1);
++	}
++	if (const auto rv = reader.find(L(u"кружки"_s)
++			+ uR"(\s*:\s*(\d+)\s*,\s*)"_s + L(u"голос"_s)
++			+ uR"(\S*\s*:\s*(\d+))"_s)) {
++		card.roundVideos = ToInt(rv->value(0));
++		card.voices = ToInt(rv->value(1));
++	}
++	if (const auto favorite = reader.find(
++			L(u"любимый чат"_s) + uR"(\s*:\s*(.+)$)"_s)) {
++		card.favoriteChat = favorite->value(0);
++	}
++	if (const auto searched = reader.find(
++			L(u"искали"_s) + uR"(\s*:\s*(\d+))"_s)) {
++		card.searched = ToInt(searched->value(0));
++	}
++	if (const auto channel = reader.find(
++			L(u"канал"_s) + uR"(\s*:\s*(.+)$)"_s)) {
++		card.channel = channel->value(0);
++	}
++
++	auto namesAt = -1;
++	const auto names = reader.find(uR"(^\s*)"_s + L(u"имена"_s), &namesAt);
++	auto usernamesAt = -1;
++	if (reader.find(L(u"usernames"_s), &usernamesAt)) {
++		static const auto mention = QRegularExpression(
++			uR"(@([A-Za-z0-9_]{4,32}))"_s);
++		const auto last = std::min(
++			usernamesAt + 1,
++			(namesAt > usernamesAt) ? (namesAt - 1) : (reader.size() - 1));
++		for (auto i = usernamesAt; i <= last; ++i) {
++			auto it = mention.globalMatch(reader.original(i));
++			while (it.hasNext()) {
++				card.usernames.push_back(it.next().captured(1));
++			}
++		}
++	}
++	if (names) {
++		static const auto change = QRegularExpression(
++			uR"(^[\s├└│|]*(\d{4}-\d{2}-\d{2})\s*[➔→➜⮕>\-–—]*\x{FE0F}?\s*(.+?)\s*$)"_s);
++		for (auto i = namesAt + 1; i < reader.size(); ++i) {
++			const auto line = reader.original(i);
++			const auto match = change.match(line);
++			if (!match.hasMatch()) {
++				if (line.trimmed().isEmpty()) {
++					continue;
++				}
++				break;
++			}
++			card.names.push_back({ match.captured(1), match.captured(2) });
++		}
++	}
++	return card;
++}
++
++QStringList FormatUserDetails(const UserCard &card) {
++	auto result = QStringList();
++	if (!card.activeSince.isEmpty()) {
++		result.push_back(u"Активен с "_s + card.activeSince
++			+ (card.activeUntil.isEmpty()
++				? QString()
++				: (u" по "_s + card.activeUntil)));
++	}
++	if (card.messages >= 0 && card.chats >= 0) {
++		result.push_back(FormatCount(card.messages) + u" сообщ. в "_s
++			+ FormatCount(card.chats) + u" чатах"_s);
++	}
++	if (!card.favoriteChat.isEmpty()) {
++		result.push_back(u"Любимый чат: "_s + card.favoriteChat);
++	}
++	auto style = QStringList();
++	if (!card.replies.isEmpty()) {
++		style.push_back(u"реплаи "_s + card.replies);
++	}
++	if (!card.media.isEmpty()) {
++		style.push_back(u"медиа "_s + card.media);
++	}
++	if (card.roundVideos >= 0) {
++		style.push_back(u"кружки "_s + QString::number(card.roundVideos));
++	}
++	if (card.voices >= 0) {
++		style.push_back(u"голос "_s + QString::number(card.voices));
++	}
++	if (!style.isEmpty()) {
++		result.push_back(Capitalized(style.join(u" · "_s)));
++	}
++	if (!card.diversity.isEmpty()) {
++		result.push_back(u"Разнообразие сообщений "_s + card.diversity);
++	}
++	auto extra = QStringList();
++	if (!card.channel.isEmpty()) {
++		extra.push_back(u"канал: "_s + card.channel);
++	}
++	if (card.searched >= 0) {
++		extra.push_back(u"искали: "_s + QString::number(card.searched));
++	}
++	if (!extra.isEmpty()) {
++		result.push_back(Capitalized(extra.join(u" · "_s)));
++	}
++	if (!card.usernames.isEmpty()) {
++		auto handles = QStringList();
++		for (const auto &name : card.usernames) {
++			handles.push_back(u"@"_s + name);
++		}
++		result.push_back(u"Юзернеймы: "_s + handles.join(u' '));
++	}
++	return result;
++}
++
++std::optional<GroupCard> ParseGroupCard(const Message &message) {
++	const auto reader = Reader(message.text);
++	const auto top = reader.find(L(u"в топе"_s)
++		+ uR"(\s*#\s*(\d+)\s*)"_s + L(u"из"_s) + uR"(\s*(\d+))"_s);
++	if (!top && !reader.has(L(u"за сутки"_s))) {
++		return std::nullopt;
++	}
++	auto card = GroupCard();
++	if (top) {
++		card.topPlace = ToInt(top->value(0));
++		card.topOf = ToInt(top->value(1));
++	}
++	if (const auto name = reader.find(QString::fromUtf16(kNamePattern))) {
++		card.name = name->value(0);
++	}
++	if (const auto id = reader.find(QString::fromUtf16(kIdPattern))) {
++		card.id = id->value(0);
++	}
++	if (const auto diversity = reader.find(DiversityPattern())) {
++		card.diversity = diversity->value(0);
++	}
++	if (const auto people = reader.find(uR"((\d+)\s*)"_s
++			+ L(u"челов"_s) + uR"(\S*\s*)"_s + L(u"за сутки"_s))) {
++		card.peopleDay = ToInt(people->value(0));
++	}
++	if (const auto written = reader.find(L(u"написали"_s)
++			+ uR"(\s*(\d+)\s*)"_s + L(u"сообщ"_s))) {
++		card.messagesDay = ToInt(written->value(0));
++	}
++	if (const auto media = reader.find(L(u"из них"_s)
++			+ uR"(\s*(\d+)\s*\(([\d.,]+\s*%)\)\s*)"_s + L(u"медиа"_s))) {
++		card.mediaDay = ToInt(media->value(0));
++		card.mediaDayPercent = media->value(1);
++	}
++	if (const auto rv = reader.find(uR"((\d+)\s*)"_s + L(u"кружк"_s)
++			+ uR"(\S*\s*)"_s + L(u"и"_s) + uR"(\s*(\d+)\s*)"_s
++			+ L(u"голос"_s))) {
++		card.roundVideosDay = ToInt(rv->value(0));
++		card.voicesDay = ToInt(rv->value(1));
++	}
++
++	auto topAt = -1;
++	const auto topDay = reader.find(
++		uR"(^\s*)"_s + L(u"топ за сутки"_s),
++		&topAt);
++	auto descriptionAt = -1;
++	if (const auto description = reader.find(
++			uR"(^\s*)"_s + L(u"описание"_s) + uR"(\s*:(.*)$)"_s,
++			&descriptionAt)) {
++		static const auto filler = QRegularExpression(uR"(^[\s\-–—]*$)"_s);
++		auto lines = QStringList();
++		if (!description->value(0).isEmpty()) {
++			lines.push_back(description->value(0));
++		}
++		const auto end = (topAt > descriptionAt) ? topAt : reader.size();
++		for (auto i = descriptionAt + 1; i < end; ++i) {
++			const auto line = reader.original(i).trimmed();
++			if (!filler.match(line).hasMatch()) {
++				lines.push_back(line);
++			}
++		}
++		card.description = lines.join(u'\n').trimmed();
++	}
++	if (topDay) {
++		static const auto row = QRegularExpression(
++			uR"(^\s*(\d+)\.\s*(.+?)\s*[-–—]\s*(\d+)\s*$)"_s);
++		for (auto i = topAt + 1; i < reader.size(); ++i) {
++			const auto line = reader.original(i);
++			const auto match = row.match(line);
++			if (!match.hasMatch()) {
++				if (line.trimmed().isEmpty()) {
++					continue;
++				}
++				break;
++			}
++			card.topDay.push_back({
++				match.captured(2),
++				match.captured(3).toInt(),
++			});
++		}
++	}
++	return card;
++}
++
++QStringList FormatGroupDetails(const GroupCard &card) {
++	auto result = QStringList();
++	if (card.topPlace >= 0) {
++		result.push_back(u"В топе #"_s + FormatCount(card.topPlace)
++			+ (card.topOf >= 0
++				? (u" из "_s + FormatCount(card.topOf))
++				: QString()));
++	}
++	auto day = QStringList();
++	if (card.peopleDay >= 0) {
++		day.push_back(FormatCount(card.peopleDay) + u" человек"_s);
++	}
++	if (card.messagesDay >= 0) {
++		day.push_back(FormatCount(card.messagesDay) + u" сообщ."_s);
++	}
++	if (card.mediaDay >= 0) {
++		day.push_back(u"медиа "_s + FormatCount(card.mediaDay)
++			+ (card.mediaDayPercent.isEmpty()
++				? QString()
++				: (u" ("_s + card.mediaDayPercent + u')')));
++	}
++	if (!day.isEmpty()) {
++		result.push_back(u"За сутки: "_s + day.join(u" · "_s));
++	}
++	auto voice = QStringList();
++	if (card.roundVideosDay >= 0) {
++		voice.push_back(u"кружки "_s + QString::number(card.roundVideosDay));
++	}
++	if (card.voicesDay >= 0) {
++		voice.push_back(u"голосовые "_s + QString::number(card.voicesDay));
++	}
++	if (!voice.isEmpty()) {
++		result.push_back(Capitalized(voice.join(u" · "_s)));
++	}
++	if (!card.diversity.isEmpty()) {
++		result.push_back(u"Разнообразие сообщений "_s + card.diversity);
++	}
++	return result;
++}
++
++} // namespace Window::Squidward
+--- /dev/null	2026-09-29 15:42:53
++++ nicegram-desktop/Telegram/SourceFiles/window/ggtg_squidward_session.h	2026-09-29 15:41:02
+@@ -0,0 +1,158 @@
++/*
++This file is part of Telegram Desktop,
++the official desktop application for the Telegram messaging service.
++
++For license and exceptions, see https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
++*/
++#pragma once
++
++#include "base/timer.h"
++#include "base/weak_ptr.h"
++#include "data/data_msg_id.h"
++#include "data/scraped_members_db.h"
++#include "mtproto/sender.h"
++#include "window/ggtg_squidward_parse.h"
++
++class HistoryItem;
++class UserData;
++
++namespace Window {
++class SessionController;
++} // namespace Window
++
++namespace Window::Squidward {
++
++enum class BotStatus {
++	Connecting,
++	Ready,
++	Failed,
++};
++
++enum class CardKind {
++	User,
++	Group,
++	Unknown, // "not found", a limit notice, or a reply we can't read
++};
++
++struct Card {
++	CardKind kind = CardKind::Unknown;
++	std::optional<UserCard> user;
++	std::optional<GroupCard> group;
++	QString rawText; // the bot's reply, cleaned (see CleanText)
++	QString query;
++	QString baseTitle; // name for a base saved from this card
++};
++
++struct Progress {
++	int page = 0;
++	int pages = 0; // 0 until the bot's page counter is seen
++	int total = -1;
++	int found = 0;
++	bool checking = false; // pages done, groups/users being checked
++};
++
++struct GroupsResult {
++	std::vector<Data::ScrapedGroupEntry> groups;
++	int channelsRemoved = 0;
++	int closed = 0;
++	bool stopped = false;
++};
++
++struct UsersResult {
++	QStringList usernames; // without '@'
++	bool stopped = false;
++};
++
++// Talks to @skvidvarde_bot from the window's account: a lookup ends in a
++// Card, and collect() pages through the card's list (a person's groups, or a
++// group's members) until the end, a stop() or a timeout. Paid buttons are
++// never pressed.
++class Session final : public base::has_weak_ptr {
++public:
++	explicit Session(not_null<Window::SessionController*> controller);
++
++	[[nodiscard]] rpl::producer<BotStatus> status() const;
++	[[nodiscard]] rpl::producer<Card> cards() const;
++	[[nodiscard]] rpl::producer<Progress> progress() const;
++	[[nodiscard]] rpl::producer<GroupsResult> groupsCollected() const;
++	[[nodiscard]] rpl::producer<UsersResult> usersCollected() const;
++	[[nodiscard]] rpl::producer<QString> errors() const;
++
++	void lookup(const QString &query);
++	// Collects the list of the last card; results come as groupsCollected()
++	// for a person's card and usersCollected() for a group's.
++	void collect();
++	// Ends collecting now; what was collected so far still comes out.
++	void stop();
++
++	[[nodiscard]] bool ready() const;
++	[[nodiscard]] bool collecting() const;
++
++private:
++	struct Collect {
++		CardKind kind = CardKind::Unknown;
++		FullMsgId listItem;
++		bool waitingFirst = true;
++		int lastPage = 0;
++		int retries = 0;
++		int safety = 2000;
++		FullMsgId buttonItem;
++		std::pair<int, int> button;
++		std::vector<GroupRow> groups;
++		std::vector<UserRow> users;
++		Progress progress;
++	};
++	struct GroupCheck {
++		std::vector<Data::ScrapedGroupEntry> source;
++		std::vector<Data::ScrapedGroupEntry> kept;
++		size_t next = 0;
++		int channels = 0;
++		int closed = 0;
++		bool stopped = false;
++		int generation = 0;
++	};
++
++	void resolveBot();
++	void handle(not_null<HistoryItem*> item, bool edited);
++	void handleCard(not_null<HistoryItem*> item, bool refresh);
++	void handlePage(not_null<HistoryItem*> item, bool edited);
++	void click(FullMsgId itemId, std::pair<int, int> button);
++	void lookupTimeout();
++	void pageTimeout();
++	void finish(bool stopped);
++	void finishGroups(std::vector<GroupRow> rows, bool stopped);
++	void checkNextGroup();
++	void settleGroup(
++		Data::ScrapedGroupEntry entry,
++		PeerData *peer,
++		crl::time delay);
++	void finishUsers(std::vector<UserRow> rows, bool stopped);
++	void resolveUsers(QVector<MTPInputUser> pending, Fn<void()> done);
++	[[nodiscard]] QString baseTitleFor(const QString &name) const;
++
++	const not_null<Window::SessionController*> _controller;
++	MTP::Sender _api;
++	UserData *_bot = nullptr;
++	rpl::variable<BotStatus> _status = BotStatus::Connecting;
++	rpl::event_stream<Card> _cards;
++	rpl::event_stream<Progress> _progress;
++	rpl::event_stream<GroupsResult> _groups;
++	rpl::event_stream<UsersResult> _users;
++	rpl::event_stream<QString> _errors;
++
++	QString _query;
++	bool _awaitingCard = false;
++	std::optional<Card> _card;
++	FullMsgId _cardItem;
++	std::optional<Collect> _collect;
++	std::optional<GroupCheck> _check;
++	bool _finishing = false;
++	// Bumped by every lookup: results of an older one are dropped.
++	int _generation = 0;
++	base::Timer _lookupTimer;
++	base::Timer _pageTimer;
++	rpl::lifetime _lifetime;
++
++};
++
++} // namespace Window::Squidward
+--- /dev/null	2026-09-29 15:42:53
++++ nicegram-desktop/Telegram/SourceFiles/window/ggtg_squidward_session.cpp	2026-09-29 15:41:02
+@@ -0,0 +1,526 @@
++/*
++This file is part of Telegram Desktop,
++the official desktop application for the Telegram messaging service.
++
++For license and exceptions, see https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
++*/
++#include "window/ggtg_squidward_session.h"
++
++#include "api/api_bot.h"
++#include "api/api_common.h"
++#include "apiwrap.h"
++#include "base/call_delayed.h"
++#include "base/flat_set.h"
++#include "core/click_handler_types.h"
++#include "core/ggtg_log.h"
++#include "data/data_changes.h"
++#include "data/data_channel.h"
++#include "data/data_session.h"
++#include "data/data_user.h"
++#include "history/history.h"
++#include "history/history_item.h"
++#include "history/history_item_components.h"
++#include "history/history_item_reply_markup.h"
++#include "main/main_session.h"
++#include "ui/text/text_entity.h"
++#include "window/window_session_controller.h"
++
++namespace Window::Squidward {
++namespace {
++
++constexpr auto kBotUsername = "skvidvarde_bot";
++constexpr auto kLookupTimeout = crl::time(30000);
++constexpr auto kFirstPageTimeout = crl::time(40000);
++constexpr auto kPageTimeout = crl::time(20000);
++
++[[nodiscard]] Message ToMessage(not_null<HistoryItem*> item) {
++	const auto text = item->originalText();
++	auto result = Message{ .text = text.text };
++	for (const auto &entity : text.entities) {
++		auto type = Entity::Type::Other;
++		switch (entity.type()) {
++		case EntityType::Bold: type = Entity::Type::Bold; break;
++		case EntityType::Url: type = Entity::Type::Url; break;
++		case EntityType::CustomUrl: type = Entity::Type::CustomUrl; break;
++		case EntityType::Mention: type = Entity::Type::Mention; break;
++		case EntityType::MentionName:
++			type = Entity::Type::MentionName;
++			break;
++		default: break;
++		}
++		result.entities.push_back({
++			type,
++			entity.offset(),
++			entity.length(),
++			entity.data(),
++		});
++	}
++	return result;
++}
++
++[[nodiscard]] std::optional<std::pair<int, int>> FindButton(
++		not_null<HistoryItem*> item,
++		Fn<bool(const QString&)> match) {
++	const auto markup = item->Get<HistoryMessageReplyMarkup>();
++	if (!markup) {
++		return std::nullopt;
++	}
++	const auto &rows = markup->data.rows;
++	for (auto row = 0; row != int(rows.size()); ++row) {
++		for (auto column = 0; column != int(rows[row].size()); ++column) {
++			if (match(rows[row][column].text)) {
++				return std::make_pair(row, column);
++			}
++		}
++	}
++	return std::nullopt;
++}
++
++[[nodiscard]] bool IsGroupsButton(const QString &text) {
++	return ButtonLastWord(text) == Fold(u"группы"_q);
++}
++
++[[nodiscard]] bool IsPeopleButton(const QString &text) {
++	return ButtonLastWord(text) == Fold(u"люди"_q)
++		&& !text.contains(u"💎"_q);
++}
++
++[[nodiscard]] bool IsNextPageButton(const QString &text) {
++	return text.simplified().startsWith(u"➡"_q) && !text.contains(u"💎"_q);
++}
++
++} // namespace
++
++Session::Session(not_null<Window::SessionController*> controller)
++: _controller(controller)
++, _api(&controller->session().mtp())
++, _lookupTimer([=] { lookupTimeout(); })
++, _pageTimer([=] { pageTimeout(); }) {
++	const auto session = &controller->session();
++	session->data().newItemAdded(
++	) | rpl::on_next([=](not_null<HistoryItem*> item) {
++		handle(item, false);
++	}, _lifetime);
++	session->changes().messageUpdates(
++		Data::MessageUpdate::Flag::Edited
++	) | rpl::on_next([=](const Data::MessageUpdate &update) {
++		handle(update.item, true);
++	}, _lifetime);
++	resolveBot();
++}
++
++rpl::producer<BotStatus> Session::status() const {
++	return _status.value();
++}
++
++rpl::producer<Card> Session::cards() const {
++	return _cards.events();
++}
++
++rpl::producer<Progress> Session::progress() const {
++	return _progress.events();
++}
++
++rpl::producer<GroupsResult> Session::groupsCollected() const {
++	return _groups.events();
++}
++
++rpl::producer<UsersResult> Session::usersCollected() const {
++	return _users.events();
++}
++
++rpl::producer<QString> Session::errors() const {
++	return _errors.events();
++}
++
++bool Session::ready() const {
++	return _bot != nullptr;
++}
++
++bool Session::collecting() const {
++	return _collect.has_value() || _finishing;
++}
++
++void Session::resolveBot() {
++	const auto username = QString::fromLatin1(kBotUsername);
++	const auto session = &_controller->session();
++	if (const auto peer = session->data().peerByUsername(username)) {
++		if (const auto user = peer->asUser()) {
++			_bot = user;
++			_status = BotStatus::Ready;
++			return;
++		}
++	}
++	_api.request(MTPcontacts_ResolveUsername(
++		MTP_flags(MTPcontacts_ResolveUsername::Flags(0)),
++		MTP_string(username),
++		MTP_string(QString())
++	)).done([=](const MTPcontacts_ResolvedPeer &result) {
++		result.match([&](const MTPDcontacts_resolvedPeer &data) {
++			session->data().processUsers(data.vusers());
++			session->data().processChats(data.vchats());
++			const auto peerId = peerFromMTP(data.vpeer());
++			_bot = peerId ? session->data().peer(peerId)->asUser() : nullptr;
++		});
++		_status = _bot ? BotStatus::Ready : BotStatus::Failed;
++	}).fail([=](const MTP::Error &error) {
++		Core::GgtgLog::Info(
++			u"Сквидвард"_q,
++			u"Бот не найден: "_q + error.type());
++		_status = BotStatus::Failed;
++	}).send();
++}
++
++void Session::lookup(const QString &query) {
++	const auto text = query.trimmed();
++	if (text.isEmpty()) {
++		return;
++	}
++	if (!_bot) {
++		_errors.fire(u"Бот ещё не подключён."_q);
++		return;
++	}
++	if (_collect) {
++		stop();
++	}
++	++_generation;
++	_finishing = false;
++	_check.reset();
++	_query = text;
++	_card.reset();
++	_cardItem = FullMsgId();
++	_awaitingCard = true;
++	Core::GgtgLog::Info(u"Сквидвард"_q, u"Пробив: "_q + text);
++	auto message = Api::MessageToSend(Api::SendAction(
++		_controller->session().data().history(_bot)));
++	message.textWithTags = { text, TextWithTags::Tags() };
++	_controller->session().api().sendMessage(std::move(message));
++	_lookupTimer.callOnce(kLookupTimeout);
++}
++
++void Session::lookupTimeout() {
++	if (!_awaitingCard) {
++		return;
++	}
++	_awaitingCard = false;
++	_errors.fire(u"Бот не отвечает. Попробуйте ещё раз."_q);
++}
++
++void Session::handle(not_null<HistoryItem*> item, bool edited) {
++	if (!_bot || item->history()->peer != _bot || item->out()) {
++		return;
++	}
++	const auto text = item->originalText().text;
++	if (IsPlaceholder(text)) {
++		return;
++	}
++	Core::GgtgLog::Info(u"Сквидвард"_q, u"Бот: "_q + text);
++	if (_collect) {
++		handlePage(item, edited);
++	} else if (_awaitingCard) {
++		handleCard(item, false);
++	} else if (edited && item->fullId() == _cardItem && !_finishing) {
++		// The bot sometimes fills the card in with a later edit.
++		handleCard(item, true);
++	}
++}
++
++void Session::handleCard(not_null<HistoryItem*> item, bool refresh) {
++	const auto message = ToMessage(item);
++	auto card = Card{
++		.rawText = CleanText(message.text),
++		.query = _query,
++	};
++	if (auto user = ParseUserCard(message)) {
++		card.kind = CardKind::User;
++		card.baseTitle = baseTitleFor(user->name);
++		card.user = std::move(user);
++	} else if (auto group = ParseGroupCard(message)) {
++		card.kind = CardKind::Group;
++		card.baseTitle = baseTitleFor(group->name);
++		card.group = std::move(group);
++	} else if (refresh) {
++		return; // an edit into something we can't read keeps the old card
++	}
++	_awaitingCard = false;
++	_lookupTimer.cancel();
++	_card = card;
++	_cardItem = item->fullId();
++	_cards.fire(std::move(card));
++}
++
++QString Session::baseTitleFor(const QString &name) const {
++	const auto username = UsernameFromQuery(_query);
++	if (name.isEmpty()) {
++		return username.isEmpty() ? _query : (u"@"_q + username);
++	}
++	return Data::GroupBaseTitle(name, username);
++}
++
++void Session::collect() {
++	if (collecting() || !_card || _card->kind == CardKind::Unknown) {
++		return;
++	}
++	const auto item = _controller->session().data().message(_cardItem);
++	if (!item) {
++		_errors.fire(u"Ответ бота больше не найден, пробейте заново."_q);
++		return;
++	}
++	const auto isUser = (_card->kind == CardKind::User);
++	const auto button = FindButton(
++		item,
++		isUser ? &IsGroupsButton : &IsPeopleButton);
++	if (!button) {
++		_errors.fire(isUser
++			? u"В ответе бота нет кнопки «Группы»."_q
++			: u"В ответе бота нет кнопки «Топ, люди»."_q);
++		return;
++	}
++	_collect.emplace();
++	_collect->kind = _card->kind;
++	_collect->buttonItem = _cardItem;
++	_collect->button = *button;
++	_progress.fire_copy(_collect->progress);
++	click(_cardItem, *button);
++	_pageTimer.callOnce(kFirstPageTimeout);
++}
++
++void Session::click(FullMsgId itemId, std::pair<int, int> button) {
++	Api::ActivateBotCommand(ClickHandlerContext{
++		.itemId = itemId,
++		.sessionWindow = base::make_weak(_controller),
++	}, button.first, button.second);
++}
++
++void Session::handlePage(not_null<HistoryItem*> item, bool edited) {
++	auto &c = *_collect;
++	if (!c.waitingFirst && (!edited || item->fullId() != c.listItem)) {
++		return;
++	}
++	const auto message = ToMessage(item);
++	const auto info = ParsePageInfo(message.text);
++	if (!c.waitingFirst && info && info->page == c.lastPage) {
++		return; // the same page edited again
++	}
++	c.waitingFirst = false;
++	c.listItem = item->fullId();
++	c.retries = 0;
++	_pageTimer.cancel();
++	if (info) {
++		c.lastPage = info->page;
++	}
++	if (c.kind == CardKind::User) {
++		const auto rows = ExtractGroupRows(message);
++		c.groups.insert(c.groups.end(), rows.begin(), rows.end());
++		c.progress.found = int(DedupeGroupRows(c.groups).size());
++	} else {
++		const auto rows = ExtractUserRows(message);
++		c.users.insert(c.users.end(), rows.begin(), rows.end());
++		c.progress.found = int(c.users.size());
++	}
++	c.progress.page = info ? info->page : (c.progress.page + 1);
++	c.progress.pages = info ? info->pages : 0;
++	if (info && info->total >= 0) {
++		c.progress.total = info->total;
++	}
++	_progress.fire_copy(c.progress);
++
++	const auto next = FindButton(item, &IsNextPageButton);
++	if (!next || (info && info->page >= info->pages) || --c.safety <= 0) {
++		finish(false);
++		return;
++	}
++	c.buttonItem = c.listItem;
++	c.button = *next;
++	click(c.buttonItem, c.button);
++	_pageTimer.callOnce(kPageTimeout);
++}
++
++void Session::pageTimeout() {
++	if (!_collect) {
++		return;
++	}
++	auto &c = *_collect;
++	if (c.retries++ < (c.waitingFirst ? 2 : 1)) {
++		click(c.buttonItem, c.button);
++		_pageTimer.callOnce(c.waitingFirst ? kFirstPageTimeout : kPageTimeout);
++		return;
++	}
++	_errors.fire(c.waitingFirst
++		? u"Бот не прислал список. Попробуйте ещё раз."_q
++		: u"Страница не пришла — показано то, что успели собрать."_q);
++	finish(true);
++}
++
++void Session::stop() {
++	if (_collect) {
++		finish(true);
++	}
++}
++
++void Session::finish(bool stopped) {
++	_pageTimer.cancel();
++	auto c = std::move(*_collect);
++	_collect.reset();
++	_finishing = true;
++	auto progress = c.progress;
++	progress.checking = true;
++	_progress.fire_copy(progress);
++	if (c.kind == CardKind::User) {
++		finishGroups(std::move(c.groups), stopped);
++	} else {
++		finishUsers(std::move(c.users), stopped);
++	}
++}
++
++void Session::finishGroups(std::vector<GroupRow> rows, bool stopped) {
++	auto check = GroupCheck{ .stopped = stopped, .generation = _generation };
++	for (const auto &row : DedupeGroupRows(std::move(rows))) {
++		if (!row.link.isEmpty()) {
++			++check.closed;
++		}
++		check.source.push_back({
++			.username = row.username,
++			.title = row.title,
++			.link = row.link,
++		});
++	}
++	_check = std::move(check);
++	checkNextGroup();
++}
++
++// Channels are of no use as recipients: every group with a username is
++// looked up (cache first, then contacts.resolveUsername with a pause) and
++// broadcast channels are dropped. A group that can't be checked now is kept.
++void Session::checkNextGroup() {
++	if (!_check || _check->generation != _generation) {
++		return;
++	}
++	auto &check = *_check;
++	while (check.next < check.source.size()
++		&& check.source[check.next].username.isEmpty()) {
++		check.kept.push_back(check.source[check.next++]);
++	}
++	if (check.next >= check.source.size()) {
++		auto result = GroupsResult{
++			.groups = std::move(check.kept),
++			.channelsRemoved = check.channels,
++			.closed = check.closed,
++			.stopped = check.stopped,
++		};
++		_check.reset();
++		_finishing = false;
++		_groups.fire(std::move(result));
++		return;
++	}
++	auto entry = check.source[check.next++];
++	const auto session = &_controller->session();
++	if (const auto peer = session->data().peerByUsername(entry.username)) {
++		settleGroup(std::move(entry), peer, 0);
++		return;
++	}
++	_api.request(MTPcontacts_ResolveUsername(
++		MTP_flags(MTPcontacts_ResolveUsername::Flags(0)),
++		MTP_string(entry.username),
++		MTP_string(QString())
++	)).done([=](const MTPcontacts_ResolvedPeer &result) {
++		auto peer = (PeerData*)nullptr;
++		result.match([&](const MTPDcontacts_resolvedPeer &data) {
++			session->data().processUsers(data.vusers());
++			session->data().processChats(data.vchats());
++			const auto peerId = peerFromMTP(data.vpeer());
++			peer = peerId ? session->data().peer(peerId).get() : nullptr;
++		});
++		settleGroup(entry, peer, 400);
++	}).fail([=] {
++		settleGroup(entry, nullptr, 800);
++	}).send();
++}
++
++void Session::settleGroup(
++		Data::ScrapedGroupEntry entry,
++		PeerData *peer,
++		crl::time delay) {
++	if (!_check) {
++		return;
++	}
++	const auto channel = peer ? peer->asChannel() : nullptr;
++	if (channel && !channel->isMegagroup()) {
++		++_check->channels;
++	} else {
++		if (channel) {
++			if (entry.title.isEmpty()) {
++				entry.title = channel->name();
++			}
++			entry.membersCount = std::max(
++				entry.membersCount,
++				channel->membersCount());
++		}
++		_check->kept.push_back(std::move(entry));
++	}
++	auto progress = Progress{
++		.found = int(_check->kept.size()),
++		.checking = true,
++	};
++	_progress.fire_copy(progress);
++	base::call_delayed(delay, this, [=] { checkNextGroup(); });
++}
++
++void Session::finishUsers(std::vector<UserRow> rows, bool stopped) {
++	const auto session = &_controller->session();
++	const auto generation = _generation;
++	auto names = QStringList();
++	auto ids = std::vector<uint64>();
++	auto toResolve = QVector<MTPInputUser>();
++	auto seen = base::flat_set<uint64>();
++	for (const auto &row : rows) {
++		if (!row.username.isEmpty()) {
++			names.push_back(row.username);
++			continue;
++		}
++		const auto fields = TextUtilities::MentionNameDataToFields(
++			row.mentionData);
++		if (!fields.userId || !seen.emplace(fields.userId).second) {
++			continue;
++		}
++		ids.push_back(fields.userId);
++		if (!session->data().userLoaded(UserId(fields.userId))) {
++			toResolve.push_back(MTP_inputUser(
++				MTP_long(fields.userId),
++				MTP_long(fields.accessHash)));
++		}
++	}
++	resolveUsers(std::move(toResolve), [=] {
++		if (generation != _generation) {
++			return;
++		}
++		auto all = names;
++		for (const auto id : ids) {
++			if (const auto user = session->data().userLoaded(UserId(id))) {
++				all.push_back(user->username());
++			}
++		}
++		_finishing = false;
++		_users.fire({ DedupeUsernames(all), stopped });
++	});
++}
++
++void Session::resolveUsers(QVector<MTPInputUser> pending, Fn<void()> done) {
++	if (pending.isEmpty()) {
++		done();
++		return;
++	}
++	const auto count = std::min<int>(100, pending.size());
++	auto chunk = pending.mid(0, count);
++	const auto rest = pending.mid(count);
++	_api.request(MTPusers_GetUsers(
++		MTP_vector<MTPInputUser>(std::move(chunk))
++	)).done([=](const MTPVector<MTPUser> &result) {
++		_controller->session().data().processUsers(result);
++		resolveUsers(rest, done);
++	}).fail([=] {
++		resolveUsers(rest, done);
++	}).send();
++}
++
++} // namespace Window::Squidward
+--- /dev/null	2026-09-29 15:42:53
++++ nicegram-desktop/Telegram/SourceFiles/window/ggtg_squidward_parse_test.cpp	2026-09-29 15:40:39
+@@ -0,0 +1,307 @@
++/*
++This file is part of Telegram Desktop,
++the official desktop application for the Telegram messaging service.
++
++For license and exceptions, see https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
++*/
++// Standalone checks for ggtg_squidward_parse.cpp - not part of the app build.
++// Run: Telegram/build/ggtg/test_squidward_parse.sh
++#include "window/ggtg_squidward_parse.h"
++
++#include <QtCore/QLocale>
++
++#include <cstdio>
++
++using namespace Window::Squidward;
++using namespace Qt::StringLiterals;
++
++namespace {
++
++int Failures = 0;
++
++void Check(bool ok, const char *what, int line) {
++	if (!ok) {
++		++Failures;
++		std::printf("FAIL line %d: %s\n", line, what);
++	}
++}
++
++void CheckString(
++		const QString &actual,
++		const QString &expected,
++		const char *what,
++		int line) {
++	if (actual != expected) {
++		++Failures;
++		std::printf(
++			"FAIL line %d: %s\n  actual:   \"%s\"\n  expected: \"%s\"\n",
++			line,
++			what,
++			actual.toUtf8().constData(),
++			expected.toUtf8().constData());
++	}
++}
++
++#define CHECK(x) Check((x), #x, __LINE__)
++#define CHECK_EQ(a, b) Check((a) == (b), #a " == " #b, __LINE__)
++#define CHECK_STR(a, b) CheckString((a), (b), #a, __LINE__)
++
++[[nodiscard]] Entity Ent(
++		Entity::Type type,
++		const QString &text,
++		const QString &shown,
++		const QString &data = QString()) {
++	return { type, int(text.indexOf(shown)), int(shown.size()), data };
++}
++
++void TestFoundation() {
++	CHECK_STR(Fold(u"İD"_s), u"id"_s);
++	CHECK_STR(Fold(u"ɪᴅ"_s), u"id"_s);
++	CHECK_STR(Fold(u"Кαнαл"_s), u"канал"_s);
++	CHECK_EQ(Fold(u"userŋames 🍀"_s).size(), u"userŋames 🍀"_s.size());
++	CHECK_STR(ButtonLastWord(u"👁 Группы"_s), Fold(u"группы"_s));
++	CHECK_STR(ButtonLastWord(u"🎖 Тoп, люди"_s), Fold(u"люди"_s));
++
++	const auto page = ParsePageInfo(u"Всего 1262, страница 1 из 85"_s);
++	CHECK(page.has_value());
++	CHECK_EQ(page->page, 1);
++	CHECK_EQ(page->pages, 85);
++	CHECK_EQ(page->total, 1262);
++	CHECK(!ParsePageInfo(u"Это FAMBUN"_s).has_value());
++
++	CHECK_STR(UsernameFromLink(u"https://t.me/fambun_chat"_s), u"fambun_chat"_s);
++	CHECK(UsernameFromLink(u"https://t.me/c/2361171296/896316"_s).isEmpty());
++	CHECK_STR(
++		PrivateLink(u"https://t.me/c/2361171296/896316"_s),
++		u"https://t.me/c/2361171296/896316"_s);
++	CHECK_STR(PrivateLink(u"t.me/+AbCd_ef"_s), u"t.me/+AbCd_ef"_s);
++	CHECK(PrivateLink(u"https://t.me/fambun_chat"_s).isEmpty());
++
++	CHECK_STR(UsernameFromQuery(u"@Qiuvvinn"_s), u"Qiuvvinn"_s);
++	CHECK_STR(UsernameFromQuery(u" https://t.me/fambun_chat "_s), u"fambun_chat"_s);
++	CHECK(UsernameFromQuery(u"https://t.me/c/2361171296/896316"_s).isEmpty());
++	CHECK(UsernameFromQuery(u"149474479"_s).isEmpty());
++
++	CHECK(IsPlaceholder(u"⏳ Вычисляю..."_s));
++	CHECK(!IsPlaceholder(u"Это FAMBUN"_s));
++	CHECK_STR(CleanText(u"  a  \n\n\n\nb\n"_s), u"a\n\nb"_s);
++	CHECK_STR(FormatCount(30707), QLocale(QLocale::Russian).toString(30707));
++
++	CHECK_EQ(
++		PushRecent({ u"@a"_s, u"@b"_s }, u"@B"_s, 8),
++		(QStringList{ u"@B"_s, u"@a"_s }));
++	auto many = QStringList();
++	for (auto i = 0; i != 10; ++i) {
++		many.push_back(QString::number(i));
++	}
++	CHECK_EQ(PushRecent(many, u"x"_s, 8).size(), 8);
++}
++
++[[nodiscard]] Message GroupsPage() {
++	auto m = Message();
++	m.text = u"Чаты аккаунта 149474479.\n"
++		u"👮-админ, 🔒-приватный, ✖️-вышел\n"
++		u"Посл. сообщ - чат (всего сообщений)\n\n"
++		u"12:06 FAMBUN 🐇 (1503)\n"
++		u"11:57 Teo Iŋfłuencers™.. (81)\n"
++		u"09:29 pemuluŋ jalanan (922)\n\n"
++		u"Всего 1262, страница 1 из 85"_s;
++	m.entities = {
++		Ent(Entity::Type::CustomUrl, m.text, u"149474479"_s, u"tg://user?id=149474479"_s),
++		Ent(Entity::Type::CustomUrl, m.text, u"FAMBUN 🐇"_s, u"https://t.me/fambun_chat"_s),
++		Ent(Entity::Type::CustomUrl, m.text, u"Teo Iŋfłuencers™.."_s, u"https://t.me/c/2361171296/896316"_s),
++		Ent(Entity::Type::CustomUrl, m.text, u"pemuluŋ jalanan"_s, u"https://t.me/FAMBUN_chat"_s),
++		Ent(Entity::Type::Bold, m.text, u"1262"_s),
++	};
++	return m;
++}
++
++void TestRows() {
++	const auto rows = ExtractGroupRows(GroupsPage());
++	CHECK_EQ(int(rows.size()), 3); // the account-id link is not a group
++	CHECK_STR(rows[0].username, u"fambun_chat"_s);
++	CHECK_STR(rows[0].title, u"FAMBUN 🐇"_s);
++	CHECK(rows[1].username.isEmpty());
++	CHECK_STR(rows[1].link, u"https://t.me/c/2361171296/896316"_s);
++	CHECK_STR(rows[1].title, u"Teo Iŋfłuencers™.."_s);
++
++	CHECK_EQ(int(DedupeGroupRows(rows).size()), 2);
++	auto twice = rows;
++	twice.insert(twice.end(), rows.begin(), rows.end());
++	CHECK_EQ(int(DedupeGroupRows(twice).size()), 2);
++
++	auto members = Message();
++	members.text = u"Участники чата\n"
++		u"01. ✓ sheAy fourtis - 449\n"
++		u"02. ✓ RayRed - 243\n"
++		u"03. ✓ HelperBot - 3\n\n"
++		u"Всего 8067, страница 1 из 404"_s;
++	members.entities = {
++		Ent(Entity::Type::MentionName, members.text, u"sheAy fourtis"_s, u"12345.678"_s),
++		Ent(Entity::Type::CustomUrl, members.text, u"RayRed"_s, u"https://t.me/RayRed"_s),
++		Ent(Entity::Type::CustomUrl, members.text, u"HelperBot"_s, u"https://t.me/HelperBot"_s),
++	};
++	const auto users = ExtractUserRows(members);
++	CHECK_EQ(int(users.size()), 3);
++	CHECK_STR(users[0].mentionData, u"12345.678"_s);
++	CHECK_STR(users[1].username, u"RayRed"_s);
++
++	CHECK_EQ(
++		DedupeUsernames({ u"@RayRed"_s, u"rayred"_s, u"HelperBot"_s, u""_s, u"@Mogu"_s }),
++		(QStringList{ u"RayRed"_s, u"Mogu"_s }));
++}
++
++[[nodiscard]] Message UserCardMessage() {
++	auto m = Message();
++	m.text = u"Это Qiuvviɳɳ\n"
++		u"Разнообразие сообщ. 67,15%\n"
++		u"С 13.06.2018 по сегодня 12:06\n"
++		u"30707 сообщений в 446 чатах\n"
++		u"96,16% реплаи 85,85% медиа\n"
++		u"Кружки: 0, голос: 0\n"
++		u"любимый чат: pemuluŋ jałanaŋ\n"
++		u"Искали: 2\n"
++		u"Кαнал: Proofs\n\n"
++		u"ɪᴅ: 149474479\n"
++		u"userŋames: (3 oƒ 10)\n"
++		u"| @Qiuvvinn | @RandyPlenger | @WangiWon\n"
++		u"Имена: (3 из 10)\n"
++		u"├2026-09-17 ➔ 🍀 Qiuvviɳɳ 🍀\n"
++		u"├2026-09-17 ➔ 😎 Qiuvviɳɳ 😎\n"
++		u"├2026-09-14 ➔ Qiuvviɳɳ@stakecruncher *FREPP"_s;
++	return m;
++}
++
++void TestUserCard() {
++	const auto card = ParseUserCard(UserCardMessage());
++	CHECK(card.has_value());
++	if (!card) {
++		return;
++	}
++	CHECK_STR(card->name, u"Qiuvviɳɳ"_s);
++	CHECK_STR(card->id, u"149474479"_s);
++	CHECK_STR(card->diversity, u"67,15%"_s);
++	CHECK_STR(card->activeSince, u"13.06.2018"_s);
++	CHECK_STR(card->activeUntil, u"сегодня 12:06"_s);
++	CHECK_EQ(card->messages, 30707);
++	CHECK_EQ(card->chats, 446);
++	CHECK_STR(card->replies, u"96,16%"_s);
++	CHECK_STR(card->media, u"85,85%"_s);
++	CHECK_EQ(card->roundVideos, 0);
++	CHECK_EQ(card->voices, 0);
++	CHECK_STR(card->favoriteChat, u"pemuluŋ jałanaŋ"_s);
++	CHECK_EQ(card->searched, 2);
++	CHECK_STR(card->channel, u"Proofs"_s);
++	CHECK_EQ(
++		card->usernames,
++		(QStringList{ u"Qiuvvinn"_s, u"RandyPlenger"_s, u"WangiWon"_s }));
++	CHECK_EQ(int(card->names.size()), 3);
++	if (card->names.size() == 3) {
++		CHECK_STR(card->names[0].date, u"2026-09-17"_s);
++		CHECK_STR(card->names[0].name, u"🍀 Qiuvviɳɳ 🍀"_s);
++		CHECK_STR(card->names[2].name, u"Qiuvviɳɳ@stakecruncher *FREPP"_s);
++	}
++
++	const auto lines = FormatUserDetails(*card);
++	CHECK_EQ(lines.size(), 7);
++	if (lines.size() == 7) {
++		CHECK_STR(lines[0], u"Активен с 13.06.2018 по сегодня 12:06"_s);
++		CHECK_STR(lines[1], FormatCount(30707) + u" сообщ. в "_s + FormatCount(446) + u" чатах"_s);
++		CHECK_STR(lines[3], u"Реплаи 96,16% · медиа 85,85% · кружки 0 · голос 0"_s);
++		CHECK_STR(lines[5], u"Канал: Proofs · искали: 2"_s);
++		CHECK_STR(lines[6], u"Юзернеймы: @Qiuvvinn @RandyPlenger @WangiWon"_s);
++	}
++
++	// Review focus 1: a card with most lines missing.
++	auto partial = Message();
++	partial.text = u"Это Someone\nɪᴅ: 42\n30 сообщений в 3 чатах"_s;
++	const auto small = ParseUserCard(partial);
++	CHECK(small.has_value());
++	if (small) {
++		CHECK_EQ(
++			FormatUserDetails(*small),
++			(QStringList{ FormatCount(30) + u" сообщ. в "_s + FormatCount(3) + u" чатах"_s }));
++	}
++	auto notACard = Message();
++	notACard.text = u"Ничего не найдено"_s;
++	CHECK(!ParseUserCard(notACard).has_value());
++}
++
++[[nodiscard]] Message GroupCardMessage(bool withDescription) {
++	auto m = Message();
++	m.text = u"Это ƑAMBuN 🐇🐰👯\n"
++		u"В топе # 17851 из 756778\n"
++		u"Разнообразие сообщ. 9,80%\n"
++		u"349 человek за сутки\n"
++		u"написали 579 сообщений\n"
++		u"из них 572 (98,99%) медиа\n"
++		u"0 кружков и 0 голосовых\n"
++		u"İD: 2303994538\n"
++		u"Описание:\n"
++		u"--- --- --- --- --- --- ---\n"_s
++		+ (withDescription
++			? u"Лучший чат о розыгрышах\nЗаходите!\n"_s
++			: u"\n\n"_s)
++		+ u"--- --- --- --- --- --- ---\n"
++		u"Топ за сутки:\n"
++		u"1. Ay🐰 - 25\n"
++		u"2. ołaaaa - 18\n"
++		u"3. S R - 15"_s;
++	return m;
++}
++
++void TestGroupCard() {
++	const auto card = ParseGroupCard(GroupCardMessage(true));
++	CHECK(card.has_value());
++	if (!card) {
++		return;
++	}
++	CHECK_STR(card->name, u"ƑAMBuN 🐇🐰👯"_s);
++	CHECK_STR(card->id, u"2303994538"_s);
++	CHECK_EQ(card->topPlace, 17851);
++	CHECK_EQ(card->topOf, 756778);
++	CHECK_STR(card->diversity, u"9,80%"_s);
++	CHECK_EQ(card->peopleDay, 349);
++	CHECK_EQ(card->messagesDay, 579);
++	CHECK_EQ(card->mediaDay, 572);
++	CHECK_STR(card->mediaDayPercent, u"98,99%"_s);
++	CHECK_EQ(card->roundVideosDay, 0);
++	CHECK_EQ(card->voicesDay, 0);
++	CHECK_STR(card->description, u"Лучший чат о розыгрышах\nЗаходите!"_s);
++	CHECK_EQ(int(card->topDay.size()), 3);
++	if (card->topDay.size() == 3) {
++		CHECK_STR(card->topDay[0].name, u"Ay🐰"_s);
++		CHECK_EQ(card->topDay[0].messages, 25);
++		CHECK_STR(card->topDay[2].name, u"S R"_s);
++	}
++	const auto lines = FormatGroupDetails(*card);
++	CHECK_EQ(lines.size(), 4);
++	if (lines.size() == 4) {
++		CHECK_STR(lines[0], u"В топе #"_s + FormatCount(17851) + u" из "_s + FormatCount(756778));
++		CHECK_STR(lines[1], u"За сутки: "_s + FormatCount(349) + u" человек · "_s
++			+ FormatCount(579) + u" сообщ. · медиа "_s + FormatCount(572) + u" (98,99%)"_s);
++		CHECK_STR(lines[2], u"Кружки 0 · голосовые 0"_s);
++	}
++
++	const auto empty = ParseGroupCard(GroupCardMessage(false));
++	CHECK(empty.has_value() && empty->description.isEmpty());
++
++	// A card is one kind or the other, never both.
++	CHECK(!ParseUserCard(GroupCardMessage(true)).has_value());
++	CHECK(!ParseGroupCard(UserCardMessage()).has_value());
++}
++
++} // namespace
++
++int main() {
++	TestFoundation();
++	TestRows();
++	TestUserCard();
++	TestGroupCard();
++	if (Failures) {
++		std::printf("%d check(s) failed\n", Failures);
++		return 1;
++	}
++	std::printf("All checks passed\n");
++	return 0;
++}

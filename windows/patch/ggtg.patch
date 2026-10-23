@@ -1,0 +1,4402 @@
+diff --git a/Telegram/CMakeLists.txt b/Telegram/CMakeLists.txt
+index 1c76dfa..e2ccfe2 100644
+--- a/Telegram/CMakeLists.txt
++++ b/Telegram/CMakeLists.txt
+@@ -1629,6 +1629,8 @@ PRIVATE
+     mtproto/mtp_instance.h
+     mtproto/proxy_check.cpp
+     mtproto/proxy_check.h
++    mtproto/proxy_pool.cpp
++    mtproto/proxy_pool.h
+     mtproto/sender.h
+     mtproto/session.cpp
+     mtproto/session.h
+@@ -1935,6 +1937,10 @@ PRIVATE
+     storage/storage_facade.h
+     storage/storage_media_prepare.cpp
+     storage/storage_media_prepare.h
++    storage/storage_tdata_export.cpp
++    storage/storage_tdata_export.h
++    storage/storage_tdata_import.cpp
++    storage/storage_tdata_import.h
+     storage/storage_shared_media.cpp
+     storage/storage_shared_media.h
+     storage/storage_sparse_ids_list.cpp
+diff --git a/Telegram/SourceFiles/boxes/connection_box.cpp b/Telegram/SourceFiles/boxes/connection_box.cpp
+index 104c6ae..494df4d 100644
+--- a/Telegram/SourceFiles/boxes/connection_box.cpp
++++ b/Telegram/SourceFiles/boxes/connection_box.cpp
+@@ -7,6 +7,12 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
+ */
+ #include "boxes/connection_box.h"
+ 
++#include <QtCore/QJsonDocument>
++#include <QtCore/QJsonObject>
++#include <QtNetwork/QNetworkAccessManager>
++#include <QtNetwork/QNetworkReply>
++#include <QtNetwork/QNetworkRequest>
++
+ #include "base/call_delayed.h"
+ #include "base/qt/qt_key_modifiers.h"
+ #include "base/qthelp_regex.h"
+@@ -21,11 +27,13 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
+ #include "mtproto/facade.h"
+ #include "mtproto/mtproto_config.h"
+ #include "mtproto/proxy_check.h"
++#include "mtproto/proxy_pool.h"
+ #include "mtproto/web_proxy/web_proxy_transport.h"
+ #include "qr/qr_generate.h"
+ #include "settings/settings_common.h"
+ #include "storage/localstorage.h"
+ #include "ui/basic_click_handlers.h"
++#include "ui/layers/generic_box.h"
+ #include "ui/boxes/confirm_box.h"
+ #include "ui/boxes/peer_qr_box.h"
+ #include "ui/effects/animations.h"
+@@ -682,30 +690,43 @@ public:
+ 		QWidget*,
+ 		const ProxyData &data,
+ 		Fn<void(ProxyData)> callback,
+-		Fn<void(ProxyData)> shareCallback);
++		Fn<void(ProxyData)> shareCallback,
++		// Given a callback, is expected to show some external picker (e.g.
++		// a saved proxy list) and invoke that callback with whatever the
++		// user picked there - kept as an injected callback rather than
++		// this box calling MakeProxyListPickerBox itself, since that's
++		// defined later in this file, after this class. Null (the
++		// default) just hides the "Replace" entry point.
++		Fn<void(Fn<void(ProxyData)>)> pickFromList = nullptr);
++
++	// Fills the quick-paste field from an externally-picked proxy (see
++	// pickFromList above) as if the user had typed/pasted it themselves.
++	void fillFrom(const ProxyData &proxy);
+ 
+ private:
+ 	using Type = ProxyData::Type;
+ 
+ 	void prepare() override;
+ 	void setInnerFocus() override {
+-		if (_type->current() == Type::Web) {
+-			_webHost->setFocusFast();
+-		} else {
+-			_host->setFocusFast();
+-		}
++		_quickPaste->setFocusFast();
+ 	}
+ 
+ 	void refreshButtons();
+ 	ProxyData collectData();
+ 	void save();
+ 	void share();
++	void check();
++	// Re-parses whatever is currently visible in _quickPaste into
++	// _host/_port/_user/_password/_type - called from collectData() so
++	// Save/Check/Share always act on the live field text, not just
++	// whatever was there the last time Enter was pressed.
++	void applyQuickPaste();
+ 	void setupControls(const ProxyData &data);
++	[[nodiscard]] not_null<Ui::InputField*> setupQuickPaste(
++		const ProxyData &data);
+ 	void setupTypes();
+ 	void setupSocketAddress(const ProxyData &data);
+-	void setupWebAddress(const ProxyData &data);
+ 	void setupCredentials(const ProxyData &data);
+-	void setupMtprotoCredentials(const ProxyData &data);
+ 
+ 	void addLabel(
+ 		not_null<Ui::VerticalLayout*> parent,
+@@ -714,23 +735,21 @@ private:
+ 	const bool _allowShare = false;
+ 	Fn<void(ProxyData)> _callback;
+ 	Fn<void(ProxyData)> _shareCallback;
++	Fn<void(Fn<void(ProxyData)>)> _pickFromList;
+ 
+ 	object_ptr<Ui::VerticalLayout> _content;
+ 
+ 	std::shared_ptr<Ui::RadioenumGroup<Type>> _type;
+ 
+-	QPointer<Ui::SlideWrap<>> _aboutSponsored;
++	QPointer<Ui::InputField> _quickPaste;
++	QPointer<Ui::SlideWrap<>> _aboutHttpFormat;
+ 	QPointer<HostInput> _host;
+ 	QPointer<Ui::NumberInput> _port;
+ 	QPointer<Ui::InputField> _user;
+ 	QPointer<Ui::PasswordInput> _password;
+-	QPointer<Base64UrlInput> _secret;
+-	QPointer<Ui::InputField> _webHost;
+ 
+-	QPointer<Ui::SlideWrap<Ui::VerticalLayout>> _socketAddress;
+-	QPointer<Ui::SlideWrap<Ui::VerticalLayout>> _webAddress;
++	QPointer<Ui::SlideWrap<Ui::VerticalLayout>> _addressWrap;
+ 	QPointer<Ui::SlideWrap<Ui::VerticalLayout>> _credentials;
+-	QPointer<Ui::SlideWrap<Ui::VerticalLayout>> _mtprotoCredentials;
+ 
+ };
+ 
+@@ -1469,10 +1488,12 @@ ProxyBox::ProxyBox(
+ 	QWidget*,
+ 	const ProxyData &data,
+ 	Fn<void(ProxyData)> callback,
+-	Fn<void(ProxyData)> shareCallback)
+-: _allowShare(data.type != Type::None)
++	Fn<void(ProxyData)> shareCallback,
++	Fn<void(Fn<void(ProxyData)>)> pickFromList)
++: _allowShare(data.type != Type::None && shareCallback != nullptr)
+ , _callback(std::move(callback))
+ , _shareCallback(std::move(shareCallback))
++, _pickFromList(std::move(pickFromList))
+ , _content(this) {
+ 	setupControls(data);
+ }
+@@ -1480,60 +1501,17 @@ ProxyBox::ProxyBox(
+ void ProxyBox::prepare() {
+ 	setTitle(tr::lng_proxy_edit());
+ 
+-	connect(_host.data(), &HostInput::changed, [=] {
+-		Ui::PostponeCall(_host, [=] {
+-			const auto host = _host->getLastText().trimmed();
+-			static const auto mask = QRegularExpression(
+-				u"^\\d+\\.\\d+\\.\\d+\\.\\d+:(\\d*)$"_q);
+-			const auto match = mask.match(host);
+-			if (_host->cursorPosition() == host.size()
+-				&& match.hasMatch()) {
+-				const auto port = match.captured(1);
+-				_port->setText(port);
+-				_port->setCursorPosition(port.size());
+-				_port->setFocus();
+-				_host->setText(host.mid(0, host.size() - port.size() - 1));
+-			}
+-		});
+-	});
+-	_port.data()->events(
+-	) | rpl::on_next([=](not_null<QEvent*> e) {
+-		if (e->type() == QEvent::KeyPress
+-			&& (static_cast<QKeyEvent*>(e.get())->key() == Qt::Key_Backspace)
+-			&& _port->cursorPosition() == 0) {
+-			_host->setCursorPosition(_host->getLastText().size());
+-			_host->setFocus();
+-		}
+-	}, _port->lifetime());
+-
+ 	const auto submit = [=] {
+-		if (_webHost->hasFocus()
+-			&& !_webHost->getLastText().trimmed().isEmpty()) {
+-			_secret->setFocus();
+-		} else if (_host->hasFocus()
+-			&& !_host->getLastText().trimmed().isEmpty()) {
+-			_port->setFocus();
+-		} else if (_port->hasFocus()
+-			&& !_port->getLastText().trimmed().isEmpty()) {
+-			if (_type->current() == Type::Mtproto) {
+-				_secret->setFocus();
+-			} else {
+-				_user->setFocus();
+-			}
+-		} else if (_user->hasFocus()) {
+-			_password->setFocus();
+-		} else {
+-			save();
+-		}
++		applyQuickPaste();
++		save();
+ 	};
++	_quickPaste->submits(
++	) | rpl::on_next(submit, _quickPaste->lifetime());
+ 	connect(_host.data(), &Ui::MaskedInputField::submitted, submit);
+ 	connect(_port.data(), &Ui::MaskedInputField::submitted, submit);
+ 	_user->submits(
+ 	) | rpl::on_next(submit, _user->lifetime());
+-	_webHost->submits(
+-	) | rpl::on_next(submit, _webHost->lifetime());
+ 	connect(_password.data(), &Ui::MaskedInputField::submitted, submit);
+-	connect(_secret.data(), &Ui::MaskedInputField::submitted, submit);
+ 
+ 	refreshButtons();
+ 	setDimensionsToContent(st::boxWideWidth, _content);
+@@ -1542,21 +1520,29 @@ void ProxyBox::prepare() {
+ void ProxyBox::refreshButtons() {
+ 	clearButtons();
+ 	addButton(tr::lng_settings_save(), [=] { save(); });
++	addButton(rpl::single(u"Check proxy"_q), [=] { check(); });
+ 	addButton(tr::lng_cancel(), [=] { closeBox(); });
+ 
+ 	const auto type = _type->current();
+-	if (_allowShare
+-		&& (type == Type::Socks5
+-			|| type == Type::Mtproto
+-			|| type == Type::Web)) {
++	if (_allowShare && (type == Type::Socks5)) {
+ 		addLeftButton(tr::lng_proxy_share(), [=] { share(); });
+ 	}
+ }
+ 
+ void ProxyBox::save() {
+ 	if (const auto data = collectData()) {
+-		_callback(data);
++		// closeBox() can tear this box down synchronously as part of
++		// closing its layer - _callback is a member of *this*, so grab an
++		// independent copy of it before that happens, or reading
++		// this->_callback afterwards is a use-after-free (seen as the
++		// callback appearing "empty" and throwing bad_function_call).
++		const auto callback = _callback;
++		// ...and close *before* invoking it: for the add-account flow the
++		// callback can swap out the whole window's content (a new account
++		// with no session shows the login screen), which must happen
++		// after this box has already let go of its layer, not before.
+ 		closeBox();
++		callback(data);
+ 	}
+ }
+ 
+@@ -1566,41 +1552,28 @@ void ProxyBox::share() {
+ 	}
+ }
+ 
++void ProxyBox::check() {
++	if (const auto data = collectData()) {
++		Ui::show(MakeProxyCheckBox(data), Ui::LayerOption::KeepOther);
++	}
++}
++
+ ProxyData ProxyBox::collectData() {
++	applyQuickPaste();
+ 	auto result = ProxyData();
+ 	result.type = _type->current();
+-	const auto web = (result.type == Type::Web);
+-	result.host = web
+-		? MTP::NormalizeWebProxyHost(_webHost->getLastText())
+-		: _host->getLastText().trimmed();
+-	result.port = web
+-		? 443
+-		: _port->getLastText().trimmed().toInt();
+-	result.user = (result.type == Type::Mtproto || web)
+-		? QString()
+-		: _user->getLastText();
+-	result.password = (result.type == Type::Mtproto || web)
+-		? _secret->getLastText()
+-		: _password->getLastText();
++	result.host = _host->getLastText().trimmed();
++	result.port = _port->getLastText().trimmed().toInt();
++	result.user = _user->getLastText();
++	result.password = _password->getLastText();
+ 	if (result.host.isEmpty()) {
+-		if (web) {
+-			_webHost->showError();
+-		} else {
+-			_host->showError();
+-		}
+-	} else if (!web && !result.port) {
++		_host->showError();
++	} else if (!result.port) {
+ 		_port->showError();
+-	} else if ((result.type == Type::Http || result.type == Type::Socks5)
+-		&& !result.password.isEmpty() && result.user.isEmpty()) {
++	} else if (!result.password.isEmpty() && result.user.isEmpty()) {
+ 		_user->showError();
+-	} else if ((result.type == Type::Mtproto || web) && !result.valid()) {
+-		_secret->showError();
+ 	} else if (!result) {
+-		if (web) {
+-			_webHost->showError();
+-		} else {
+-			_host->showError();
+-		}
++		_host->showError();
+ 	} else {
+ 		return result;
+ 	}
+@@ -1609,10 +1582,8 @@ ProxyData ProxyBox::collectData() {
+ 
+ void ProxyBox::setupTypes() {
+ 	const auto types = std::vector<std::pair<Type, QString>>{
+-		{ Type::Mtproto, u"MTPROTO"_q },
+ 		{ Type::Socks5, u"SOCKS5"_q },
+ 		{ Type::Http, u"HTTP"_q },
+-		{ Type::Web, u"WEB"_q },
+ 	};
+ 	for (const auto &[type, label] : types) {
+ 		_content->add(
+@@ -1623,33 +1594,27 @@ void ProxyBox::setupTypes() {
+ 				label),
+ 			st::proxyEditTypePadding);
+ 	}
+-	auto warning = _type->value(
+-	) | rpl::map([](Type type) {
+-		return (type == Type::Web)
+-			? tr::lng_proxy_web_warning(tr::now)
+-			: tr::lng_proxy_sponsor_warning(tr::now);
+-	});
+-	_aboutSponsored = _content->add(object_ptr<Ui::SlideWrap<>>(
++	_aboutHttpFormat = _content->add(object_ptr<Ui::SlideWrap<>>(
+ 		_content,
+ 		object_ptr<Ui::PaddingWrap<>>(
+ 			_content,
+ 			object_ptr<Ui::FlatLabel>(
+ 				_content,
+-				std::move(warning),
++				u"Correct format: http://ip:port:login:pass"_q,
+ 				st::boxDividerLabel),
+ 			st::proxyAboutSponsorPadding)));
+ }
+ 
+ void ProxyBox::setupSocketAddress(const ProxyData &data) {
+-	_socketAddress = _content->add(
++	_addressWrap = _content->add(
+ 		object_ptr<Ui::SlideWrap<Ui::VerticalLayout>>(
+ 			_content,
+ 			object_ptr<Ui::VerticalLayout>(_content)));
+-	const auto content = _socketAddress->entity();
+-	addLabel(content, tr::lng_proxy_address_label(tr::now));
+-	const auto address = content->add(
++	const auto section = _addressWrap->entity();
++	addLabel(section, tr::lng_proxy_address_label(tr::now));
++	const auto address = section->add(
+ 		object_ptr<Ui::FixedHeightWidget>(
+-			content,
++			section,
+ 			st::connectionHostInputField.heightMin),
+ 		st::proxyEditInputPadding);
+ 	_host = Ui::CreateChild<HostInput>(
+@@ -1671,25 +1636,10 @@ void ProxyBox::setupSocketAddress(const ProxyData &data) {
+ 			_host->height());
+ 		_host->moveToLeft(0, 0);
+ 	}, address->lifetime());
+-}
+-
+-void ProxyBox::setupWebAddress(const ProxyData &data) {
+-	_webAddress = _content->add(
+-		object_ptr<Ui::SlideWrap<Ui::VerticalLayout>>(
+-			_content,
+-			object_ptr<Ui::VerticalLayout>(_content)));
+-	const auto content = _webAddress->entity();
+-	addLabel(content, tr::lng_proxy_web_host_label(tr::now));
+-	_webHost = content->add(
+-		object_ptr<Ui::InputField>(
+-			content,
+-			st::connectionUserInputField,
+-			tr::lng_proxy_web_host_ph(),
+-			(data.type == Type::Web) ? data.host : QString()),
+-		st::proxyEditInputPadding);
+-	_webHost->setInputMethodHints(Qt::ImhUrlCharactersOnly
+-		| Qt::ImhNoAutoUppercase
+-		| Qt::ImhNoPredictiveText);
++	// Manual editing is gone from this box - only quick paste fills these
++	// fields now (see setupQuickPaste) - so they stay hidden, existing only
++	// to hold the values collectData() reads on Save.
++	_addressWrap->toggle(false, anim::type::instant);
+ }
+ 
+ void ProxyBox::setupCredentials(const ProxyData &data) {
+@@ -1714,9 +1664,7 @@ void ProxyBox::setupCredentials(const ProxyData &data) {
+ 		passwordWrap.data(),
+ 		st::connectionPasswordInputField,
+ 		tr::lng_connection_password_ph(),
+-		(data.type == Type::Mtproto || data.type == Type::Web)
+-			? QString()
+-			: data.password);
++		data.password);
+ 	_password->move(0, 0);
+ 	_password->heightValue(
+ 	) | rpl::on_next([=, wrap = passwordWrap.data()](int height) {
+@@ -1727,72 +1675,121 @@ void ProxyBox::setupCredentials(const ProxyData &data) {
+ 		_password->resize(width, _password->height());
+ 	}, _password->lifetime());
+ 	credentials->add(std::move(passwordWrap), st::proxyEditInputPadding);
++	_credentials->toggle(false, anim::type::instant);
++}
++
++void ProxyBox::applyQuickPaste() {
++	// One-line "ip:port:login:pass" quick-fill - splits on ':', with the
++	// password taking everything after the third colon so a password
++	// that itself contains ':' doesn't get truncated. An "http://" prefix
++	// selects the HTTP proxy type instead of the SOCKS5 default. Re-run on
++	// every collectData() call (Save/Check/Share), not just on Enter, so
++	// they always act on whatever is currently visible in the field.
++	auto text = _quickPaste->getLastText().trimmed();
++	auto type = Type::Socks5;
++	const auto httpPrefix = u"http://"_q;
++	if (text.startsWith(httpPrefix, Qt::CaseInsensitive)) {
++		type = Type::Http;
++		text = text.mid(httpPrefix.size());
++	}
++	const auto parts = text.split(':');
++	if (parts.size() < 2) {
++		return;
++	}
++	const auto port = parts[1].trimmed().toUShort();
++	if (!port) {
++		return;
++	}
++	_host->setText(parts[0].trimmed());
++	_port->setText(QString::number(port));
++	_user->setText(parts.size() > 2 ? parts[2].trimmed() : QString());
++	_password->setText(parts.size() > 3
++		? QStringList(parts.mid(3)).join(':').trimmed()
++		: QString());
++	_type->setValue(type);
+ }
+ 
+-void ProxyBox::setupMtprotoCredentials(const ProxyData &data) {
+-	_mtprotoCredentials = _content->add(
+-		object_ptr<Ui::SlideWrap<Ui::VerticalLayout>>(
++void ProxyBox::fillFrom(const ProxyData &proxy) {
++	auto text = proxy.host + u":"_q + QString::number(proxy.port);
++	if (!proxy.user.isEmpty() || !proxy.password.isEmpty()) {
++		text += ':' + proxy.user + ':' + proxy.password;
++	}
++	if (proxy.type == Type::Http) {
++		text = u"http://"_q + text;
++	}
++	_quickPaste->setText(text);
++	applyQuickPaste();
++	refreshButtons();
++}
++
++not_null<Ui::InputField*> ProxyBox::setupQuickPaste(const ProxyData &data) {
++	addLabel(_content, u"Вставить прокси"_q);
++	auto initial = QString();
++	if (data.type == Type::Socks5 || data.type == Type::Http) {
++		initial = data.host + u":"_q + QString::number(data.port);
++		if (!data.user.isEmpty() || !data.password.isEmpty()) {
++			initial += ':' + data.user + ':' + data.password;
++		}
++		if (data.type == Type::Http) {
++			initial = u"http://"_q + initial;
++		}
++	}
++	const auto field = _content->add(
++		object_ptr<Ui::InputField>(
+ 			_content,
+-			object_ptr<Ui::VerticalLayout>(_content)));
+-	const auto mtproto = _mtprotoCredentials->entity();
+-	addLabel(mtproto, tr::lng_proxy_credentials(tr::now));
+-
+-	auto secretWrap = object_ptr<Ui::RpWidget>(mtproto);
+-	_secret = Ui::CreateChild<Base64UrlInput>(
+-		secretWrap.data(),
+-		st::connectionUserInputField,
+-		tr::lng_connection_proxy_secret_ph(),
+-		(data.type == Type::Mtproto || data.type == Type::Web)
+-			? data.password
+-			: QString());
+-	_secret->move(0, 0);
+-	_secret->heightValue(
+-	) | rpl::on_next([=, wrap = secretWrap.data()](int height) {
+-		wrap->resize(wrap->width(), height);
+-	}, _secret->lifetime());
+-	secretWrap->widthValue(
+-	) | rpl::on_next([=](int width) {
+-		_secret->resize(width, _secret->height());
+-	}, _secret->lifetime());
+-	mtproto->add(std::move(secretWrap), st::proxyEditInputPadding);
++			st::defaultInputField,
++			rpl::single(u"ip:port:login:pass"_q),
++			initial),
++		st::proxyEditInputPadding);
++	if (_pickFromList) {
++		const auto replace = _content->add(
++			object_ptr<Ui::LinkButton>(_content, u"Заменить"_q),
++			st::proxyEditInputPadding);
++		replace->setClickedCallback([=, weak = base::make_weak(this)] {
++			_pickFromList([=](ProxyData proxy) {
++				if (const auto strong = weak.get()) {
++					strong->fillFrom(proxy);
++				}
++			});
++		});
++	}
++	return field;
+ }
+ 
+ void ProxyBox::setupControls(const ProxyData &data) {
+ 	_type = std::make_shared<Ui::RadioenumGroup<Type>>(
+-		(data.type == Type::None
+-			? Type::Mtproto
+-			: data.type));
++		(data.type == Type::Http) ? Type::Http : Type::Socks5);
+ 	_content.create(this);
+ 	_content->resizeToWidth(st::boxWideWidth);
+ 	_content->moveToLeft(0, 0);
+ 
++	const auto quickPaste = setupQuickPaste(data);
++	_quickPaste = quickPaste;
+ 	setupTypes();
+ 	setupSocketAddress(data);
+-	setupWebAddress(data);
+ 	setupCredentials(data);
+-	setupMtprotoCredentials(data);
+ 
+ 	const auto handleType = [=](Type type) {
+-		const auto web = (type == Type::Web);
+-		const auto credentialsShown
+-			= (type == Type::Http || type == Type::Socks5);
+-		const auto mtprotoShown = (type == Type::Mtproto || web);
+-		_socketAddress->toggle(!web, anim::type::instant);
+-		_webAddress->toggle(web, anim::type::instant);
+-		_credentials->toggle(credentialsShown, anim::type::instant);
+-		_mtprotoCredentials->toggle(mtprotoShown, anim::type::instant);
+-		_aboutSponsored->toggle(mtprotoShown, anim::type::instant);
+-		const auto credentialsPolicy = credentialsShown
+-			? Qt::StrongFocus
+-			: Qt::NoFocus;
+-		_user->rawTextEdit()->setFocusPolicy(credentialsPolicy);
+-		_password->setFocusPolicy(credentialsPolicy);
+-		_secret->setFocusPolicy(
+-			mtprotoShown ? Qt::StrongFocus : Qt::NoFocus);
+-		_webHost->setFocusPolicy(web ? Qt::StrongFocus : Qt::NoFocus);
++		const auto httpShown = (type == Type::Http);
++		_aboutHttpFormat->toggle(httpShown, anim::type::instant);
++		_user->rawTextEdit()->setFocusPolicy(Qt::NoFocus);
++		_password->setFocusPolicy(Qt::NoFocus);
+ 	};
++	const auto httpPrefix = u"http://"_q;
+ 	_type->setChangedCallback([=](Type type) {
+ 		handleType(type);
++		const auto current = quickPaste->getLastText();
++		if (type == Type::Http) {
++			if (!current.isEmpty()
++				&& !current.startsWith(httpPrefix, Qt::CaseInsensitive)) {
++				quickPaste->setText(httpPrefix + current);
++				quickPaste->setCursorPosition(
++					quickPaste->getLastText().size());
++			}
++		} else if (current.startsWith(httpPrefix, Qt::CaseInsensitive)) {
++			quickPaste->setText(current.mid(httpPrefix.size()));
++			quickPaste->setCursorPosition(quickPaste->getLastText().size());
++		}
+ 		refreshButtons();
+ 	});
+ 	handleType(_type->current());
+@@ -1814,6 +1811,409 @@ using Checker = MTP::ProxyCheckConnection;
+ 
+ } // namespace
+ 
++[[nodiscard]] object_ptr<Ui::BoxContent> MakeProxyListPickerBox(
++	const MTP::ProxyData &current,
++	Fn<void(const MTP::ProxyData &proxy)> submit);
++
++object_ptr<Ui::BoxContent> MakeAccountProxyBox(
++		not_null<Main::Account*> account) {
++	const auto current = account->proxyOverride();
++	const auto submit = [=](const ProxyData &result) {
++		account->setProxyOverride(result);
++		if (result.type != ProxyData::Type::None) {
++			MTP::GlobalProxyPool().removeMatching(result);
++		}
++	};
++	// Always land on the actual editor, showing the account's current
++	// proxy pre-filled and ready to save as-is - jumping straight to the
++	// list picker whenever any saved list existed (skipping this view
++	// entirely) meant there was no way to just look at what's already set.
++	// "Replace" inside the box below is the way into that same picker now.
++	const auto pickFromList = [=](Fn<void(ProxyData)> apply) {
++		Ui::show(
++			MakeProxyListPickerBox(current, [=](const MTP::ProxyData &proxy) {
++				apply(proxy);
++			}),
++			Ui::LayerOption::KeepOther);
++	};
++	return Box<ProxyBox>(
++		current,
++		submit,
++		Fn<void(ProxyData)>(),
++		pickFromList);
++}
++
++object_ptr<Ui::BoxContent> MakeManualProxyBox(
++		Fn<void(const MTP::ProxyData &proxy)> submit) {
++	return Box<ProxyBox>(
++		ProxyData(),
++		[=](const ProxyData &result) { submit(result); },
++		Fn<void(ProxyData)>());
++}
++
++[[nodiscard]] QString DescribeProxyPoolEntry(const MTP::ProxyData &entry) {
++	auto result = entry.host + u":"_q + QString::number(entry.port);
++	if (!entry.user.isEmpty()) {
++		result += u" ("_q + entry.user + ')';
++	}
++	return result;
++}
++
++[[nodiscard]] QString DescribeProxyList(const MTP::ProxyList &list) {
++	const auto name = list.name.isEmpty() ? u"(unnamed)"_q : list.name;
++	return name + u" ("_q + QString::number(list.entries.size()) + ')';
++}
++
++object_ptr<Ui::BoxContent> MakeProxyListPickerBox(
++		const MTP::ProxyData &current,
++		Fn<void(const MTP::ProxyData &proxy)> submit) {
++	return Box([=](not_null<Ui::GenericBox*> box) {
++		box->setTitle(rpl::single(u"Choose a proxy list"_q));
++		const auto &lists = MTP::GlobalProxyPool().lists();
++		for (auto i = 0; i != int(lists.size()); ++i) {
++			if (lists[i].entries.empty()) {
++				continue;
++			}
++			const auto button = box->addRow(object_ptr<Ui::SettingsButton>(
++				box.get(),
++				rpl::single(DescribeProxyList(lists[i])),
++				st::settingsButton));
++			button->setAcceptBoth(true);
++			button->clicks(
++			) | rpl::on_next([=](Qt::MouseButton) {
++				// Peek, don't take: the entry is only actually removed
++				// from its list once the caller confirms the add it was
++				// used for succeeded (see ProxyPool::removeMatching) -
++				// otherwise a failed attempt would silently burn through
++				// the whole pool for nothing.
++				const auto picked = MTP::GlobalProxyPool().peek(i);
++				// Close this transient box *before* invoking submit(),
++				// which may swap out the whole window's content (a new
++				// account with no session shows the login screen) - if
++				// that runs while this box still thinks it's on top,
++				// the transition can silently get lost.
++				box->closeBox();
++				if (picked) {
++					submit(*picked);
++				}
++			}, button->lifetime());
++		}
++		box->addButton(rpl::single(u"Enter manually..."_q), [=] {
++			box->closeBox();
++			Ui::show(Box<ProxyBox>(
++				current,
++				[=](const ProxyData &result) { submit(result); },
++				Fn<void(ProxyData)>()));
++		});
++		box->addButton(tr::lng_cancel(), [=] { box->closeBox(); });
++	});
++}
++
++object_ptr<Ui::BoxContent> MakeNewProxyBox(
++		Fn<void(const MTP::ProxyData &proxy)> submit) {
++	const auto &lists = MTP::GlobalProxyPool().lists();
++	const auto hasAny = ranges::any_of(lists, [](const MTP::ProxyList &list) {
++		return !list.entries.empty();
++	});
++	if (!hasAny) {
++		return MakeManualProxyBox(submit);
++	}
++	return MakeProxyListPickerBox(MTP::ProxyData(), submit);
++}
++
++object_ptr<Ui::BoxContent> MakeMultiProxyBox(
++		Fn<void(Fn<MTP::ProxyData()> nextProxy)> submit) {
++	const auto &lists = MTP::GlobalProxyPool().lists();
++	const auto hasAny = ranges::any_of(lists, [](const MTP::ProxyList &list) {
++		return !list.entries.empty();
++	});
++	if (!hasAny) {
++		// No lists to pull several distinct entries from - the one proxy
++		// typed in manually ends up shared by every imported account.
++		return MakeManualProxyBox([=](const MTP::ProxyData &proxy) {
++			submit([proxy] { return proxy; });
++		});
++	}
++	return Box([=](not_null<Ui::GenericBox*> box) {
++		box->setTitle(rpl::single(u"Choose a proxy list"_q));
++		for (auto i = 0; i != int(lists.size()); ++i) {
++			if (lists[i].entries.empty()) {
++				continue;
++			}
++			const auto button = box->addRow(object_ptr<Ui::SettingsButton>(
++				box.get(),
++				rpl::single(DescribeProxyList(lists[i])),
++				st::settingsButton));
++			button->setAcceptBoth(true);
++			button->clicks(
++			) | rpl::on_next([=](Qt::MouseButton) {
++				box->closeBox();
++				// Pulls a fresh, distinct entry from this same list for
++				// every account being imported - once the list runs dry,
++				// the rest fall back to a placeholder that can never
++				// actually connect, rather than silently sharing one
++				// proxy or connecting unproxied.
++				submit([i] {
++					if (const auto taken = MTP::GlobalProxyPool().take(i)) {
++						return *taken;
++					}
++					return MTP::UnreachableProxyPlaceholder();
++				});
++			}, button->lifetime());
++		}
++		box->addButton(rpl::single(u"Enter manually..."_q), [=] {
++			box->closeBox();
++			Ui::show(MakeManualProxyBox([=](const MTP::ProxyData &proxy) {
++				submit([proxy] { return proxy; });
++			}));
++		});
++		box->addButton(tr::lng_cancel(), [=] { box->closeBox(); });
++	});
++}
++
++object_ptr<Ui::BoxContent> MakeProxyListEditorBox(int listIndex) {
++	return Box([=](not_null<Ui::GenericBox*> box) {
++		const auto &lists = MTP::GlobalProxyPool().lists();
++		if (listIndex < 0 || listIndex >= int(lists.size())) {
++			box->closeBox();
++			return;
++		}
++		box->setTitle(rpl::single(u"Edit proxy list"_q));
++
++		const auto nameField = box->addRow(object_ptr<Ui::InputField>(
++			box.get(),
++			st::defaultInputField,
++			rpl::single(u"List name"_q),
++			lists[listIndex].name));
++		nameField->submits(
++		) | rpl::on_next([=] {
++			MTP::GlobalProxyPool().renameList(
++				listIndex,
++				nameField->getLastText().trimmed());
++		}, nameField->lifetime());
++
++		Ui::AddSkip(box->verticalLayout());
++		const auto &entries = lists[listIndex].entries;
++		if (entries.empty()) {
++			box->addRow(object_ptr<Ui::FlatLabel>(
++				box.get(),
++				u"List is empty."_q,
++				st::boxLabel));
++		} else {
++			for (auto i = 0; i != int(entries.size()); ++i) {
++				const auto row = box->addRow(object_ptr<Ui::SettingsButton>(
++					box.get(),
++					rpl::single(
++						u"✕ "_q + DescribeProxyPoolEntry(entries[i])),
++					st::settingsButton));
++				row->setAcceptBoth(true);
++				row->clicks(
++				) | rpl::on_next([=](Qt::MouseButton) {
++					MTP::GlobalProxyPool().removeEntry(listIndex, i);
++					box->closeBox();
++					Ui::show(MakeProxyListEditorBox(listIndex));
++				}, row->lifetime());
++			}
++		}
++
++		Ui::AddSkip(box->verticalLayout());
++		Ui::AddDivider(box->verticalLayout());
++		Ui::AddSkip(box->verticalLayout());
++
++		const auto addField = box->addRow(object_ptr<Ui::InputField>(
++			box.get(),
++			st::defaultInputField,
++			Ui::InputField::Mode::MultiLine,
++			rpl::single(u"ip:port:login:pass (one per line)"_q)));
++		box->addButton(rpl::single(u"Add"_q), [=] {
++			MTP::GlobalProxyPool().renameList(
++				listIndex,
++				nameField->getLastText().trimmed());
++			MTP::GlobalProxyPool().addLines(listIndex, addField->getLastText());
++			box->closeBox();
++			Ui::show(MakeProxyListEditorBox(listIndex));
++		});
++		box->addButton(rpl::single(u"Delete this list"_q), [=] {
++			MTP::GlobalProxyPool().removeList(listIndex);
++			box->closeBox();
++			Ui::show(MakeProxyPoolManagerBox());
++		});
++		box->addButton(tr::lng_close(), [=] { box->closeBox(); });
++	});
++}
++
++object_ptr<Ui::BoxContent> MakeProxyPoolManagerBox() {
++	return Box([=](not_null<Ui::GenericBox*> box) {
++		box->setTitle(rpl::single(u"Proxy lists"_q));
++		const auto &lists = MTP::GlobalProxyPool().lists();
++		if (lists.empty()) {
++			box->addRow(object_ptr<Ui::FlatLabel>(
++				box.get(),
++				u"No lists yet - create one below."_q,
++				st::boxLabel));
++		} else {
++			for (auto i = 0; i != int(lists.size()); ++i) {
++				const auto row = box->addRow(object_ptr<Ui::SettingsButton>(
++					box.get(),
++					rpl::single(DescribeProxyList(lists[i])),
++					st::settingsButton));
++				row->setAcceptBoth(true);
++				row->clicks(
++				) | rpl::on_next([=](Qt::MouseButton) {
++					box->closeBox();
++					Ui::show(MakeProxyListEditorBox(i));
++				}, row->lifetime());
++			}
++		}
++
++		Ui::AddSkip(box->verticalLayout());
++		Ui::AddDivider(box->verticalLayout());
++		Ui::AddSkip(box->verticalLayout());
++
++		const auto nameField = box->addRow(object_ptr<Ui::InputField>(
++			box.get(),
++			st::defaultInputField,
++			rpl::single(u"New list name (e.g. India)"_q)));
++		box->addButton(rpl::single(u"Create list"_q), [=] {
++			const auto name = nameField->getLastText().trimmed();
++			if (name.isEmpty()) {
++				return;
++			}
++			const auto index = MTP::GlobalProxyPool().addList(name);
++			box->closeBox();
++			Ui::show(MakeProxyListEditorBox(index));
++		});
++		box->addButton(tr::lng_close(), [=] { box->closeBox(); });
++	});
++}
++
++object_ptr<Ui::BoxContent> MakeProxyCheckBox(const MTP::ProxyData &proxy) {
++	return Box([=](not_null<Ui::GenericBox*> box) {
++		box->setTitle(rpl::single(u"Proxy check"_q));
++		const auto label = box->addRow(object_ptr<Ui::FlatLabel>(
++			box.get(),
++			u"Checking..."_q,
++			st::boxLabel));
++		box->addButton(tr::lng_close(), [=] { box->closeBox(); });
++
++		if (proxy.type == ProxyData::Type::None || proxy.host.isEmpty()) {
++			label->setText(u"No proxy entered to check."_q);
++			return;
++		} else if (proxy.type == ProxyData::Type::Mtproto) {
++			label->setText(u"MTProto proxies can't be checked this way - "
++				"they only relay Telegram's own protocol, not generic "
++				"HTTP requests. If it lets this account connect at all, "
++				"it's working."_q);
++			return;
++		}
++
++		struct State final : QObject {
++			QNetworkAccessManager manager;
++		};
++		const auto state = box->lifetime().make_state<State>();
++		state->manager.setProxy(MTP::ToNetworkProxy(proxy));
++		const auto weak = base::make_weak(box);
++
++		const auto showIp = [=](const QString &ip, const QString &country) {
++			auto text = TextWithEntities{ u"Proxy is working. Exit IP: "_q };
++			text.append(Ui::Text::Link(ip));
++			if (!country.isEmpty()) {
++				text.append(u" ("_q + country + u")"_q);
++			}
++			label->setMarkedText(text);
++			label->setClickHandlerFilter([=](const auto &...) {
++				TextUtilities::SetClipboardText(TextForMimeData::Simple(ip));
++				box->uiShow()->showToast(u"IP copied to clipboard"_q);
++				return false;
++			});
++		};
++		// ipify is the last-resort fallback (IP only, no country) if
++		// neither geo-lookup service below responds.
++		const auto checkViaIpify = [=] {
++			auto request = QNetworkRequest(QUrl(u"https://api.ipify.org"_q));
++			const auto reply = state->manager.get(request);
++			QObject::connect(reply, &QNetworkReply::finished, [=] {
++				if (!weak) {
++					reply->deleteLater();
++					return;
++				}
++				if (reply->error() != QNetworkReply::NoError) {
++					label->setText(
++						u"Proxy is not working: "_q + reply->errorString());
++				} else {
++					const auto ip = QString::fromUtf8(
++						reply->readAll()).trimmed();
++					if (ip.isEmpty()) {
++						label->setText(
++							u"Proxy is not working: bad response."_q);
++					} else {
++						showIp(ip, QString());
++					}
++				}
++				reply->deleteLater();
++			});
++		};
++		// ipapi.co as a secondary source, tried only if ip-api.com itself
++		// is unreachable through this proxy (not just "status":"fail").
++		const auto checkViaIpapi = [=] {
++			auto request = QNetworkRequest(QUrl(u"https://ipapi.co/json/"_q));
++			const auto reply = state->manager.get(request);
++			QObject::connect(reply, &QNetworkReply::finished, [=] {
++				if (!weak) {
++					reply->deleteLater();
++					return;
++				}
++				if (reply->error() != QNetworkReply::NoError) {
++					reply->deleteLater();
++					checkViaIpify();
++					return;
++				}
++				const auto object = QJsonDocument::fromJson(
++					reply->readAll()).object();
++				const auto ip = object.value(u"ip"_q).toString();
++				const auto country = object.value(
++					u"country_name"_q).toString();
++				reply->deleteLater();
++				if (ip.isEmpty()) {
++					checkViaIpify();
++					return;
++				}
++				showIp(ip, country);
++			});
++		};
++
++		// ip-api.com is the primary source: unlike ipapi.co, it doesn't
++		// reject requests from proxy/hosting/datacenter IP ranges with a
++		// blanket 403, which is exactly what most of these proxies are.
++		// HTTP-only on the free tier, but that's fine - this goes through
++		// the proxy being tested either way, not a direct connection.
++		auto request = QNetworkRequest(QUrl(u"http://ip-api.com/json/"_q));
++		const auto reply = state->manager.get(request);
++		QObject::connect(reply, &QNetworkReply::finished, [=] {
++			if (!weak) {
++				reply->deleteLater();
++				return;
++			}
++			if (reply->error() != QNetworkReply::NoError) {
++				reply->deleteLater();
++				checkViaIpapi();
++				return;
++			}
++			const auto object = QJsonDocument::fromJson(
++				reply->readAll()).object();
++			const auto ip = object.value(u"query"_q).toString();
++			const auto country = object.value(u"country"_q).toString();
++			const auto ok = object.value(u"status"_q).toString() == u"success"_q;
++			reply->deleteLater();
++			if (!ok || ip.isEmpty()) {
++				checkViaIpapi();
++				return;
++			}
++			showIp(ip, country);
++		});
++	});
++}
++
+ ProxiesBoxController::ProxiesBoxController(not_null<Main::Account*> account)
+ : _account(account)
+ , _settings(Core::App().settings().proxy())
+diff --git a/Telegram/SourceFiles/boxes/connection_box.h b/Telegram/SourceFiles/boxes/connection_box.h
+index 02717ab..b4844f8 100644
+--- a/Telegram/SourceFiles/boxes/connection_box.h
++++ b/Telegram/SourceFiles/boxes/connection_box.h
+@@ -34,6 +34,46 @@ namespace Window {
+ class SessionController;
+ } // namespace Window
+ 
++// Edits a single account's own proxy override (Main::Account::proxyOverride/
++// setProxyOverride), independent of the app-wide proxy list/settings above.
++[[nodiscard]] object_ptr<Ui::BoxContent> MakeAccountProxyBox(
++	not_null<Main::Account*> account);
++
++// Prompts for a one-off proxy with no account attached yet - for setting a
++// proxy up front, before a not-yet-created account's first connection
++// (e.g. tdata import). Calls submit() only if the user actually saves.
++// If MTP::GlobalProxyPool() has any non-empty list, offers to pick a list
++// by name first (taking its first entry, which is then removed) before
++// falling back to manual entry.
++[[nodiscard]] object_ptr<Ui::BoxContent> MakeNewProxyBox(
++	Fn<void(const MTP::ProxyData &proxy)> submit);
++
++// Same idea, but for importing several accounts at once (e.g. a tdata
++// folder with multiple accounts in it) where each one should end up on its
++// *own* proxy rather than sharing one. If a list is picked, submit() gets a
++// generator that hands out a fresh, distinct entry from that list each time
++// it's called - once the list runs out, it returns
++// MTP::UnreachableProxyPlaceholder() instead of falling back to manual/
++// direct, so extra accounts stay proxied-but-disconnected until the user
++// sets a real proxy for them. Manual entry has only one value to give, so
++// every account ends up sharing it.
++[[nodiscard]] object_ptr<Ui::BoxContent> MakeMultiProxyBox(
++	Fn<void(Fn<MTP::ProxyData()> nextProxy)> submit);
++
++// Top-level manager: shows all named proxy lists (e.g. "India",
++// "Indonesia") with their counts, lets the user create a new one, and
++// opens a per-list editor (rename, bulk-add "host:port:login:password"
++// lines, remove entries, delete the list) when one is picked.
++[[nodiscard]] object_ptr<Ui::BoxContent> MakeProxyPoolManagerBox();
++
++// Makes a plain HTTPS request through the given proxy to an external
++// IP-echo service and shows the result - proves the proxy actually works
++// and which exit IP it connects through. MTProto-type proxies can't be
++// checked this way (they only relay Telegram's own protocol, not generic
++// HTTP), the box says so instead of silently testing a direct connection.
++[[nodiscard]] object_ptr<Ui::BoxContent> MakeProxyCheckBox(
++	const MTP::ProxyData &proxy);
++
+ class ProxiesBoxController {
+ public:
+ 	using ProxyData = MTP::ProxyData;
+diff --git a/Telegram/SourceFiles/core/launcher.cpp b/Telegram/SourceFiles/core/launcher.cpp
+index ef9f96f..0d60ace 100644
+--- a/Telegram/SourceFiles/core/launcher.cpp
++++ b/Telegram/SourceFiles/core/launcher.cpp
+@@ -247,6 +247,18 @@ bool CheckPortableVersionFolder() {
+ 		return false;
+ 	}
+ 
++	// Portable-next-to-tdata: if a "tdata" folder sits right next to the
++	// executable, run entirely from here (no install, no %APPDATA%), the
++	// same way the official portable build does with its own marker
++	// folder. Lets you keep any number of independent copies side by
++	// side, each next to its own tdata.
++	if (!cAlphaVersion()
++		&& !QDir(cExeDir() + u"TelegramForcePortable"_q).exists()
++		&& QDir(cExeDir() + u"tdata"_q).exists()) {
++		cForceWorkingDir(cExeDir());
++		return true;
++	}
++
+ 	const auto portable = cExeDir() + u"TelegramForcePortable"_q;
+ 	QFile key(portable + u"/tdata/alpha"_q);
+ 	if (cAlphaVersion()) {
+diff --git a/Telegram/SourceFiles/core/version.h b/Telegram/SourceFiles/core/version.h
+index 137f370..94fe2e5 100644
+--- a/Telegram/SourceFiles/core/version.h
++++ b/Telegram/SourceFiles/core/version.h
+@@ -18,7 +18,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
+ #endif // TDESKTOP_ALLOW_CLOSED_ALPHA
+ 
+ // used in Updater.cpp and Setup.iss for Windows
+-constexpr auto AppId = "{53F49750-6209-4FBF-9CA8-7A333C87D1ED}"_cs;
++constexpr auto AppId = "{7C8B1E2A-4F3D-4A6E-9B5C-2D8E6F1A9C3B}"_cs;
+ constexpr auto AppNameOld = "Telegram Win (Unofficial)"_cs;
+ constexpr auto AppName = "Telegram Desktop"_cs;
+ constexpr auto AppFile = "Telegram"_cs;
+diff --git a/Telegram/SourceFiles/intro/intro_widget.cpp b/Telegram/SourceFiles/intro/intro_widget.cpp
+index f188e0c..5902387 100644
+--- a/Telegram/SourceFiles/intro/intro_widget.cpp
++++ b/Telegram/SourceFiles/intro/intro_widget.cpp
+@@ -7,6 +7,8 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
+ */
+ #include "intro/intro_widget.h"
+ 
++#include <QtWidgets/QFileDialog>
++
+ #include "intro/intro_start.h"
+ #include "intro/intro_phone.h"
+ #include "intro/intro_qr.h"
+@@ -34,9 +36,12 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
+ #include "ui/wrap/fade_wrap.h"
+ #include "ui/ui_utility.h"
+ #include "boxes/abstract_box.h"
++#include "boxes/connection_box.h"
+ #include "core/update_checker.h"
+ #include "core/application.h"
+ #include "mtproto/mtproto_dc_options.h"
++#include "mtproto/mtproto_proxy_data.h"
++#include "mtproto/proxy_pool.h"
+ #include "window/window_slide_animation.h"
+ #include "window/window_connecting_widget.h"
+ #include "window/window_controller.h"
+@@ -89,6 +94,12 @@ Widget::Widget(
+ 		this,
+ 		tr::lng_menu_settings(),
+ 		st::defaultBoxButton))
++, _importTdata(
++	this,
++	object_ptr<Ui::RoundButton>(
++		this,
++		rpl::single(u"Import tdata"_q),
++		st::defaultBoxButton))
+ , _next(
+ 	this,
+ 	object_ptr<Ui::RoundButton>(this, nullptr, *_nextStyle))
+@@ -97,6 +108,46 @@ Widget::Widget(
+ 		account,
+ 		rpl::single(true))) {
+ 	_settings->entity()->setTextTransform(Ui::RoundButtonTextTransform::ToUpper);
++	_importTdata->entity()->setTextTransform(
++		Ui::RoundButtonTextTransform::ToUpper);
++	_importTdata->entity()->setClickedCallback([=] {
++		// A proxy is mandatory here too: no "skip" path, so an imported
++		// session never makes its first connection from this machine's
++		// own direct/real IP.
++		Ui::show(MakeMultiProxyBox([=](Fn<MTP::ProxyData()> nextProxy) {
++			const auto folder = QFileDialog::getExistingDirectory(
++				nullptr,
++				u"Select a tdata folder to import"_q);
++			if (folder.isEmpty()) {
++				return;
++			}
++			auto &domain = Core::App().domain();
++			if (domain.accounts().size() >= domain.maxAccounts()) {
++				Ui::show(Ui::MakeInformBox(u"Account limit reached."_q));
++				return;
++			}
++			// nextProxy() hands out a fresh entry per account and already
++			// only consumes a pool entry once that account is confirmed
++			// added - nothing left to clean up here either way.
++			const auto imported = domain.addFromTdata(
++				folder,
++				MTP::Environment::Production,
++				nextProxy);
++			if (!imported.empty()) {
++				domain.activate(imported.front());
++				if (imported.size() > 1) {
++					Ui::show(Ui::MakeInformBox(
++						u"Imported %1 accounts from this tdata folder. Any "
++						u"that didn't get a real proxy (list ran out) will "
++						u"show disconnected - set one via right-click on "
++						u"the account."_q.arg(imported.size())));
++				}
++			} else {
++				Ui::show(Ui::MakeInformBox(
++					u"Couldn't import this tdata folder: it's either unreadable, or its account(s) are already added."_q));
++			}
++		}));
++	});
+ 	controller->setDefaultFloatPlayerDelegate(floatPlayerDelegate());
+ 
+ 	getData()->country = ComputeNewAccountCountry();
+@@ -421,6 +472,7 @@ void Widget::historyMove(StackAction action, Animate animate) {
+ 
+ 	auto stepHasCover = getStep()->hasCover();
+ 	_settings->toggle(!stepHasCover, anim::type::normal);
++	_importTdata->toggle(!stepHasCover, anim::type::normal);
+ 	if (_testModeLabel) {
+ 		_testModeLabel->toggle(!stepHasCover, anim::type::normal);
+ 	}
+@@ -450,6 +502,7 @@ void Widget::fixOrder() {
+ 	if (_update) _update->raise();
+ 	if (_changeLanguage) _changeLanguage->raise();
+ 	_settings->raise();
++	_importTdata->raise();
+ 	_back->raise();
+ 	floatPlayerRaiseAll();
+ 	_connecting->raise();
+@@ -459,6 +512,7 @@ void Widget::moveToStep(Step *step, StackAction action, Animate animate) {
+ 	appendStep(step);
+ 	_back->raise();
+ 	_settings->raise();
++	_importTdata->raise();
+ 	if (_update) {
+ 		_update->raise();
+ 	}
+@@ -714,6 +768,7 @@ void Widget::showControls() {
+ 	_connecting->setForceHidden(false);
+ 	auto hasCover = getStep()->hasCover();
+ 	_settings->toggle(!hasCover, anim::type::instant);
++	_importTdata->toggle(!hasCover, anim::type::instant);
+ 	if (_testModeLabel) {
+ 		_testModeLabel->toggle(!hasCover, anim::type::instant);
+ 	}
+@@ -764,6 +819,7 @@ void Widget::hideControls() {
+ 	_next->hide(anim::type::instant);
+ 	_connecting->setForceHidden(true);
+ 	_settings->hide(anim::type::instant);
++	_importTdata->hide(anim::type::instant);
+ 	if (_testModeLabel) _testModeLabel->hide(anim::type::instant);
+ 	if (_update) _update->hide(anim::type::instant);
+ 	if (_changeLanguage) _changeLanguage->hide(anim::type::instant);
+@@ -835,6 +891,9 @@ void Widget::updateControlsGeometry() {
+ 		getStep()->hasCover() ? st::introCoverHeight : 0,
+ 		shown);
+ 	_settings->moveToRight(skip, controlsTop + skip);
++	_importTdata->moveToRight(
++		skip,
++		_settings->y() + _settings->height() + skip);
+ 	if (_testModeLabel) {
+ 		_testModeLabel->moveToRight(
+ 			skip + _settings->width() + skip,
+diff --git a/Telegram/SourceFiles/intro/intro_widget.h b/Telegram/SourceFiles/intro/intro_widget.h
+index 511f754..bad8253 100644
+--- a/Telegram/SourceFiles/intro/intro_widget.h
++++ b/Telegram/SourceFiles/intro/intro_widget.h
+@@ -206,6 +206,7 @@ private:
+ 	object_ptr<Ui::FadeWrap<Ui::IconButton>> _back;
+ 	object_ptr<Ui::FadeWrap<Ui::RoundButton>> _update = { nullptr };
+ 	object_ptr<Ui::FadeWrap<Ui::RoundButton>> _settings;
++	object_ptr<Ui::FadeWrap<Ui::RoundButton>> _importTdata;
+ 	object_ptr<Ui::FadeWrap<Ui::FlatLabel>> _testModeLabel = { nullptr };
+ 
+ 	object_ptr<Ui::FadeWrap<Ui::RoundButton>> _next;
+diff --git a/Telegram/SourceFiles/main/main_account.cpp b/Telegram/SourceFiles/main/main_account.cpp
+index 2721c7a..76e7442 100644
+--- a/Telegram/SourceFiles/main/main_account.cpp
++++ b/Telegram/SourceFiles/main/main_account.cpp
+@@ -20,6 +20,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
+ #include "window/window_controller.h"
+ #include "media/audio/media_audio.h"
+ #include "mtproto/mtproto_config.h"
++#include "mtproto/proxy_pool.h"
+ #include "mainwidget.h"
+ #include "api/api_updates.h"
+ #include "ui/ui_utility.h"
+@@ -44,6 +45,25 @@ constexpr auto kWideIdsTag = ~uint64(0);
+ 
+ } // namespace
+ 
++UserId PeekAuthorizationUserId(const QByteArray &serialized) {
++	QDataStream stream(serialized);
++	stream.setVersion(QDataStream::Qt_5_1);
++
++	const auto legacyUserId = Serialize::read<qint32>(stream);
++	const auto legacyMainDcId = Serialize::read<qint32>(stream);
++	auto userId = quint64();
++	if (((uint64(legacyUserId) << 32) | uint64(legacyMainDcId))
++		== kWideIdsTag) {
++		userId = Serialize::read<quint64>(stream);
++	} else {
++		userId = uint64(legacyUserId);
++	}
++	if (stream.status() != QDataStream::Ok) {
++		return UserId();
++	}
++	return UserId(userId);
++}
++
+ Account::Account(not_null<Domain*> domain, const QString &dataName, int index)
+ : _domain(domain)
+ , _local(std::make_unique<Storage::Account>(
+@@ -274,6 +294,59 @@ void Account::setMtpMainDcId(MTP::DcId mainDcId) {
+ 	_mtpFields.mainDcId = mainDcId;
+ }
+ 
++void Account::setMtpProxyOverride(const MTP::ProxyData &proxy) {
++	Expects(!_mtp);
++
++	_mtpFields.proxyOverride = proxy;
++}
++
++MTP::ProxyData Account::proxyOverride() const {
++	return local().readProxySettings();
++}
++
++void Account::setProxyOverride(const MTP::ProxyData &proxy) {
++	local().writeProxySettings(proxy);
++	if (_mtp) {
++		_mtp->setProxyOverride(proxy);
++	}
++}
++
++QString Account::folderTag() const {
++	return local().readFolderTag();
++}
++
++void Account::setFolderTag(const QString &folder) {
++	local().writeFolderTag(folder);
++}
++
++bool Account::pinned() const {
++	return local().readPinned();
++}
++
++void Account::setPinned(bool pinned) {
++	local().writePinned(pinned);
++}
++
++bool Account::muted() const {
++	return local().readPref<bool>("account_muted");
++}
++
++void Account::setMuted(bool muted) {
++	local().writePref<bool>("account_muted", muted);
++}
++
++QString Account::twoFactorPassword() const {
++	return local().readPref<QString>("account_2fa");
++}
++
++void Account::setTwoFactorPassword(const QString &password) {
++	if (password.isEmpty()) {
++		local().clearPref("account_2fa");
++	} else {
++		local().writePref<QString>("account_2fa", password);
++	}
++}
++
+ void Account::setLegacyMtpKey(std::shared_ptr<MTP::AuthKey> key) {
+ 	Expects(!_mtp);
+ 	Expects(key != nullptr);
+@@ -430,6 +503,18 @@ void Account::startMtp(std::unique_ptr<MTP::Config> config) {
+ 	fields.config = std::move(config);
+ 	fields.deviceModel = Platform::DeviceModelPretty();
+ 	fields.systemVersion = Platform::SystemVersionPretty();
++	if (!fields.proxyOverride) {
++		const auto saved = local().readProxySettings();
++		if (saved.type != MTP::ProxyData::Type::None) {
++			fields.proxyOverride = saved;
++		} else {
++			// Enforcement: an account with no proxy of its own must never
++			// connect from this machine's real IP. Seed an unreachable
++			// placeholder so it stays visibly disconnected (red dot in the
++			// accounts list) until a real proxy is set for it.
++			fields.proxyOverride = MTP::UnreachableProxyPlaceholder();
++		}
++	}
+ 	_mtp = std::make_unique<MTP::Instance>(
+ 		MTP::Instance::Mode::Normal,
+ 		std::move(fields));
+diff --git a/Telegram/SourceFiles/main/main_account.h b/Telegram/SourceFiles/main/main_account.h
+index eb05f1b..4b569e5 100644
+--- a/Telegram/SourceFiles/main/main_account.h
++++ b/Telegram/SourceFiles/main/main_account.h
+@@ -29,6 +29,12 @@ class Session;
+ class SessionSettings;
+ class AppConfig;
+ 
++// Reads just the user id out of a serializeMtpAuthorization()-shaped blob,
++// without touching any account/session state - used to reject importing a
++// tdata folder for a user that's already added, before writing anything
++// to disk for it. Returns UserId() if the blob can't be parsed.
++[[nodiscard]] UserId PeekAuthorizationUserId(const QByteArray &serialized);
++
+ class Account final : public base::has_weak_ptr {
+ public:
+ 	Account(not_null<Domain*> domain, const QString &dataName, int index);
+@@ -82,6 +88,34 @@ public:
+ 	[[nodiscard]] MTP::Instance &mtp() const {
+ 		return *_mtp;
+ 	}
++
++	// Per-account proxy override - each account can connect through its own
++	// proxy independently of the app-wide "Settings > Advanced" proxy.
++	[[nodiscard]] MTP::ProxyData proxyOverride() const;
++	void setProxyOverride(const MTP::ProxyData &proxy);
++
++	// Arbitrary user-defined folder name for organizing the accounts list.
++	// Empty string means the account is not in any folder.
++	[[nodiscard]] QString folderTag() const;
++	void setFolderTag(const QString &folder);
++
++	// Pinned accounts sort first within their group (folder or ungrouped).
++	[[nodiscard]] bool pinned() const;
++	void setPinned(bool pinned);
++
++	// Suppresses this account's own notifications (message/reaction/poll
++	// alerts and sounds), independent of any chat's own mute state and of
++	// the app-wide "notify from all accounts" setting.
++	[[nodiscard]] bool muted() const;
++	void setMuted(bool muted);
++
++	// The account's two-step verification password, kept here purely so it
++	// isn't lost - e.g. picked up automatically from a sibling file next to
++	// an imported tdata folder (see AccountsList's import flow), or entered
++	// by hand from the account's context menu. Not used to actually log in
++	// or unlock anything; Telegram itself still asks for it as normal.
++	[[nodiscard]] QString twoFactorPassword() const;
++	void setTwoFactorPassword(const QString &password);
+ 	[[nodiscard]] rpl::producer<not_null<MTP::Instance*>> mtpValue() const;
+ 
+ 	// Each time the main session changes a new copy of the pointer is fired.
+@@ -95,6 +129,13 @@ public:
+ 	void setLegacyMtpKey(std::shared_ptr<MTP::AuthKey> key);
+ 
+ 	void setMtpMainDcId(MTP::DcId mainDcId);
++
++	// In-memory-only proxy seed for an account that hasn't start()-ed
++	// yet: setProxyOverride() below needs the account's own storage key
++	// (only ready *after* start()), so it can't be used before that
++	// point. This just primes _mtpFields so startMtp() picks it up and
++	// the very first connection already goes through the proxy.
++	void setMtpProxyOverride(const MTP::ProxyData &proxy);
+ 	void setSessionUserId(UserId userId);
+ 	void setSessionFromStorage(
+ 		std::unique_ptr<SessionSettings> data,
+diff --git a/Telegram/SourceFiles/main/main_domain.cpp b/Telegram/SourceFiles/main/main_domain.cpp
+index 3421d0e..dc174b2 100644
+--- a/Telegram/SourceFiles/main/main_domain.cpp
++++ b/Telegram/SourceFiles/main/main_domain.cpp
+@@ -18,8 +18,10 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
+ #include "data/data_user.h"
+ #include "mtproto/mtproto_config.h"
+ #include "mtproto/mtproto_dc_options.h"
++#include "mtproto/mtproto_proxy_data.h"
+ #include "storage/storage_domain.h"
+ #include "storage/storage_account.h"
++#include "storage/storage_tdata_import.h"
+ #include "storage/localstorage.h"
+ #include "export/export_settings.h"
+ #include "window/notifications_manager.h"
+@@ -154,6 +156,11 @@ std::vector<not_null<Account*>> Domain::orderedAccounts() const {
+ 	ranges::stable_sort(accounts, [&](
+ 			not_null<Account*> a,
+ 			not_null<Account*> b) {
++		const auto aPinned = a->pinned();
++		const auto bPinned = b->pinned();
++		if (aPinned != bPinned) {
++			return aPinned && !bPinned;
++		}
+ 		const auto aIt = a->sessionExists()
+ 			? ranges::find(order, a->session().uniqueId())
+ 			: end(order);
+@@ -267,7 +274,9 @@ void Domain::scheduleUpdateUnreadBadge() {
+ 	}));
+ }
+ 
+-not_null<Main::Account*> Domain::add(MTP::Environment environment) {
++not_null<Main::Account*> Domain::add(
++		MTP::Environment environment,
++		const MTP::ProxyData &proxy) {
+ 	Expects(started());
+ 	Expects(_accounts.size() < kPremiumMaxAccounts);
+ 
+@@ -302,7 +311,19 @@ not_null<Main::Account*> Domain::add(MTP::Environment environment) {
+ 	});
+ 	const auto account = _accounts.back().account.get();
+ 	account->setMtpMainDcId(mainDcId);
++	if (proxy.type != MTP::ProxyData::Type::None) {
++		// The account's own storage key only exists *after* start(), so
++		// setProxyOverride() (which writes to that storage) would crash
++		// here - seed the in-memory MTP fields instead, so startMtp()
++		// still picks it up before the very first connection.
++		account->setMtpProxyOverride(proxy);
++	}
+ 	_local->startAdded(account, std::move(config));
++	if (proxy.type != MTP::ProxyData::Type::None) {
++		// Now that start() has run, the storage key exists - persist the
++		// proxy for real so it survives a restart.
++		account->setProxyOverride(proxy);
++	}
+ 	watchSession(account);
+ 	_accountsChanges.fire({});
+ 
+@@ -315,7 +336,105 @@ not_null<Main::Account*> Domain::add(MTP::Environment environment) {
+ 	return account;
+ }
+ 
+-void Domain::addActivated(MTP::Environment environment, bool newWindow) {
++std::vector<not_null<Main::Account*>> Domain::addFromTdata(
++		const QString &folderPath,
++		MTP::Environment environment,
++		Fn<MTP::ProxyData()> nextProxy) {
++	Expects(started());
++
++	auto result = std::vector<not_null<Main::Account*>>();
++
++	const auto authorizations = Storage::ReadForeignTdataAuthorizations(
++		folderPath);
++	if (authorizations.empty()) {
++		return result;
++	}
++
++	static const auto cloneConfig = [](const MTP::Config &config) {
++		return std::make_unique<MTP::Config>(config);
++	};
++	const auto config = [&]() -> std::unique_ptr<MTP::Config> {
++		for (const auto &[index, account] : _accounts) {
++			if (account->mtp().environment() == environment) {
++				return cloneConfig(account->mtp().config());
++			}
++		}
++		return (environment == MTP::Environment::Production)
++			? cloneConfig(Core::App().fallbackProductionConfig())
++			: std::make_unique<MTP::Config>(environment);
++	}();
++
++	// A tdata folder can hold several accounts - import every one of them
++	// it lists, stopping early if the account limit is hit, and skipping
++	// (not aborting on) any that's already added elsewhere.
++	for (const auto &authorization : authorizations) {
++		if (_accounts.size() >= kPremiumMaxAccounts) {
++			break;
++		}
++		if (hasAccountWithUserId(
++				PeekAuthorizationUserId(authorization),
++				nullptr)) {
++			// Reject before creating any Account object or touching disk -
++			// two accounts for the same real Telegram user fight over one
++			// MTProto session and the server force-resets both.
++			continue;
++		}
++
++		auto index = 0;
++		while (ranges::contains(_accounts, index, &AccountWithIndex::index)) {
++			++index;
++		}
++		_accounts.push_back(AccountWithIndex{
++			.index = index,
++			.account = std::make_unique<Account>(this, _dataName, index)
++		});
++		const auto account = _accounts.back().account.get();
++		// setMtpAuthorization derives mainDcId/userId from the imported
++		// blob itself, so unlike add() there's no separate
++		// setMtpMainDcId() call.
++		account->setMtpAuthorization(authorization);
++		// Called only now - past every check that could still skip this
++		// account - so a generator pulling from a proxy pool (see
++		// MakeMultiProxyBox) never consumes an entry for an account that
++		// ends up not being added.
++		const auto proxy = nextProxy();
++		if (proxy.type != MTP::ProxyData::Type::None) {
++			// The account's own storage key only exists *after* start(),
++			// so setProxyOverride() (which writes to that storage) would
++			// crash here - seed the in-memory MTP fields instead, so
++			// startMtp() still picks it up before the very first
++			// connection.
++			account->setMtpProxyOverride(proxy);
++		}
++		_local->startAdded(account, cloneConfig(*config));
++		if (proxy.type != MTP::ProxyData::Type::None) {
++			// Now that start() has run, the storage key exists - persist
++			// the proxy for real so it survives a restart.
++			account->setProxyOverride(proxy);
++		}
++		watchSession(account);
++		result.push_back(account);
++	}
++
++	if (result.empty()) {
++		return result;
++	}
++
++	_accountsChanges.fire({});
++
++	auto &settings = Core::App().settings();
++	if (_accounts.size() >= 2 && !settings.mainMenuAccountsShown()) {
++		settings.setMainMenuAccountsShown(true);
++		Core::App().saveSettingsDelayed();
++	}
++
++	return result;
++}
++
++void Domain::addActivated(
++		MTP::Environment environment,
++		const MTP::ProxyData &proxy,
++		bool newWindow) {
+ 	const auto added = [&](not_null<Main::Account*> account) {
+ 		if (newWindow) {
+ 			Core::App().ensureSeparateWindowFor(account);
+@@ -327,11 +446,14 @@ void Domain::addActivated(MTP::Environment environment, bool newWindow) {
+ 		}
+ 	};
+ 	if (accounts().size() < maxAccounts()) {
+-		added(add(environment));
++		added(add(environment, proxy));
+ 	} else {
+ 		for (auto &[index, account] : accounts()) {
+ 			if (!account->sessionExists()
+ 				&& account->mtp().environment() == environment) {
++				if (proxy.type != MTP::ProxyData::Type::None) {
++					account->setProxyOverride(proxy);
++				}
+ 				added(account.get());
+ 				break;
+ 			}
+@@ -344,6 +466,22 @@ void Domain::watchSession(not_null<Account*> account) {
+ 	) | rpl::filter([=](Session *session) {
+ 		return session != nullptr;
+ 	}) | rpl::on_next([=](Session *session) {
++		if (hasAccountWithUserId(session->userId(), account.get())) {
++			// A normal phone/QR login can complete for a number that's
++			// already logged in under another account slot in this app -
++			// the addFromTdata early check can't catch that case. Log it
++			// straight back out before it fights the other slot's session
++			// (deferred: destroying the session from inside its own
++			// creation callback would be a use-after-free).
++			LOG(("Main Info: rejecting duplicate account, user id %1"
++				).arg(session->userId().bare));
++			crl::on_main(&Core::App(), [=] {
++				if (account->sessionExists()) {
++					account->forcedLogOut();
++				}
++			});
++			return;
++		}
+ 		session->data().unreadBadgeChanges(
+ 		) | rpl::on_next([=] {
+ 			scheduleUpdateUnreadBadge();
+@@ -410,6 +548,23 @@ bool Domain::removePasscodeIfEmpty() {
+ 	return true;
+ }
+ 
++bool Domain::hasAccountWithUserId(UserId userId, Account *except) const {
++	if (!userId) {
++		return false;
++	}
++	for (const auto &[index, account] : _accounts) {
++		if (account.get() == except) {
++			continue;
++		}
++		if (const auto session = account->maybeSession()) {
++			if (session->userId() == userId) {
++				return true;
++			}
++		}
++	}
++	return false;
++}
++
+ void Domain::removeRedundantAccounts() {
+ 	Expects(started());
+ 
+diff --git a/Telegram/SourceFiles/main/main_domain.h b/Telegram/SourceFiles/main/main_domain.h
+index 99e2c9d..46ef6ab 100644
+--- a/Telegram/SourceFiles/main/main_domain.h
++++ b/Telegram/SourceFiles/main/main_domain.h
+@@ -9,6 +9,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
+ 
+ #include "base/timer.h"
+ #include "base/weak_ptr.h"
++#include "data/data_peer_id.h"
+ 
+ namespace Storage {
+ class Domain;
+@@ -17,6 +18,7 @@ enum class StartResult : uchar;
+ 
+ namespace MTP {
+ enum class Environment : uchar;
++struct ProxyData;
+ } // namespace MTP
+ 
+ namespace Main {
+@@ -31,8 +33,8 @@ public:
+ 		std::unique_ptr<Account> account;
+ 	};
+ 
+-	static constexpr auto kMaxAccounts = 3;
+-	static constexpr auto kPremiumMaxAccounts = 6;
++	static constexpr auto kMaxAccounts = 50;
++	static constexpr auto kPremiumMaxAccounts = 50;
+ 
+ 	explicit Domain(const QString &dataName);
+ 	~Domain();
+@@ -69,14 +71,44 @@ public:
+ 	[[nodiscard]] rpl::producer<> unreadBadgeChanges() const;
+ 	void notifyUnreadBadgeChanged();
+ 
+-	[[nodiscard]] not_null<Main::Account*> add(MTP::Environment environment);
++	[[nodiscard]] not_null<Main::Account*> add(
++		MTP::Environment environment,
++		const MTP::ProxyData &proxy);
+ 	void maybeActivate(not_null<Main::Account*> account);
+ 	void activate(not_null<Main::Account*> account);
+-	void addActivated(MTP::Environment environment, bool newWindow = false);
++	void addActivated(
++		MTP::Environment environment,
++		const MTP::ProxyData &proxy,
++		bool newWindow = false);
++
++	// Imports every account found in a foreign tdata folder (e.g. copied
++	// in from another install - it can hold several, same as this app's
++	// own) as brand new logged-in accounts, skipping phone/code login
++	// entirely. Stops early if the account limit is reached, so this can
++	// return fewer accounts than the folder actually holds. Returns an
++	// empty vector if the folder didn't contain any readable
++	// authorization, or every account in it is already added elsewhere.
++	// nextProxy() is called once per account, right before it's added, and
++	// its result is applied *before* that account's very first connection
++	// attempt, so that connection never happens unproxied - pass a
++	// generator that hands out a different proxy per call (e.g. from a
++	// pool list) if each account needs its own.
++	std::vector<not_null<Main::Account*>> addFromTdata(
++		const QString &folderPath,
++		MTP::Environment environment,
++		Fn<MTP::ProxyData()> nextProxy);
+ 
+ 	// Drops session-less accounts that have no window open for them.
+ 	void removeRedundantAccounts();
+ 
++	// True if some other already-authorized account (besides "except", if
++	// given) has this same Telegram user id. Two accounts sharing one real
++	// Telegram user fight over the same MTProto session and the server
++	// force-resets both, so this is used to reject that before it happens.
++	[[nodiscard]] bool hasAccountWithUserId(
++		UserId userId,
++		Account *except) const;
++
+ 	// Interface for Storage::Domain.
+ 	void accountAddedInStorage(AccountWithIndex accountWithIndex);
+ 	void activateFromStorage(int index);
+diff --git a/Telegram/SourceFiles/mtproto/mtp_instance.cpp b/Telegram/SourceFiles/mtproto/mtp_instance.cpp
+index 602e120..90362ea 100644
+--- a/Telegram/SourceFiles/mtproto/mtp_instance.cpp
++++ b/Telegram/SourceFiles/mtproto/mtp_instance.cpp
+@@ -68,6 +68,8 @@ public:
+ 
+ 	void resolveProxyDomain(const QString &host);
+ 	void setGoodProxyDomain(const QString &host, const QString &ip);
++	void setProxyOverride(const ProxyData &proxy);
++	[[nodiscard]] ProxyData currentProxy() const;
+ 	void suggestMainDcId(DcId mainDcId);
+ 	void setMainDcId(DcId mainDcId);
+ 	[[nodiscard]] bool hasMainDcId() const;
+@@ -292,6 +294,7 @@ private:
+ 	base::Timer _checkDelayedTimer;
+ 
+ 	Core::SettingsProxy &_proxySettings;
++	std::optional<ProxyData> _proxyOverride;
+ 
+ 	rpl::lifetime _lifetime;
+ 
+@@ -314,7 +317,8 @@ Instance::Private::Private(
+ , _mode(mode)
+ , _config(std::move(fields.config))
+ , _networkReachability(base::NetworkReachability::Instance())
+-, _proxySettings(Core::App().settings().proxy()) {
++, _proxySettings(Core::App().settings().proxy())
++, _proxyOverride(fields.proxyOverride) {
+ 	Expects(_config != nullptr);
+ 
+ 	const auto idealThreadPoolSize = QThread::idealThreadCount();
+@@ -366,7 +370,7 @@ Instance::Private::Private(
+ 
+ 	_proxySettings.connectionTypeChanges(
+ 	) | rpl::on_next([=] {
+-		if (_configLoader) {
++		if (_configLoader && !_proxyOverride) {
+ 			_configLoader->setProxyEnabled(_proxySettings.isEnabled());
+ 		}
+ 	}, _lifetime);
+@@ -387,6 +391,20 @@ void Instance::Private::start() {
+ 	requestConfig();
+ }
+ 
++void Instance::Private::setProxyOverride(const ProxyData &proxy) {
++	_proxyOverride = proxy;
++	restart();
++}
++
++ProxyData Instance::Private::currentProxy() const {
++	if (_proxyOverride) {
++		return (_proxyOverride->type != ProxyData::Type::None)
++			? *_proxyOverride
++			: ProxyData();
++	}
++	return _proxySettings.isEnabled() ? _proxySettings.selected() : ProxyData();
++}
++
+ void Instance::Private::resolveProxyDomain(const QString &host) {
+ 	if (!_domainResolver) {
+ 		_domainResolver = std::make_unique<DomainResolver>([=](
+@@ -429,14 +447,27 @@ void Instance::Private::applyDomainIps(
+ 		}
+ 		return true;
+ 	};
+-	for (auto &proxy : _proxySettings.list()) {
+-		applyToProxy(proxy);
+-	}
+-	auto selected = _proxySettings.selected();
+-	if (applyToProxy(selected) && _proxySettings.isEnabled()) {
+-		_proxySettings.setSelected(selected);
+-		for (const auto &[shiftedDcId, session] : _sessions) {
+-			session->refreshOptions();
++	// An account with its own proxy override must never write into the
++	// shared/global proxy settings - that would leak its resolved IPs
++	// (and, worse, its *selected* proxy) into every other account that
++	// falls back to the global proxy, and yank their connections onto
++	// an IP they never asked for.
++	if (_proxyOverride) {
++		if (applyToProxy(*_proxyOverride)) {
++			for (const auto &[shiftedDcId, session] : _sessions) {
++				session->refreshOptions();
++			}
++		}
++	} else {
++		for (auto &proxy : _proxySettings.list()) {
++			applyToProxy(proxy);
++		}
++		auto selected = _proxySettings.selected();
++		if (applyToProxy(selected) && _proxySettings.isEnabled()) {
++			_proxySettings.setSelected(selected);
++			for (const auto &[shiftedDcId, session] : _sessions) {
++				session->refreshOptions();
++			}
+ 		}
+ 	}
+ 	_instance->proxyDomainResolved(host, ips, expireAt);
+@@ -460,6 +491,10 @@ void Instance::Private::setGoodProxyDomain(
+ 		}
+ 		return true;
+ 	};
++	if (_proxyOverride) {
++		applyToProxy(*_proxyOverride);
++		return;
++	}
+ 	for (auto &proxy : _proxySettings.list()) {
+ 		applyToProxy(proxy);
+ 	}
+@@ -514,6 +549,9 @@ void Instance::Private::requestConfig() {
+ 	if (_configLoader || isKeysDestroyer()) {
+ 		return;
+ 	}
++	const auto proxyEnabled = _proxyOverride
++		? (_proxyOverride->type != ProxyData::Type::None)
++		: _proxySettings.isEnabled();
+ 	_configLoader = std::make_unique<ConfigLoader>(
+ 		_instance,
+ 		_userPhone,
+@@ -521,7 +559,7 @@ void Instance::Private::requestConfig() {
+ 		[=](const Error &error, const Response &) {
+ 			return configLoadFail(error);
+ 		},
+-		_proxySettings.isEnabled());
++		proxyEnabled);
+ 	_configLoader->load();
+ }
+ 
+@@ -1860,6 +1898,14 @@ void Instance::resolveProxyDomain(const QString &host) {
+ 	_private->resolveProxyDomain(host);
+ }
+ 
++void Instance::setProxyOverride(const ProxyData &proxy) {
++	_private->setProxyOverride(proxy);
++}
++
++ProxyData Instance::currentProxy() const {
++	return _private->currentProxy();
++}
++
+ void Instance::setGoodProxyDomain(const QString &host, const QString &ip) {
+ 	_private->setGoodProxyDomain(host, ip);
+ }
+diff --git a/Telegram/SourceFiles/mtproto/mtp_instance.h b/Telegram/SourceFiles/mtproto/mtp_instance.h
+index eeb56d2..400c579 100644
+--- a/Telegram/SourceFiles/mtproto/mtp_instance.h
++++ b/Telegram/SourceFiles/mtproto/mtp_instance.h
+@@ -9,6 +9,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
+ 
+ #include "mtproto/details/mtproto_serialized_request.h"
+ #include "mtproto/mtproto_response.h"
++#include "mtproto/mtproto_proxy_data.h"
+ 
+ namespace MTP {
+ namespace details {
+@@ -48,6 +49,7 @@ public:
+ 		AuthKeysList keys;
+ 		QString deviceModel;
+ 		QString systemVersion;
++		std::optional<ProxyData> proxyOverride;
+ 	};
+ 
+ 	enum class Mode {
+@@ -62,6 +64,8 @@ public:
+ 
+ 	void resolveProxyDomain(const QString &host);
+ 	void setGoodProxyDomain(const QString &host, const QString &ip);
++	void setProxyOverride(const ProxyData &proxy);
++	[[nodiscard]] ProxyData currentProxy() const;
+ 	void suggestMainDcId(DcId mainDcId);
+ 	void setMainDcId(DcId mainDcId);
+ 	[[nodiscard]] DcId mainDcId() const;
+diff --git a/Telegram/SourceFiles/mtproto/proxy_pool.cpp b/Telegram/SourceFiles/mtproto/proxy_pool.cpp
+new file mode 100644
+index 0000000..51fde7e
+--- /dev/null
++++ b/Telegram/SourceFiles/mtproto/proxy_pool.cpp
+@@ -0,0 +1,225 @@
++/*
++This file is part of Telegram Desktop,
++the official desktop application for the Telegram messaging service.
++
++For license and copyright information please follow this link:
++https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
++*/
++#include "mtproto/proxy_pool.h"
++
++#include "settings.h"
++
++#include <QtCore/QDir>
++#include <QtCore/QFile>
++#include <QtCore/QFileInfo>
++#include <QtCore/QJsonArray>
++#include <QtCore/QJsonDocument>
++#include <QtCore/QJsonObject>
++
++namespace MTP {
++namespace {
++
++[[nodiscard]] QString PoolFilePath() {
++	return cWorkingDir() + u"tdata/proxy_pool.json"_q;
++}
++
++} // namespace
++
++ProxyPool::ProxyPool() {
++	load();
++}
++
++const std::vector<ProxyList> &ProxyPool::lists() const {
++	return _lists;
++}
++
++int ProxyPool::addList(const QString &name) {
++	_lists.push_back(ProxyList{ .name = name });
++	save();
++	return int(_lists.size()) - 1;
++}
++
++void ProxyPool::renameList(int listIndex, const QString &name) {
++	if (listIndex < 0 || listIndex >= int(_lists.size())) {
++		return;
++	}
++	if (_lists[listIndex].name == name) {
++		return;
++	}
++	_lists[listIndex].name = name;
++	save();
++}
++
++void ProxyPool::removeList(int listIndex) {
++	if (listIndex < 0 || listIndex >= int(_lists.size())) {
++		return;
++	}
++	_lists.erase(_lists.begin() + listIndex);
++	save();
++}
++
++int ProxyPool::addLines(int listIndex, const QString &text) {
++	if (listIndex < 0 || listIndex >= int(_lists.size())) {
++		return 0;
++	}
++	auto added = 0;
++	auto &entries = _lists[listIndex].entries;
++	for (const auto &rawLine : text.split('\n')) {
++		const auto line = rawLine.trimmed();
++		if (line.isEmpty()) {
++			continue;
++		}
++		const auto parts = line.split(':');
++		if (parts.size() < 2) {
++			continue;
++		}
++		const auto port = parts[1].trimmed().toUShort();
++		if (!port) {
++			continue;
++		}
++		auto entry = ProxyData();
++		entry.type = ProxyData::Type::Socks5;
++		entry.host = parts[0].trimmed();
++		entry.port = port;
++		if (parts.size() > 2) {
++			entry.user = parts[2].trimmed();
++		}
++		if (parts.size() > 3) {
++			entry.password = QStringList(parts.mid(3)).join(':').trimmed();
++		}
++		entries.push_back(entry);
++		++added;
++	}
++	if (added > 0) {
++		save();
++	}
++	return added;
++}
++
++void ProxyPool::removeEntry(int listIndex, int entryIndex) {
++	if (listIndex < 0 || listIndex >= int(_lists.size())) {
++		return;
++	}
++	auto &entries = _lists[listIndex].entries;
++	if (entryIndex < 0 || entryIndex >= int(entries.size())) {
++		return;
++	}
++	entries.erase(entries.begin() + entryIndex);
++	save();
++}
++
++std::optional<ProxyData> ProxyPool::take(int listIndex) {
++	if (listIndex < 0 || listIndex >= int(_lists.size())) {
++		return std::nullopt;
++	}
++	auto &entries = _lists[listIndex].entries;
++	if (entries.empty()) {
++		return std::nullopt;
++	}
++	auto result = entries.front();
++	entries.erase(entries.begin());
++	save();
++	return result;
++}
++
++std::optional<ProxyData> ProxyPool::peek(int listIndex) const {
++	if (listIndex < 0 || listIndex >= int(_lists.size())) {
++		return std::nullopt;
++	}
++	const auto &entries = _lists[listIndex].entries;
++	if (entries.empty()) {
++		return std::nullopt;
++	}
++	return entries.front();
++}
++
++bool ProxyPool::removeMatching(const ProxyData &proxy) {
++	for (auto &list : _lists) {
++		for (auto i = list.entries.begin(); i != list.entries.end(); ++i) {
++			if (*i == proxy) {
++				list.entries.erase(i);
++				save();
++				return true;
++			}
++		}
++	}
++	return false;
++}
++
++void ProxyPool::load() {
++	auto file = QFile(PoolFilePath());
++	if (!file.open(QIODevice::ReadOnly)) {
++		return;
++	}
++	const auto json = QJsonDocument::fromJson(file.readAll());
++	if (!json.isArray() && !json.isObject()) {
++		return;
++	}
++	// Accept both the new array-of-lists format and, defensively, the
++	// old single-list {"name":..,"entries":[..]} format from before
++	// named lists existed, so any pool saved with the previous build
++	// isn't silently dropped.
++	const auto readList = [](const QJsonObject &object) {
++		auto list = ProxyList{ .name = object["name"].toString() };
++		for (const auto &value : object["entries"].toArray()) {
++			const auto item = value.toObject();
++			auto entry = ProxyData();
++			entry.type = ProxyData::Type::Socks5;
++			entry.host = item["host"].toString();
++			entry.port = quint16(item["port"].toInt());
++			entry.user = item["user"].toString();
++			entry.password = item["password"].toString();
++			if (!entry.host.isEmpty() && entry.port) {
++				list.entries.push_back(entry);
++			}
++		}
++		return list;
++	};
++	if (json.isArray()) {
++		for (const auto &value : json.array()) {
++			_lists.push_back(readList(value.toObject()));
++		}
++	} else {
++		_lists.push_back(readList(json.object()));
++	}
++}
++
++void ProxyPool::save() const {
++	auto array = QJsonArray();
++	for (const auto &list : _lists) {
++		auto entries = QJsonArray();
++		for (const auto &entry : list.entries) {
++			entries.push_back(QJsonObject{
++				{ "host", entry.host },
++				{ "port", int(entry.port) },
++				{ "user", entry.user },
++				{ "password", entry.password },
++			});
++		}
++		array.push_back(QJsonObject{
++			{ "name", list.name },
++			{ "entries", entries },
++		});
++	}
++	const auto path = PoolFilePath();
++	QDir().mkpath(QFileInfo(path).absolutePath());
++	auto file = QFile(path);
++	if (file.open(QIODevice::WriteOnly)) {
++		file.write(QJsonDocument(array).toJson(QJsonDocument::Compact));
++	}
++}
++
++ProxyPool &GlobalProxyPool() {
++	static auto instance = ProxyPool();
++	return instance;
++}
++
++ProxyData UnreachableProxyPlaceholder() {
++	auto result = ProxyData();
++	result.type = ProxyData::Type::Socks5;
++	result.host = u"127.0.0.1"_q;
++	result.port = 1;
++	return result;
++}
++
++} // namespace MTP
+diff --git a/Telegram/SourceFiles/mtproto/proxy_pool.h b/Telegram/SourceFiles/mtproto/proxy_pool.h
+new file mode 100644
+index 0000000..46cdd1f
+--- /dev/null
++++ b/Telegram/SourceFiles/mtproto/proxy_pool.h
+@@ -0,0 +1,74 @@
++/*
++This file is part of Telegram Desktop,
++the official desktop application for the Telegram messaging service.
++
++For license and copyright information please follow this link:
++https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
++*/
++#pragma once
++
++#include "mtproto/mtproto_proxy_data.h"
++
++namespace MTP {
++
++struct ProxyList {
++	QString name;
++	std::vector<ProxyData> entries;
++};
++
++// Named, on-disk pools of spare SOCKS5 proxies (e.g. one list per
++// region/source: "India", "Indonesia", ...), entirely separate from the
++// app's own global proxy list/settings. Meant for bulk-loading a batch of
++// proxies once per list (paste as ip:port:login:pass, one per line) and
++// then handing one out automatically - by list name - when adding
++// accounts. Taking an entry removes it from its list, so nothing gets
++// assigned twice.
++class ProxyPool final {
++public:
++	ProxyPool();
++
++	[[nodiscard]] const std::vector<ProxyList> &lists() const;
++
++	// Returns the new list's index.
++	int addList(const QString &name);
++	void renameList(int listIndex, const QString &name);
++	void removeList(int listIndex);
++
++	// Parses "host:port[:login[:password]]" lines (blank/unparsable
++	// lines skipped). Returns how many were actually added.
++	int addLines(int listIndex, const QString &text);
++	void removeEntry(int listIndex, int entryIndex);
++
++	// Removes and returns the first entry of the list, or nullopt if the
++	// list is empty or listIndex is out of range.
++	[[nodiscard]] std::optional<ProxyData> take(int listIndex);
++
++	// Reads the first entry of the list without removing it, or nullopt.
++	[[nodiscard]] std::optional<ProxyData> peek(int listIndex) const;
++
++	// Removes the first entry across all lists that's structurally equal
++	// to "proxy" (used to consume a previously-peek()'d entry only once
++	// the thing it was picked for is confirmed to have actually
++	// succeeded, instead of removing it up front and losing it on a
++	// failed add attempt). Returns whether an entry was found and removed.
++	bool removeMatching(const ProxyData &proxy);
++
++private:
++	void load();
++	void save() const;
++
++	std::vector<ProxyList> _lists;
++
++};
++
++[[nodiscard]] ProxyPool &GlobalProxyPool();
++
++// A SOCKS5 address that can never actually connect (unassigned loopback
++// port) - used as a stand-in when an account needs *some* proxy applied
++// (so it never falls back to a direct/unproxied connection) but none is
++// actually available yet, e.g. importing more accounts from a tdata folder
++// than a chosen proxy list has entries for. Shows up as permanently
++// disconnected until the user sets a real proxy for that account.
++[[nodiscard]] ProxyData UnreachableProxyPlaceholder();
++
++} // namespace MTP
+diff --git a/Telegram/SourceFiles/mtproto/session.cpp b/Telegram/SourceFiles/mtproto/session.cpp
+index 40d7048..588579d 100644
+--- a/Telegram/SourceFiles/mtproto/session.cpp
++++ b/Telegram/SourceFiles/mtproto/session.cpp
+@@ -237,20 +237,20 @@ void Session::restart() {
+ }
+ 
+ void Session::refreshOptions() {
+-	const auto &settings = Core::App().settings().proxy();
+-	const auto &proxy = settings.selected();
+-	const auto isEnabled = settings.isEnabled();
+-	const auto proxyType = (isEnabled ? proxy.type : ProxyData::Type::None);
++	// Per-account override (if set on this account's Instance) takes priority
++	// over the app-wide proxy - see Instance::currentProxy().
++	const auto proxy = _instance->currentProxy();
++	const auto proxyType = proxy.type;
+ 	const auto useTcp = (proxyType != ProxyData::Type::Http);
+ 	const auto useHttp = (proxyType != ProxyData::Type::Mtproto)
+ 		&& (proxyType != ProxyData::Type::Web);
+ 	const auto useIPv4 = true;
+-	const auto useIPv6 = settings.tryIPv6();
++	const auto useIPv6 = Core::App().settings().proxy().tryIPv6();
+ 	_data->setOptions(SessionOptions(
+ 		_instance->systemLangCode(),
+ 		_instance->cloudLangCode(),
+ 		_instance->langPackName(),
+-		(isEnabled ? proxy : ProxyData()),
++		proxy,
+ 		useIPv4,
+ 		useIPv6,
+ 		useHttp,
+diff --git a/Telegram/SourceFiles/settings/sections/settings_advanced.cpp b/Telegram/SourceFiles/settings/sections/settings_advanced.cpp
+index 7fc18f9..9aaede8 100644
+--- a/Telegram/SourceFiles/settings/sections/settings_advanced.cpp
++++ b/Telegram/SourceFiles/settings/sections/settings_advanced.cpp
+@@ -136,6 +136,21 @@ void BuildDataStorageSection(SectionBuilder &builder) {
+ 		.keywords = { u"connection"_q, u"proxy"_q, u"network"_q, u"vpn"_q },
+ 	});
+ 
++	builder.addButton({
++		.id = u"advanced/account_proxy"_q,
++		.title = rpl::single(u"Proxy for this account"_q),
++		.icon = { &st::menuIconNetwork },
++		.onClick = [=] {
++			controller->window().show(MakeAccountProxyBox(account));
++		},
++		.keywords = {
++			u"connection"_q,
++			u"proxy"_q,
++			u"network"_q,
++			u"account"_q,
++		},
++	});
++
+ 	const auto showDownloadPath = container
+ 		? container->lifetime().make_state<rpl::variable<bool>>(
+ 			!Core::App().settings().askDownloadPath())
+diff --git a/Telegram/SourceFiles/settings/sections/settings_information.cpp b/Telegram/SourceFiles/settings/sections/settings_information.cpp
+index e59963a..bc6ba3f 100644
+--- a/Telegram/SourceFiles/settings/sections/settings_information.cpp
++++ b/Telegram/SourceFiles/settings/sections/settings_information.cpp
+@@ -6,6 +6,9 @@ For license and copyright information please follow this link:
+ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
+ */
+ #include "settings/sections/settings_information.h"
++#include "settings.h"
++
++#include <QtWidgets/QFileDialog>
+ 
+ #include "settings/sections/settings_main.h"
+ #include "settings/settings_builder.h"
+@@ -19,6 +22,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
+ #include "ui/widgets/buttons.h"
+ #include "ui/widgets/fields/input_field.h"
+ #include "ui/widgets/popup_menu.h"
++#include "ui/layers/generic_box.h"
+ #include "ui/widgets/box_content_divider.h"
+ #include "ui/widgets/menu/menu_add_action_callback_factory.h"
+ #include "ui/boxes/confirm_box.h"
+@@ -29,12 +33,16 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
+ #include "ui/painter.h"
+ #include "ui/vertical_list.h"
+ #include "ui/unread_badge_paint.h"
++#include "ui/empty_userpic.h"
+ #include "ui/ui_utility.h"
+ #include "core/application.h"
++#include "core/file_utilities.h"
+ #include "core/click_handler_types.h"
+ #include "core/core_settings.h"
+ #include "chat_helpers/emoji_suggestions_widget.h"
+ #include "boxes/add_contact_box.h"
++#include "boxes/connection_box.h"
++#include "mtproto/proxy_pool.h"
+ #include "boxes/premium_limits_box.h"
+ #include "boxes/username_box.h"
+ #include "boxes/peers/edit_peer_color_box.h"
+@@ -53,7 +61,9 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
+ #include "main/main_account.h"
+ #include "main/main_session.h"
+ #include "main/main_domain.h"
++#include "storage/storage_tdata_export.h"
+ #include "mtproto/mtproto_dc_options.h"
++#include "mtproto/facade.h"
+ #include "window/window_session_controller.h"
+ #include "window/window_controller.h"
+ #include "window/window_peer_menu.h"
+@@ -62,17 +72,28 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
+ #include "api/api_user_names.h"
+ #include "api/api_user_privacy.h"
+ #include "base/call_delayed.h"
++#include "base/flat_set.h"
++#include "base/weak_ptr.h"
+ #include "base/options.h"
+ #include "base/unixtime.h"
+ #include "base/random.h"
+ #include "styles/style_chat.h" // popupMenuExpandedSeparator
++#include "styles/style_dialogs.h"
++#include "styles/style_dialogs_layout.h"
+ #include "styles/style_layers.h"
+ #include "styles/style_settings.h"
+ #include "styles/style_menu_icons.h"
+ #include "styles/style_window.h"
++#include "styles/style_window_main_menu.h"
+ 
+ #include <QtGui/QGuiApplication>
+ #include <QtCore/QBuffer>
++#include <QtCore/QDir>
++#include <QtCore/QFile>
++#include <QtCore/QFileInfo>
++#include <QtCore/QJsonArray>
++#include <QtCore/QJsonDocument>
++#include <QtCore/QJsonObject>
+ 
+ namespace Settings {
+ namespace {
+@@ -96,6 +117,67 @@ struct InformationHighlightTargets {
+ constexpr auto kSaveBioTimeout = 1000;
+ constexpr auto kPlayStatusLimit = 2;
+ 
++// Persisted across AccountsList instances (recreated every time the side
++// menu/settings page opens) and across app restarts, so collapsed/expanded
++// folders and their order don't reset every time the menu is reopened.
++struct FoldersUiState {
++	std::vector<QString> order;
++	base::flat_set<QString> collapsed;
++	base::flat_set<QString> pinned;
++};
++
++[[nodiscard]] QString FoldersUiStatePath() {
++	return cWorkingDir() + u"tdata/folders_ui.json"_q;
++}
++
++[[nodiscard]] FoldersUiState &GlobalFoldersUiState() {
++	static auto state = [] {
++		auto result = FoldersUiState();
++		auto file = QFile(FoldersUiStatePath());
++		if (file.open(QIODevice::ReadOnly)) {
++			const auto json = QJsonDocument::fromJson(
++				file.readAll()).object();
++			for (const auto &value : json["order"].toArray()) {
++				result.order.push_back(value.toString());
++			}
++			for (const auto &value : json["collapsed"].toArray()) {
++				result.collapsed.insert(value.toString());
++			}
++			for (const auto &value : json["pinned"].toArray()) {
++				result.pinned.insert(value.toString());
++			}
++		}
++		return result;
++	}();
++	return state;
++}
++
++void SaveFoldersUiState() {
++	const auto &state = GlobalFoldersUiState();
++	auto order = QJsonArray();
++	for (const auto &name : state.order) {
++		order.push_back(name);
++	}
++	auto collapsed = QJsonArray();
++	for (const auto &name : state.collapsed) {
++		collapsed.push_back(name);
++	}
++	auto pinned = QJsonArray();
++	for (const auto &name : state.pinned) {
++		pinned.push_back(name);
++	}
++	const auto path = FoldersUiStatePath();
++	QDir().mkpath(QFileInfo(path).absolutePath());
++	auto file = QFile(path);
++	if (file.open(QIODevice::WriteOnly)) {
++		file.write(QJsonDocument(QJsonObject{
++			{ "order", order },
++			{ "collapsed", collapsed },
++			{ "pinned", pinned },
++		}).toJson(QJsonDocument::Compact));
++	}
++}
++
+ class ComposedBadge final : public Ui::RpWidget {
+ public:
+ 	ComposedBadge(
+@@ -221,23 +303,67 @@ private:
+ 
+ 	[[nodiscard]] not_null<Ui::SlideWrap<Ui::SettingsButton>*> setupAdd();
+ 	void rebuild();
++	// rebuild() destroys the whole account/folder button tree, including
++	// whichever widget's click handler triggered the change (a folder
++	// header's own collapse toggle, a popup menu item owned by an account
++	// row about to be torn down, ...). Calling it synchronously from such
++	// a handler is a use-after-free; defer it a tick instead.
++	void scheduleRebuild();
++	// Returns the header row itself, so callers can use it as a drag
++	// handle for reordering the whole folder block it sits in.
++	not_null<Ui::SettingsButton*> addFolderHeader(
++		not_null<Ui::VerticalLayout*> container,
++		const QString &folder,
++		const std::vector<not_null<::Main::Account*>> &accounts,
++		const std::vector<QString> &folderOrder);
++	void moveAccountToFolder(
++		not_null<::Main::Account*> account,
++		const QString &folder);
++	void promptNewFolder(not_null<::Main::Account*> account);
++	void promptRenameFolder(const QString &folder);
++	void removeFolder(const QString &folder);
++	void togglePinned(not_null<::Main::Account*> account);
++	void toggleMuted(not_null<::Main::Account*> account);
++	void toggleFolderPinned(const QString &folder);
+ 
+ 	const not_null<Window::SessionController*> _controller;
+ 	const not_null<Ui::VerticalLayout*> _outer;
++	// Established at construction time, while _outer is guaranteed alive,
++	// and only ever copied afterwards - re-wrapping _outer.get() at a later,
++	// deferred-call time is not safe, since by then _outer may already be
++	// dangling (e.g. the panel it lives in closed while a box was open).
++	const QPointer<Ui::VerticalLayout> _outerWeak;
+ 	int _outerIndex = 0;
++	// The container rebuild() (re)inserts everything into - each call must
++	// destroy the previous one first, or the old folder headers/rows stay
++	// behind as orphaned, still-visible duplicates (Qt destroying _wrap
++	// also destroys the account buttons living in it as its children,
++	// which auto-nulls their QPointer-backed handles in _watched below).
++	QPointer<Ui::VerticalLayout> _wrap;
+ 
+ 	Ui::SlideWrap<Ui::SettingsButton> *_addAccount = nullptr;
+ 	base::flat_map<
+ 		not_null<::Main::Account*>,
+ 		base::unique_qptr<Ui::SettingsButton>> _watched;
++	// Collapsed/expanded state lives in GlobalFoldersUiState() instead of
++	// here, so it survives this object being destroyed and recreated every
++	// time the side menu (or settings page) closes and reopens.
+ 
+ 	base::unique_qptr<Ui::PopupMenu> _contextMenu;
+-	std::unique_ptr<Ui::VerticalLayoutReorder> _reorder;
++	base::unique_qptr<Ui::PopupMenu> _folderContextMenu;
++	// One reorder per draggable list: each expanded folder's own account
++	// list, the ungrouped accounts list, and (if any folders exist) the
++	// top-level list of folder blocks itself. All owned via make_state() on
++	// their respective container, which dies with _wrap on the next
++	// rebuild() - this vector is only ever rebuilt from scratch, never
++	// mutated in place.
++	std::vector<Ui::VerticalLayoutReorder*> _allReorders;
+ 	int _reordering = 0;
+ 
+ 	rpl::event_stream<> _closeRequests;
+ 
+ 	base::binary_guard _accountSwitchGuard;
++	base::binary_guard _rebuildGuard;
+ 
+ };
+ 
+@@ -361,6 +487,91 @@ void ShowMenu(
+ 	menu->popup(QCursor::pos());
+ }
+ 
++// Small "type a name" prompt, used for naming/renaming account folders.
++void PromptFolderName(
++		not_null<Window::SessionController*> controller,
++		const QString &title,
++		const QString &initial,
++		Fn<void(QString)> done) {
++	controller->show(Box([=](not_null<Ui::GenericBox*> box) {
++		box->setTitle(rpl::single(title));
++		const auto field = box->addRow(object_ptr<Ui::InputField>(
++			box.get(),
++			st::defaultInputField,
++			rpl::single(QString()),
++			initial));
++		box->setFocusCallback([=] {
++			field->setFocusFast();
++		});
++		const auto save = [=] {
++			const auto text = field->getLastText().trimmed();
++			if (text.isEmpty()) {
++				return;
++			}
++			done(text);
++			box->closeBox();
++		};
++		field->submits(
++		) | rpl::on_next(save, field->lifetime());
++		box->addButton(tr::lng_settings_save(), save);
++		box->addButton(tr::lng_cancel(), [=] { box->closeBox(); });
++	}));
++}
++
++// Shows the account's stored 2FA password (if any) for viewing/copying,
++// and lets it be entered or changed by hand too - not just picked up
++// automatically from a sibling file at import time.
++// Read-only: just shows whatever password was already picked up (from a
++// sibling file at import time, see findSiblingTwoFactor below, or set once
++// by hand elsewhere) so it isn't lost - not an editor. The account's real
++// two-step verification is still Telegram's own, changed the normal way
++// from that account's actual Privacy & Security settings.
++void ShowTwoFactorBox(
++		not_null<Window::SessionController*> controller,
++		not_null<::Main::Account*> account) {
++	controller->show(Box([=](not_null<Ui::GenericBox*> box) {
++		box->setTitle(rpl::single(u"2FA password"_q));
++		const auto saved = account->twoFactorPassword();
++		if (saved.isEmpty()) {
++			box->addRow(object_ptr<Ui::FlatLabel>(
++				box.get(),
++				u"No 2FA password saved for this account."_q,
++				st::boxLabel));
++		} else {
++			const auto label = box->addRow(object_ptr<Ui::FlatLabel>(
++				box.get(),
++				rpl::single(TextWithEntities()),
++				st::boxLabel));
++			label->setMarkedText(Ui::Text::Link(saved));
++			label->setClickHandlerFilter([=](const auto &...) {
++				TextUtilities::SetClipboardText(
++					TextForMimeData::Simple(saved));
++				box->uiShow()->showToast(u"Copied to clipboard"_q);
++				return false;
++			});
++		}
++		box->addButton(tr::lng_close(), [=] { box->closeBox(); });
++	}));
++}
++
++// Writes the account's stored 2FA password (if any) as a sidecar file next
++// to its exported tdata, mirroring the sibling-file layout the import side
++// already reads (see findSiblingTwoFactor in SetupAccounts) - so exporting
++// and re-importing an account round-trips the password too, not just the
++// session itself.
++void WriteTwoFactorSidecar(
++		not_null<::Main::Account*> account,
++		const QString &accountFolder) {
++	const auto twoFactor = account->twoFactorPassword();
++	if (twoFactor.isEmpty()) {
++		return;
++	}
++	auto file = QFile(accountFolder + u"/2fa.txt"_q);
++	if (file.open(QIODevice::WriteOnly)) {
++		file.write(twoFactor.toUtf8());
++	}
++}
++
+ not_null<Ui::SettingsButton*> AddRow(
+ 		not_null<Ui::VerticalLayout*> container,
+ 		rpl::producer<QString> label,
+@@ -819,16 +1030,17 @@ void SetupAccountsWrap(
+ 	}
+ }
+ 
+-[[nodiscard]] bool IsAltShift(Qt::KeyboardModifiers modifiers) {
+-	return (modifiers & Qt::ShiftModifier) && (modifiers & Qt::AltModifier);
+-}
+-
+ [[nodiscard]] object_ptr<Ui::SettingsButton> MakeAccountButton(
+ 		QWidget *parent,
+ 		not_null<Window::SessionController*> window,
+ 		not_null<::Main::Account*> account,
+ 		Fn<void(Qt::KeyboardModifiers)> callback,
+-		bool locked) {
++		bool locked,
++		const std::vector<QString> &folders,
++		Fn<void(QString)> moveToFolder,
++		Fn<void()> promptNewFolder,
++		Fn<void()> togglePinned,
++		Fn<void()> toggleMuted) {
+ 	const auto active = (account == &window->session().account());
+ 	const auto session = &account->session();
+ 	const auto user = session->user();
+@@ -846,6 +1058,20 @@ void SetupAccountsWrap(
+ 		st::mainMenuAddAccountButton);
+ 	const auto raw = result.data();
+ 
++	struct State {
++		State(QWidget *parent) : userpic(parent) {
++			userpic.setAttribute(Qt::WA_TransparentForMouseEvents);
++		}
++
++		Ui::RpWidget userpic;
++		Ui::PeerUserpicView view;
++		base::unique_qptr<Ui::PopupMenu> menu;
++		bool connected = false;
++		base::Timer connectionPoll;
++		QPointer<Ui::RpWidget> connectionDot;
++	};
++	const auto state = raw->lifetime().make_state<State>(raw);
++
+ 	{
+ 		const auto container = Badge::AddRight(raw, st::mainMenuAccountLine);
+ 		const auto composedBadge = Ui::CreateChild<ComposedBadge>(
+@@ -862,26 +1088,130 @@ void SetupAccountsWrap(
+ 		}, container->lifetime());
+ 	}
+ 
+-	struct State {
+-		State(QWidget *parent) : userpic(parent) {
+-			userpic.setAttribute(Qt::WA_TransparentForMouseEvents);
++	// Pin/mute badges used to be painted right on the (tiny, 26px) userpic
++	// (crowded), then folded into the ComposedBadge/ Badge::AddRight pairing
++	// above (also wrong: that pairing sizes itself to reach almost all the
++	// way across the row whenever the name fits - it's built to host content
++	// flush right, not to just report a small badge's width - so adding our
++	// width into its container inflated the button's reserved text padding
++	// far beyond our actual footprint and crushed the account name to
++	// nothing). A standalone overlay pinned to the row's own right edge,
++	// untangled from that padding math entirely, avoids both problems.
++	const auto badges = Ui::CreateChild<Ui::RpWidget>(raw);
++	{
++		const auto badgeSize = st::mainMenuAccountBadgeSize;
++		const auto badgeSkip = st::mainMenuAccountBadgeSkip;
++		const auto badgeColor = st::dialogsUnreadBgMuted->c;
++		const auto muteImage = account->muted()
++			? std::make_optional(
++				st::dialogsMuteIcon.icon.instance(badgeColor))
++			: std::nullopt;
++		const auto pinImage = account->pinned()
++			? std::make_optional(
++				st::dialogsPinnedIcon.icon.instance(badgeColor))
++			: std::nullopt;
++		auto badgesWidth = 0;
++		auto badgesCount = 0;
++		if (muteImage) {
++			badgesWidth += badgeSize;
++			++badgesCount;
++		}
++		if (pinImage) {
++			badgesWidth += badgeSize;
++			++badgesCount;
++		}
++		if (badgesCount > 1) {
++			badgesWidth += badgeSkip * (badgesCount - 1);
++		}
++		badges->resize(badgesWidth, badgesWidth ? badgeSize : 0);
++		badges->paintRequest(
++		) | rpl::on_next([=] {
++			auto p = Painter(badges);
++			auto left = 0;
++			// Both drawn scaled to a common badgeSize square via drawImage
++			// rather than icon.paint() at native size (dialogs_mute is 8x8,
++			// dialogs_pinned 20x20 - painted at native size they'd be wildly
++			// inconsistent). That alone isn't quite enough though: the mute
++			// glyph fills its whole source canvas edge to edge, while the
++			// pin glyph sits in a canvas with generous padding around it -
++			// scaled to the same box, mute still reads as visibly bigger/
++			// bolder. Shrinking mute's drawn rect (synthetic padding to
++			// match) is what actually makes them look the same size.
++			if (muteImage) {
++				const auto inset = badgeSize / 3;
++				const auto muteRect = QRect(
++					left + inset / 2,
++					inset / 2,
++					badgeSize - inset,
++					badgeSize - inset);
++				p.drawImage(muteRect, *muteImage);
++				left += badgeSize + badgeSkip;
++			}
++			if (pinImage) {
++				p.drawImage(QRect(left, 0, badgeSize, badgeSize), *pinImage);
++			}
++		}, badges->lifetime());
++	}
++	raw->sizeValue(
++	) | rpl::on_next([=](QSize outer) {
++		badges->move(
++			outer.width()
++				- st::mainMenuAccountBadgeRightMargin
++				- badges->width(),
++			(outer.height() - badges->height()) / 2);
++	}, badges->lifetime());
++
++	// Small always-visible online/offline dot, polled rather than wired to
++	// MTP::Instance::setStateChangedHandler - that's a single-subscriber
++	// slot other code (the main connecting-widget) already occupies, and
++	// clobbering it there would break that indicator instead of adding
++	// to it. Polling dcstate() is read-only, so it can't step on anyone.
++	const auto refreshConnected = [=] {
++		const auto dcState = account->mtp().dcstate();
++		const auto connected = (dcState != MTP::DisconnectedState)
++			&& (dcState != MTP::ConnectingState)
++			&& (dcState >= 0);
++		if (connected != state->connected) {
++			state->connected = connected;
++			if (state->connectionDot) {
++				state->connectionDot->update();
++			}
+ 		}
+-
+-		Ui::RpWidget userpic;
+-		Ui::PeerUserpicView view;
+-		base::unique_qptr<Ui::PopupMenu> menu;
+ 	};
+-	const auto state = raw->lifetime().make_state<State>(raw);
++	state->connectionPoll.setCallback(refreshConnected);
++	state->connectionPoll.callEach(1500);
++	refreshConnected();
+ 
+ 	const auto userpicSkip = 2 * st::mainMenuAccountLine + st::lineWidth;
+ 	const auto userpicSize = st::mainMenuAccountSize
+ 		+ userpicSkip * 2;
++
++	const auto connectionDot = Ui::CreateChild<Ui::RpWidget>(raw);
++	state->connectionDot = connectionDot;
++	const auto dotSize = st::mainMenuAccountStatusDot;
++	connectionDot->resize(dotSize, dotSize);
++	connectionDot->setAttribute(Qt::WA_TransparentForMouseEvents);
++	connectionDot->paintRequest(
++	) | rpl::on_next([=] {
++		auto p = Painter(connectionDot);
++		auto hq = PainterHighQualityEnabler(p);
++		p.setPen(Qt::NoPen);
++		p.setBrush(state->connected
++			? QColor(76, 217, 100)
++			: QColor(255, 59, 48));
++		p.drawEllipse(connectionDot->rect());
++	}, connectionDot->lifetime());
++
+ 	raw->heightValue(
+ 	) | rpl::on_next([=](int height) {
+ 		const auto left = st::mainMenuAddAccountButton.iconLeft
+ 			+ (st::settingsIconAdd.width() - userpicSize) / 2;
+ 		const auto top = (height - userpicSize) / 2;
+ 		state->userpic.setGeometry(left, top, userpicSize, userpicSize);
++		const auto dotSkip = st::mainMenuAccountStatusSkip;
++		connectionDot->move(
++			std::max(left - dotSkip - dotSize, 0),
++			(height - dotSize) / 2);
+ 	}, state->userpic.lifetime());
+ 
+ 	state->userpic.paintRequest(
+@@ -951,6 +1281,65 @@ void SetupAccountsWrap(
+ 				addAction);
+ 		}
+ 
++		state->menu->addSeparator();
++		state->menu->addAction(u"Proxy"_q, [=] {
++			window->show(MakeAccountProxyBox(account));
++		});
++		state->menu->addAction(u"2FA password"_q, [=] {
++			ShowTwoFactorBox(window, account);
++		});
++		state->menu->addAction(
++			account->pinned() ? u"Unpin"_q : u"Pin"_q,
++			[=] { togglePinned(); });
++		state->menu->addAction(
++			account->muted() ? u"Unmute"_q : u"Mute"_q,
++			[=] { toggleMuted(); });
++		const auto currentFolder = account->folderTag();
++		auto hasOtherFolders = false;
++		for (const auto &folder : folders) {
++			if (folder != currentFolder) {
++				hasOtherFolders = true;
++				break;
++			}
++		}
++		if (hasOtherFolders) {
++			// A row per folder gets unreadable once there are many folders -
++			// tuck them behind one submenu instead of listing every one
++			// inline in the account's own context menu.
++			auto submenu = std::make_unique<Ui::PopupMenu>(state->menu.get());
++			for (const auto &folder : folders) {
++				if (folder == currentFolder) {
++					continue;
++				}
++				submenu->addAction(folder, [=] { moveToFolder(folder); });
++			}
++			state->menu->addAction(u"Move to folder"_q, std::move(submenu));
++		}
++		state->menu->addAction(u"Move to new folder..."_q, [=] {
++			promptNewFolder();
++		});
++		if (!currentFolder.isEmpty()) {
++			state->menu->addAction(u"Remove from folder"_q, [=] {
++				moveToFolder(QString());
++			});
++		}
++		state->menu->addAction(u"Export this account..."_q, [=] {
++			const auto folder = QFileDialog::getExistingDirectory(
++				nullptr,
++				u"Choose a folder to export this account into"_q);
++			if (folder.isEmpty()) {
++				return;
++			}
++			auto phone = session->user()->phone();
++			if (phone.isEmpty()) {
++				phone = u"account"_q;
++			}
++			const auto accountFolder = folder + '/' + phone;
++			Storage::ExportAccountAsTdata(account, accountFolder);
++			WriteTwoFactorSidecar(account, accountFolder);
++			File::ShowInFolder(folder);
++		});
++
+ 		if (!isActive) {
+ 			auto logoutCallback = [=] {
+ 				const auto callback = [=](Fn<void()> &&close) {
+@@ -984,6 +1373,7 @@ AccountsList::AccountsList(
+ 	not_null<Window::SessionController*> controller)
+ : _controller(controller)
+ , _outer(container)
++, _outerWeak(container.get())
+ , _outerIndex(container->count()) {
+ 	setup();
+ }
+@@ -1055,8 +1445,22 @@ not_null<Ui::SlideWrap<Ui::SettingsButton>*> AccountsList::setupAdd() {
+ 	const auto button = result->entity();
+ 
+ 	using Environment = MTP::Environment;
+-	const auto add = [=](Environment environment, bool newWindow = false) {
+-		auto &domain = _controller->session().domain();
++	// A proxy is mandatory for a freshly-added account here too - no
++	// "skip" path on purpose, so a new login never makes its first
++	// connection from this machine's own direct/real IP.
++	// The proxy box (MakeNewProxyBox) stays open while the user picks a
++	// list/types, which gives the event loop time to run - and this menu
++	// (and "this" AccountsList with it) can legitimately close in the
++	// meantime, e.g. because opening that box closes the slide-out main
++	// menu it lives in. So these callbacks capture "controller" as its
++	// own plain copy up front (not via "this->_controller" later), and
++	// touch nothing else that depends on "this" staying alive.
++	const auto controller = _controller;
++	const auto addWithProxy = [controller](
++			Environment environment,
++			bool newWindow,
++			const MTP::ProxyData &proxy) {
++		auto &domain = controller->session().domain();
+ 		domain.removeRedundantAccounts();
+ 
+ 		auto found = false;
+@@ -1068,17 +1472,159 @@ not_null<Ui::SlideWrap<Ui::SettingsButton>*> AccountsList::setupAdd() {
+ 			}
+ 		}
+ 		if (!found && domain.accounts().size() >= domain.maxAccounts()) {
+-			_controller->show(
+-				Box(AccountsLimitBox, &_controller->session()));
+-		} else if (newWindow) {
+-			domain.addActivated(environment, true);
++			controller->show(
++				Box(AccountsLimitBox, &controller->session()));
++			return;
++		}
++		// Only drop the proxy from its pool list once we're actually
++		// past the failure case above - a failed attempt shouldn't burn
++		// through the list for nothing.
++		if (proxy.type != MTP::ProxyData::Type::None) {
++			MTP::GlobalProxyPool().removeMatching(proxy);
++		}
++		if (newWindow) {
++			domain.addActivated(environment, proxy, true);
+ 		} else {
+-			_controller->window().preventOrInvoke([=] {
+-				Core::App().setActivePrimaryWindow(&_controller->window());
+-				_controller->session().domain().addActivated(environment);
++			controller->window().preventOrInvoke([=] {
++				Core::App().setActivePrimaryWindow(&controller->window());
++				controller->session().domain().addActivated(
++					environment,
++					proxy);
+ 			});
+ 		}
+ 	};
++	const auto add = [=](Environment environment, bool newWindow = false) {
++		controller->show(MakeNewProxyBox([=](const MTP::ProxyData &proxy) {
++			addWithProxy(environment, newWindow, proxy);
++		}));
++	};
++
++	// Purchased/scraped accounts often come as a folder holding the tdata
++	// directory plus a sibling text file with the account's 2FA password,
++	// so it doesn't get lost once the tdata folder itself is imported and
++	// (usually) deleted. Checked in that folder's parent first (the normal
++	// layout - a tdata subfolder plus the password file beside it), then
++	// inside the selected folder itself, in case that's where it was put
++	// instead. Matches any file whose name contains "2fa", so "2FA.txt",
++	// "2fa_password.txt" etc. all work; takes the first match found.
++	const auto findSiblingTwoFactor = [](const QString &tdataFolder) {
++		const auto dirs = std::vector<QDir>{
++			QFileInfo(tdataFolder).dir(),
++			QDir(tdataFolder),
++		};
++		for (const auto &dir : dirs) {
++			for (const auto &info : dir.entryInfoList(QDir::Files)) {
++				if (!info.fileName().contains(u"2fa"_q, Qt::CaseInsensitive)) {
++					continue;
++				}
++				auto file = QFile(info.absoluteFilePath());
++				if (file.open(QIODevice::ReadOnly)) {
++					const auto text = QString::fromUtf8(
++						file.readAll()).trimmed();
++					if (!text.isEmpty()) {
++						return text;
++					}
++				}
++			}
++		}
++		return QString();
++	};
++
++	const auto importTdataProxied = [=](
++			Fn<MTP::ProxyData()> nextProxy) {
++		const auto folder = QFileDialog::getExistingDirectory(
++			nullptr,
++			u"Select a tdata folder to import"_q);
++		if (folder.isEmpty()) {
++			return;
++		}
++		auto &domain = controller->session().domain();
++		if (domain.accounts().size() >= domain.maxAccounts()) {
++			controller->show(
++				Box(AccountsLimitBox, &controller->session()));
++			return;
++		}
++		// nextProxy() hands out a fresh entry per account (see
++		// MakeMultiProxyBox) and already only consumes a pool entry once
++		// that specific account is confirmed added - nothing left to undo
++		// or clean up here regardless of how many ended up imported.
++		const auto imported = domain.addFromTdata(
++			folder,
++			MTP::Environment::Production,
++			nextProxy);
++		if (imported.empty()) {
++			// Unreadable folder, or every account in it is already added
++			// under another slot - either way nothing was written to disk
++			// for it.
++			controller->show(Ui::MakeInformBox(
++				u"Couldn't import this tdata folder: it's either unreadable, or its account(s) are already added."_q));
++			return;
++		}
++		if (const auto twoFactor = findSiblingTwoFactor(folder)
++				; !twoFactor.isEmpty()) {
++			// A folder holding several accounts at once (rare) has no way
++			// to tell whose password this is, so it's applied to all of
++			// them - still better than silently dropping it.
++			for (const auto &account : imported) {
++				account->setTwoFactorPassword(twoFactor);
++			}
++		}
++		if (imported.size() > 1) {
++			controller->show(Ui::MakeInformBox(
++				u"Imported %1 accounts from this tdata folder. Any that "
++				u"didn't get a real proxy (list ran out) will show "
++				u"disconnected - set one via right-click on the account."_q
++					.arg(imported.size())));
++		}
++	};
++	// A proxy is mandatory for a freshly-imported account: no "skip" path
++	// here on purpose, so an imported session never makes its first
++	// connection from this machine's own direct/real IP.
++	const auto importTdata = [=] {
++		controller->show(MakeMultiProxyBox(importTdataProxied));
++	};
++
++	const auto exportAccounts = [=] {
++		const auto folder = QFileDialog::getExistingDirectory(
++			nullptr,
++			u"Choose a folder to export accounts into"_q);
++		if (folder.isEmpty()) {
++			return;
++		}
++		// Grouped by the same account-folder tag as the accounts list
++		// itself, one top-level "<name>: <count>" directory per group, so
++		// the export mirrors how they're organized in the app instead of
++		// dumping every account as one flat pile of phone-numbered folders.
++		auto grouped = base::flat_map<
++			QString,
++			std::vector<not_null<::Main::Account*>>>();
++		for (const auto &account
++				: _controller->session().domain().orderedAccounts()) {
++			if (!account->sessionExists()) {
++				continue;
++			}
++			grouped[account->folderTag()].push_back(account);
++		}
++		auto unnamed = 0;
++		for (const auto &[tag, accounts] : grouped) {
++			const auto groupName = tag.isEmpty() ? u"No folder"_q : tag;
++			const auto groupFolder = folder
++				+ '/'
++				+ groupName
++				+ u": "_q
++				+ QString::number(accounts.size());
++			for (const auto &account : accounts) {
++				auto phone = account->session().user()->phone();
++				if (phone.isEmpty()) {
++					phone = u"account_%1"_q.arg(++unnamed);
++				}
++				const auto accountFolder = groupFolder + '/' + phone;
++				Storage::ExportAccountAsTdata(account, accountFolder);
++				WriteTwoFactorSidecar(account, accountFolder);
++			}
++		}
++		File::ShowInFolder(folder);
++	};
+ 
+ 	button->setAcceptBoth(true);
+ 	button->clicks(
+@@ -1088,22 +1634,14 @@ not_null<Ui::SlideWrap<Ui::SettingsButton>*> AccountsList::setupAdd() {
+ 			const auto newWindow = (modifiers & Qt::ControlModifier);
+ 			add(Environment::Production, newWindow);
+ 			return;
+-		} else if (which != Qt::RightButton
+-			|| !IsAltShift(button->clickModifiers())) {
+-#ifdef _DEBUG
+-			if (which != Qt::RightButton) {
+-				return;
+-			}
+-#else // _DEBUG
++		} else if (which != Qt::RightButton) {
+ 			return;
+-#endif // !_DEBUG
+ 		}
+ 		_contextMenu = base::make_unique_q<Ui::PopupMenu>(_outer);
+-		_contextMenu->addAction("Production Server", [=] {
+-			add(Environment::Production);
+-		});
+-		_contextMenu->addAction("Test Server", [=] {
+-			add(Environment::Test);
++		_contextMenu->addAction("Import tdata folder...", importTdata);
++		_contextMenu->addAction("Export accounts...", exportAccounts);
++		_contextMenu->addAction("Manage proxy pool...", [=] {
++			_controller->show(MakeProxyPoolManagerBox());
+ 		});
+ 		_contextMenu->popup(QCursor::pos());
+ 	}, button->lifetime());
+@@ -1112,98 +1650,530 @@ not_null<Ui::SlideWrap<Ui::SettingsButton>*> AccountsList::setupAdd() {
+ }
+ 
+ void AccountsList::rebuild() {
+-	const auto inner = _outer->insert(
++	delete _wrap.data();
++	_allReorders.clear();
++
++	const auto wrap = _outer->insert(
+ 		_outerIndex,
+ 		object_ptr<Ui::VerticalLayout>(_outer.get()));
++	_wrap = wrap;
++
++	const auto premiumLimit = _controller->session().domain().maxAccounts();
++	const auto list = _controller->session().domain().orderedAccounts();
+ 
+-	_reorder = std::make_unique<Ui::VerticalLayoutReorder>(inner);
+-	_reorder->updates(
+-	) | rpl::on_next([=](Ui::VerticalLayoutReorder::Single data) {
+-		using State = Ui::VerticalLayoutReorder::State;
+-		if (data.state == State::Started) {
+-			++_reordering;
++	// Group accounts by their folder tag (see Main::Account::folderTag).
++	// Folders are purely a UI grouping derived from that per-account tag -
++	// there's no separate "list of folders" stored anywhere, so an empty
++	// folder simply stops existing once its last account leaves it.
++	auto folderOrder = std::vector<QString>();
++	auto grouped = base::flat_map<
++		QString,
++		std::vector<not_null<::Main::Account*>>>();
++	auto ungrouped = std::vector<not_null<::Main::Account*>>();
++	for (const auto &account : list) {
++		if (!account->sessionExists() || list.size() == 1) {
++			continue;
++		}
++		const auto tag = account->folderTag();
++		if (tag.isEmpty()) {
++			ungrouped.push_back(account);
+ 		} else {
+-			Ui::PostponeCall(inner, [=] {
+-				--_reordering;
+-			});
+-			if (data.state == State::Applied) {
+-				std::vector<uint64> order;
+-				order.reserve(inner->count());
+-				for (auto i = 0; i < inner->count(); i++) {
+-					for (const auto &[account, button] : _watched) {
+-						if (button.get() == inner->widgetAt(i)) {
+-							order.push_back(account->session().uniqueId());
+-						}
+-					}
+-				}
+-				Core::App().settings().setAccountsOrder(order);
+-				Core::App().saveSettings();
++			auto &bucket = grouped[tag];
++			if (bucket.empty()) {
++				folderOrder.push_back(tag);
+ 			}
++			bucket.push_back(account);
+ 		}
+-	}, inner->lifetime());
++	}
++	{
++		// Pinned folders sort first, same as pinned accounts. Custom,
++		// user-dragged order (persisted separately from the account order
++		// below, since folders aren't accounts) breaks ties within each
++		// pinned/unpinned tier - any folder not yet in the saved order
++		// (new folders) falls back to whatever order it was first
++		// encountered in above.
++		const auto &state = GlobalFoldersUiState();
++		ranges::stable_sort(folderOrder, [&](
++				const QString &a,
++				const QString &b) {
++			const auto aPinned = state.pinned.contains(a);
++			const auto bPinned = state.pinned.contains(b);
++			if (aPinned != bPinned) {
++				return aPinned && !bPinned;
++			}
++			return ranges::find(state.order, a)
++				< ranges::find(state.order, b);
++		});
++	}
+ 
+-	const auto premiumLimit = _controller->session().domain().maxAccounts();
+-	const auto list = _controller->session().domain().orderedAccounts();
+-	for (const auto &account : list) {
++	auto renderedCount = 0;
++	const auto addAccountButton = [=, &renderedCount](
++			not_null<Ui::VerticalLayout*> container,
++			not_null<::Main::Account*> account,
++			bool indented) {
+ 		auto i = _watched.find(account);
+ 		Assert(i != _watched.end());
+-
+ 		auto &button = i->second;
+-		if (!account->sessionExists() || list.size() == 1) {
+-			button = nullptr;
+-		} else if (!button) {
+-			const auto nextIsLocked = (inner->count() >= premiumLimit);
+-			auto callback = [=](Qt::KeyboardModifiers modifiers) {
+-				if (_reordering) {
+-					return;
+-				}
+-				if (account == &_controller->session().account()) {
+-					_closeRequests.fire({});
+-					return;
+-				}
+-				const auto newWindow = (modifiers & Qt::ControlModifier);
+-				auto activate = [=, guard = _accountSwitchGuard.make_guard()]{
+-					if (guard) {
+-						_reorder->finishReordering();
+-						if (newWindow) {
+-							_closeRequests.fire({});
+-							Core::App().ensureSeparateWindowFor(account);
+-						}
+-						Core::App().domain().maybeActivate(account);
++		const auto nextIsLocked = (renderedCount >= premiumLimit);
++		++renderedCount;
++		if (button) {
++			return;
++		}
++		auto callback = [=](Qt::KeyboardModifiers modifiers) {
++			if (_reordering) {
++				return;
++			}
++			if (account == &_controller->session().account()) {
++				_closeRequests.fire({});
++				return;
++			}
++			const auto newWindow = (modifiers & Qt::ControlModifier);
++			auto activate = [=, guard = _accountSwitchGuard.make_guard()]{
++				if (guard) {
++					for (const auto reorder : _allReorders) {
++						reorder->finishReordering();
+ 					}
+-				};
+-				if (const auto window = Core::App().separateWindowFor(
+-						account)) {
+-					_closeRequests.fire({});
+-					window->activate();
+-				} else {
+-					base::call_delayed(
+-						st::defaultRippleAnimation.hideDuration,
+-						account,
+-						std::move(activate));
++					if (newWindow) {
++						_closeRequests.fire({});
++						Core::App().ensureSeparateWindowFor(account);
++					}
++					Core::App().domain().maybeActivate(account);
+ 				}
+ 			};
+-			button.reset(inner->add(MakeAccountButton(
+-				inner,
++			if (const auto window = Core::App().separateWindowFor(
++					account)) {
++				_closeRequests.fire({});
++				window->activate();
++			} else {
++				base::call_delayed(
++					st::defaultRippleAnimation.hideDuration,
++					account,
++					std::move(activate));
++			}
++		};
++		button.reset(container->add(
++			MakeAccountButton(
++				container,
+ 				_controller,
+ 				account,
+ 				std::move(callback),
+-				nextIsLocked)));
++				nextIsLocked,
++				folderOrder,
++				[=](QString folder) { moveAccountToFolder(account, folder); },
++				[=] { promptNewFolder(account); },
++				[=] { togglePinned(account); },
++				[=] { toggleMuted(account); }),
++			// Shift accounts inside a folder to the right, so it's visually
++			// clear they belong to it (not just implied by where they sit
++			// between headers).
++			indented ? style::margins(28, 0, 0, 0) : style::margins()));
++	};
++
++	// Each folder's header + (if expanded) its own accounts live in their
++	// own block, a direct child of wrap - so the whole block can be
++	// dragged as one unit to reorder folders below, while a *separate*
++	// reorder scoped to just its own account sub-list handles reordering
++	// accounts within that one folder.
++	auto folderBlocks = std::vector<not_null<Ui::VerticalLayout*>>();
++	// Whole-block dragging can only start from a press on the folder's own
++	// header row - the block itself is a plain, non-interactive container
++	// and never actually receives mouse events (its header/account button
++	// children do), so VerticalLayoutReorder needs to be told explicitly
++	// which widget to listen on for each block index (setMouseEventProxy
++	// below), or it silently never sees a single press.
++	auto folderHeaderButtons = std::vector<not_null<Ui::RpWidget*>>();
++	auto blockFolder = base::flat_map<not_null<Ui::VerticalLayout*>, QString>();
++	auto accountContainers = std::vector<not_null<Ui::VerticalLayout*>>();
++	auto perFolderReorders = std::vector<std::pair<
++		not_null<Ui::VerticalLayoutReorder*>,
++		not_null<Ui::VerticalLayout*>>>();
++	for (const auto &folder : folderOrder) {
++		const auto block = wrap->add(object_ptr<Ui::VerticalLayout>(wrap));
++		folderBlocks.push_back(block);
++		blockFolder.emplace(block, folder);
++		folderHeaderButtons.push_back(
++			addFolderHeader(block, folder, grouped[folder], folderOrder));
++		if (!GlobalFoldersUiState().collapsed.contains(folder)) {
++			const auto folderInner = block->add(
++				object_ptr<Ui::VerticalLayout>(block));
++			for (const auto &account : grouped[folder]) {
++				addAccountButton(folderInner, account, true);
++			}
++			folderInner->resizeToWidth(_outer->width());
++			accountContainers.push_back(folderInner);
++			const auto folderReorder = folderInner->lifetime(
++			).make_state<Ui::VerticalLayoutReorder>(folderInner);
++			perFolderReorders.emplace_back(folderReorder, folderInner);
++		} else {
++			renderedCount += int(grouped[folder].size());
+ 		}
+ 	}
+-	inner->resizeToWidth(_outer->width());
+ 
+-	const auto count = int(list.size());
++	const auto inner = wrap->add(object_ptr<Ui::VerticalLayout>(wrap));
++	const auto innerReorder = inner->lifetime(
++	).make_state<Ui::VerticalLayoutReorder>(inner);
+ 
+-	_reorder->addPinnedInterval(
++	for (const auto &account : ungrouped) {
++		addAccountButton(inner, account, false);
++	}
++	inner->resizeToWidth(_outer->width());
++	accountContainers.push_back(inner);
++
++	// Recomputes the *entire* flat account order (every folder's own list
++	// plus the ungrouped list) from what's actually on screen right now -
++	// shared by every per-list reorder below, so a drag in any one of
++	// them always ends up saving a fully consistent order for all of them.
++	const auto persistAccountOrder = [=] {
++		std::vector<uint64> order;
++		for (const auto &container : accountContainers) {
++			for (auto i = 0; i < container->count(); i++) {
++				for (const auto &[account, button] : _watched) {
++					if (button.get() == container->widgetAt(i)) {
++						order.push_back(account->session().uniqueId());
++					}
++				}
++			}
++		}
++		Core::App().settings().setAccountsOrder(order);
++		Core::App().saveSettings();
++	};
++	const auto wireAccountReorder = [=](
++			not_null<Ui::VerticalLayoutReorder*> reorder,
++			not_null<Ui::VerticalLayout*> container) {
++		reorder->updates(
++		) | rpl::on_next([=](Ui::VerticalLayoutReorder::Single data) {
++			using State = Ui::VerticalLayoutReorder::State;
++			if (data.state == State::Started) {
++				++_reordering;
++			} else {
++				Ui::PostponeCall(container, [=] {
++					--_reordering;
++				});
++				if (data.state == State::Applied) {
++					persistAccountOrder();
++				}
++			}
++		}, container->lifetime());
++	};
++	for (const auto &[reorder, container] : perFolderReorders) {
++		wireAccountReorder(reorder, container);
++		_allReorders.push_back(reorder);
++	}
++	wireAccountReorder(innerReorder, inner);
++	_allReorders.push_back(innerReorder);
++
++	const auto ungroupedCount = int(ungrouped.size());
++	innerReorder->addPinnedInterval(
+ 		premiumLimit,
+-		std::max(1, count - premiumLimit));
++		std::max(1, ungroupedCount - premiumLimit));
++
++	// Whole-folder drag reordering: wrap's own children up to
++	// folderBlocks.size() are the folder blocks, and "inner" (ungrouped
++	// accounts) is always the one right after them - pin that one spot so
++	// only folder blocks themselves can be dragged here.
++	if (!folderBlocks.empty()) {
++		const auto blocksReorder = wrap->lifetime(
++		).make_state<Ui::VerticalLayoutReorder>(wrap);
++		blocksReorder->addPinnedInterval(int(folderBlocks.size()), 1);
++		blocksReorder->setMouseEventProxy([=](int i) -> not_null<Ui::RpWidget*> {
++			return (i >= 0 && i < int(folderHeaderButtons.size()))
++				? folderHeaderButtons[i]
++				: wrap->widgetAt(i);
++		});
++		blocksReorder->updates(
++		) | rpl::on_next([=](Ui::VerticalLayoutReorder::Single data) {
++			using State = Ui::VerticalLayoutReorder::State;
++			if (data.state == State::Started) {
++				++_reordering;
++			} else {
++				Ui::PostponeCall(wrap, [=] {
++					--_reordering;
++				});
++				if (data.state == State::Applied) {
++					std::vector<QString> order;
++					order.reserve(folderBlocks.size());
++					for (auto i = 0; i < int(folderBlocks.size()); i++) {
++						const auto widget = wrap->widgetAt(i);
++						for (const auto &[block, name] : blockFolder) {
++							if (block.get() == widget) {
++								order.push_back(name);
++							}
++						}
++					}
++					GlobalFoldersUiState().order = order;
++					SaveFoldersUiState();
++				}
++			}
++		}, wrap->lifetime());
++		_allReorders.push_back(blocksReorder);
++	}
++
++	wrap->resizeToWidth(_outer->width());
+ 
++	const auto totalCount = int(list.size());
+ 	_addAccount->toggle(
+-		(count < ::Main::Domain::kPremiumMaxAccounts),
++		(totalCount < ::Main::Domain::kPremiumMaxAccounts),
+ 		anim::type::instant);
+ 
+-	_reorder->start();
++	for (const auto reorder : _allReorders) {
++		reorder->start();
++	}
++}
++
++void AccountsList::scheduleRebuild() {
++	// Don't wrap _outer.get() here: by the time this runs, the panel that
++	// _outer lives in may have already closed (a box opened on top of it),
++	// making the raw pointer stale. _outerWeak was captured back when the
++	// object was still guaranteed alive, so just copy that instead.
++	const auto weak = _outerWeak;
++	crl::on_main([=, guard = _rebuildGuard.make_guard()] {
++		if (guard && weak) {
++			rebuild();
++		}
++	});
++}
++
++not_null<Ui::SettingsButton*> AccountsList::addFolderHeader(
++		not_null<Ui::VerticalLayout*> container,
++		const QString &folder,
++		const std::vector<not_null<::Main::Account*>> &accountsIn,
++		const std::vector<QString> &folderOrderIn) {
++	const auto accounts = accountsIn;
++	const auto folderOrder = folderOrderIn;
++	const auto collapsed = GlobalFoldersUiState().collapsed.contains(folder);
++	const auto arrow = QString(QChar(collapsed ? 0x25B8 : 0x25BE));
++	const auto text = arrow + u" "_q + folder + u" (%1)"_q.arg(int(accounts.size()));
++	const auto button = container->add(object_ptr<Ui::SettingsButton>(
++		container,
++		rpl::single(text),
++		st::mainMenuAddAccountButton));
++	button->setAcceptBoth(true);
++
++	// A folder has no photo of its own - paint a colored circle with its
++	// initial in the same spot an account row's userpic sits, instead of
++	// leaving that space empty next to account rows that do have one.
++	const auto icon = Ui::CreateChild<Ui::RpWidget>(button);
++	icon->setAttribute(Qt::WA_TransparentForMouseEvents);
++	auto nameHash = uint64(0);
++	for (const auto &ch : folder) {
++		nameHash = nameHash * 31 + ch.unicode();
++	}
++	const auto emptyUserpic = std::make_shared<Ui::EmptyUserpic>(
++		Ui::EmptyUserpic::UserpicColor(Ui::EmptyUserpic::ColorIndex(nameHash)),
++		folder);
++	const auto userpicSkip = 2 * st::mainMenuAccountLine + st::lineWidth;
++	const auto userpicSize = st::mainMenuAccountSize + userpicSkip * 2;
++	// button->height() isn't reliably its final value synchronously right
++	// after construction (same as the account row above) - track it
++	// reactively instead of reading it once.
++	button->heightValue(
++	) | rpl::on_next([=](int height) {
++		const auto left = st::mainMenuAddAccountButton.iconLeft
++			+ (st::settingsIconAdd.width() - userpicSize) / 2;
++		const auto top = (height - userpicSize) / 2;
++		icon->setGeometry(left, top, userpicSize, userpicSize);
++	}, icon->lifetime());
++	icon->show();
++	icon->raise();
++	icon->paintRequest(
++	) | rpl::on_next([=] {
++		auto p = Painter(icon);
++		const auto size = st::mainMenuAccountSize;
++		const auto full = size + userpicSkip * 2;
++		emptyUserpic->paintCircle(p, userpicSkip, userpicSkip, full, size);
++	}, icon->lifetime());
++
++	// Aggregate unread count across every account currently in this
++	// folder - polled rather than merged from each session's own change
++	// stream, since the number of accounts (and so the number of streams
++	// to merge) varies per folder and rpl::merge only takes a fixed,
++	// compile-time argument list.
++	{
++		const auto container = Badge::AddRight(
++			button,
++			st::mainMenuAccountLine);
++		container->show();
++		container->raise();
++
++		const auto events = container->lifetime(
++		).make_state<rpl::event_stream<Badge::UnreadBadge>>();
++		const auto recompute = [=] {
++			auto total = 0;
++			auto anyUnmuted = false;
++			for (const auto &account : accounts) {
++				if (!account->sessionExists()) {
++					continue;
++				}
++				auto &owner = account->session().data();
++				total += owner.unreadWithMentionsBadge();
++				if (!owner.unreadWithMentionsBadgeMuted()) {
++					anyUnmuted = true;
++				}
++			}
++			events->fire(Badge::UnreadBadge{ total, !anyUnmuted });
++		};
++		const auto poll = container->lifetime().make_state<base::Timer>();
++		poll->setCallback(recompute);
++		poll->callEach(1000);
++		recompute();
++		const auto unread = Badge::CreateUnread(
++			container.get(),
++			events->events());
++		unread->sizeValue(
++		) | rpl::on_next([=](const QSize &s) {
++			container->resize(s);
++		}, container->lifetime());
++	}
++
++	// A standalone overlay pinned to the folder row's own right edge,
++	// same as the account row's pin/mute badges - kept independent of the
++	// Badge::AddRight/unread-count pairing above rather than folded into
++	// it, so it can never end up fighting that pairing's own width/padding
++	// math for space (see the account row's own version of this for the
++	// full story on how that went wrong there).
++	const auto isPinned = GlobalFoldersUiState().pinned.contains(folder);
++	if (isPinned) {
++		const auto pinBadge = Ui::CreateChild<Ui::RpWidget>(button);
++		const auto badgeSize = st::mainMenuAccountBadgeSize;
++		pinBadge->resize(badgeSize, badgeSize);
++		const auto pinImage = st::dialogsPinnedIcon.icon.instance(
++			st::dialogsUnreadBgMuted->c);
++		pinBadge->paintRequest(
++		) | rpl::on_next([=] {
++			auto p = Painter(pinBadge);
++			p.drawImage(QRect(0, 0, badgeSize, badgeSize), pinImage);
++		}, pinBadge->lifetime());
++		// A folder header is never indented (only the accounts nested
++		// under it are), so its width is always exactly the panel's own -
++		// use that fixed constant instead of the button's own sizeValue(),
++		// which (unlike heightValue(), see the icon geometry above) wasn't
++		// reliably reflecting the post-rebuild width when this folder
++		// collapsed as a side effect of expanding a different one, leaving
++		// the badge positioned from a stale width until the whole panel
++		// was torn down and rebuilt from scratch.
++		button->heightValue(
++		) | rpl::on_next([=](int height) {
++			pinBadge->move(
++				st::mainMenuWidth
++					- st::mainMenuAccountBadgeRightMargin
++					- badgeSize,
++				(height - badgeSize) / 2);
++		}, pinBadge->lifetime());
++	}
++
++	button->clicks(
++	) | rpl::on_next([=](Qt::MouseButton which) {
++		if (which == Qt::LeftButton) {
++			auto &state = GlobalFoldersUiState();
++			if (state.collapsed.contains(folder)) {
++				state.collapsed.remove(folder);
++				for (const auto &other : folderOrder) {
++					if (other != folder) {
++						state.collapsed.insert(other);
++					}
++				}
++			} else {
++				state.collapsed.insert(folder);
++			}
++			SaveFoldersUiState();
++			scheduleRebuild();
++			return;
++		} else if (which != Qt::RightButton) {
++			return;
++		}
++		_folderContextMenu = base::make_unique_q<Ui::PopupMenu>(container);
++		_folderContextMenu->addAction(
++			GlobalFoldersUiState().pinned.contains(folder)
++				? u"Unpin folder"_q
++				: u"Pin folder"_q,
++			[=] { toggleFolderPinned(folder); });
++		_folderContextMenu->addAction(u"Rename folder"_q, [=] {
++			promptRenameFolder(folder);
++		});
++		_folderContextMenu->addAction(u"Remove folder"_q, [=] {
++			removeFolder(folder);
++		});
++		_folderContextMenu->popup(QCursor::pos());
++	}, button->lifetime());
++
++	return button;
++}
++
++void AccountsList::moveAccountToFolder(
++		not_null<::Main::Account*> account,
++		const QString &folder) {
++	account->setFolderTag(folder);
++	scheduleRebuild();
++}
++
++void AccountsList::togglePinned(not_null<::Main::Account*> account) {
++	account->setPinned(!account->pinned());
++	scheduleRebuild();
++}
++
++void AccountsList::toggleMuted(not_null<::Main::Account*> account) {
++	account->setMuted(!account->muted());
++	scheduleRebuild();
++}
++
++void AccountsList::toggleFolderPinned(const QString &folder) {
++	auto &state = GlobalFoldersUiState();
++	if (state.pinned.contains(folder)) {
++		state.pinned.remove(folder);
++	} else {
++		state.pinned.insert(folder);
++	}
++	SaveFoldersUiState();
++	scheduleRebuild();
++}
++
++void AccountsList::promptNewFolder(not_null<::Main::Account*> account) {
++	PromptFolderName(_controller, u"New folder"_q, QString(), [=](
++			QString name) {
++		moveAccountToFolder(account, name);
++	});
++}
++
++void AccountsList::promptRenameFolder(const QString &folder) {
++	PromptFolderName(_controller, u"Rename folder"_q, folder, [=](
++			QString name) {
++		if (name == folder) {
++			return;
++		}
++		for (const auto &account
++				: _controller->session().domain().orderedAccounts()) {
++			if (account->folderTag() == folder) {
++				account->setFolderTag(name);
++			}
++		}
++		auto &state = GlobalFoldersUiState();
++		if (state.collapsed.remove(folder)) {
++			state.collapsed.insert(name);
++		}
++		if (state.pinned.remove(folder)) {
++			state.pinned.insert(name);
++		}
++		ranges::replace(state.order, folder, name);
++		SaveFoldersUiState();
++		scheduleRebuild();
++	});
++}
++
++void AccountsList::removeFolder(const QString &folder) {
++	for (const auto &account
++			: _controller->session().domain().orderedAccounts()) {
++		if (account->folderTag() == folder) {
++			account->setFolderTag(QString());
++		}
++	}
++	auto &state = GlobalFoldersUiState();
++	state.collapsed.remove(folder);
++	state.pinned.remove(folder);
++	state.order.erase(
++		ranges::remove(state.order, folder),
++		state.order.end());
++	SaveFoldersUiState();
++	scheduleRebuild();
+ }
+ 
+ void BuildInformationSection(SectionBuilder &builder) {
+diff --git a/Telegram/SourceFiles/settings/sections/settings_main.cpp b/Telegram/SourceFiles/settings/sections/settings_main.cpp
+index d4f3633..22c0313 100644
+--- a/Telegram/SourceFiles/settings/sections/settings_main.cpp
++++ b/Telegram/SourceFiles/settings/sections/settings_main.cpp
+@@ -18,6 +18,8 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
+ #include "apiwrap.h"
+ #include "base/call_delayed.h"
+ #include "base/platform/base_platform_info.h"
++#include "boxes/connection_box.h"
++#include "mtproto/proxy_pool.h"
+ #include "boxes/language_box.h"
+ #include "boxes/star_gift_box.h"
+ #include "boxes/username_box.h"
+@@ -659,8 +661,25 @@ void Main::fillTopBarMenu(const Ui::Menu::MenuCallback &addAction) {
+ 	const auto &list = Core::App().domain().accounts();
+ 	if (list.size() < Core::App().domain().maxAccounts()) {
+ 		addAction(tr::lng_menu_add_account(tr::now), [=] {
+-			Core::App().setActivePrimaryWindow(&controller()->window());
+-			Core::App().domain().addActivated(MTP::Environment{});
++			// MakeNewProxyBox stays open while the user types; capture a
++			// weak pointer to the controller now rather than calling
++			// controller() again later, in case this settings page (and
++			// "this" with it) is gone by the time the box's callback runs.
++			const auto weak = base::make_weak(controller());
++			controller()->show(MakeNewProxyBox([=](
++					const MTP::ProxyData &proxy) {
++				const auto strong = weak.get();
++				if (!strong) {
++					return;
++				}
++				if (proxy.type != MTP::ProxyData::Type::None) {
++					MTP::GlobalProxyPool().removeMatching(proxy);
++				}
++				Core::App().setActivePrimaryWindow(&strong->window());
++				Core::App().domain().addActivated(
++					MTP::Environment{},
++					proxy);
++			}));
+ 		}, &st::menuIconAddAccount);
+ 	}
+ 	if (!controller()->session().supportMode()) {
+diff --git a/Telegram/SourceFiles/settings/settings_codes.cpp b/Telegram/SourceFiles/settings/settings_codes.cpp
+index d38b931..9f55a46 100644
+--- a/Telegram/SourceFiles/settings/settings_codes.cpp
++++ b/Telegram/SourceFiles/settings/settings_codes.cpp
+@@ -154,7 +154,7 @@ auto GenerateCodes() {
+ 				return (environment == MTP::Environment::Production)
+ 					? MTP::Environment::Test
+ 					: MTP::Environment::Production;
+-			}());
++			}(), MTP::ProxyData());
+ 			Ui::Toast::Show((environment == MTP::Environment::Production)
+ 				? "Switched to the test environment."
+ 				: "Switched to the production environment.");
+diff --git a/Telegram/SourceFiles/storage/storage_account.cpp b/Telegram/SourceFiles/storage/storage_account.cpp
+index 10b6742..92e6f6d 100644
+--- a/Telegram/SourceFiles/storage/storage_account.cpp
++++ b/Telegram/SourceFiles/storage/storage_account.cpp
+@@ -23,6 +23,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
+ #include "mtproto/mtproto_config.h"
+ #include "mtproto/mtproto_dc_options.h"
+ #include "mtproto/mtp_instance.h"
++#include "mtproto/mtproto_proxy_data.h"
+ #include "lang/lang_keys.h"
+ #include "history/history.h"
+ #include "core/application.h"
+@@ -104,6 +105,9 @@ enum { // Local Storage Keys
+ 	lskMediaLastPlaybackPositions = 0x1c, // no data
+ 	lskBotStorages = 0x1d, // data: PeerId botId
+ 	lskPrefs = 0x1e, // no data
++	lskProxySettings = 0x1f, // no data
++	lskAccountFolder = 0x20, // no data
++	lskAccountPinned = 0x21, // no data
+ };
+ 
+ auto EmptyMessageDraftSources()
+@@ -260,6 +264,9 @@ base::flat_set<QString> Account::collectGoodNames() const {
+ 		_legacyBackgroundKeyDay,
+ 		_recentHashtagsAndBotsKey,
+ 		_exportSettingsKey,
++		_proxySettingsKey,
++		_accountFolderKey,
++		_accountPinnedKey,
+ 		_trustedPeersKey,
+ 		_installedMasksKey,
+ 		_recentMasksKey,
+@@ -361,6 +368,9 @@ Account::ReadMapResult Account::readMapWith(
+ 	quint64 savedGifsKey = 0;
+ 	quint64 legacyBackgroundKeyDay = 0, legacyBackgroundKeyNight = 0;
+ 	quint64 userSettingsKey = 0, recentHashtagsAndBotsKey = 0, exportSettingsKey = 0;
++	quint64 proxySettingsKey = 0;
++	quint64 accountFolderKey = 0;
++	quint64 accountPinnedKey = 0;
+ 	quint64 searchSuggestionsKey = 0;
+ 	quint64 roundPlaceholderKey = 0;
+ 	quint64 inlineBotsDownloadsKey = 0;
+@@ -462,6 +472,15 @@ Account::ReadMapResult Account::readMapWith(
+ 		case lskExportSettings: {
+ 			map.stream >> exportSettingsKey;
+ 		} break;
++		case lskProxySettings: {
++			map.stream >> proxySettingsKey;
++		} break;
++		case lskAccountFolder: {
++			map.stream >> accountFolderKey;
++		} break;
++		case lskAccountPinned: {
++			map.stream >> accountPinnedKey;
++		} break;
+ 		case lskMasksKeys: {
+ 			map.stream
+ 				>> installedMasksKey
+@@ -541,6 +560,9 @@ Account::ReadMapResult Account::readMapWith(
+ 	_settingsKey = userSettingsKey;
+ 	_recentHashtagsAndBotsKey = recentHashtagsAndBotsKey;
+ 	_exportSettingsKey = exportSettingsKey;
++	_proxySettingsKey = proxySettingsKey;
++	_accountFolderKey = accountFolderKey;
++	_accountPinnedKey = accountPinnedKey;
+ 	_searchSuggestionsKey = searchSuggestionsKey;
+ 	_roundPlaceholderKey = roundPlaceholderKey;
+ 	_inlineBotsDownloadsKey = inlineBotsDownloadsKey;
+@@ -650,6 +672,9 @@ void Account::writeMap() {
+ 	if (_settingsKey) mapSize += sizeof(quint32) + sizeof(quint64);
+ 	if (_recentHashtagsAndBotsKey) mapSize += sizeof(quint32) + sizeof(quint64);
+ 	if (_exportSettingsKey) mapSize += sizeof(quint32) + sizeof(quint64);
++	if (_proxySettingsKey) mapSize += sizeof(quint32) + sizeof(quint64);
++	if (_accountFolderKey) mapSize += sizeof(quint32) + sizeof(quint64);
++	if (_accountPinnedKey) mapSize += sizeof(quint32) + sizeof(quint64);
+ 	if (_installedMasksKey || _recentMasksKey || _archivedMasksKey) {
+ 		mapSize += sizeof(quint32) + 3 * sizeof(quint64);
+ 	}
+@@ -715,6 +740,15 @@ void Account::writeMap() {
+ 	if (_exportSettingsKey) {
+ 		mapData.stream << quint32(lskExportSettings) << quint64(_exportSettingsKey);
+ 	}
++	if (_proxySettingsKey) {
++		mapData.stream << quint32(lskProxySettings) << quint64(_proxySettingsKey);
++	}
++	if (_accountFolderKey) {
++		mapData.stream << quint32(lskAccountFolder) << quint64(_accountFolderKey);
++	}
++	if (_accountPinnedKey) {
++		mapData.stream << quint32(lskAccountPinned) << quint64(_accountPinnedKey);
++	}
+ 	if (_installedMasksKey || _recentMasksKey || _archivedMasksKey) {
+ 		mapData.stream << quint32(lskMasksKeys);
+ 		mapData.stream
+@@ -788,6 +822,9 @@ void Account::reset() {
+ 	_archivedCustomEmojiKey = 0;
+ 	_legacyBackgroundKeyDay = _legacyBackgroundKeyNight = 0;
+ 	_settingsKey = _recentHashtagsAndBotsKey = _exportSettingsKey = 0;
++	_proxySettingsKey = 0;
++	_accountFolderKey = 0;
++	_accountPinnedKey = 0;
+ 	_searchSuggestionsKey = 0;
+ 	_roundPlaceholderKey = 0;
+ 	_inlineBotsDownloadsKey = 0;
+@@ -3098,6 +3135,129 @@ Export::Settings Account::readExportSettings() {
+ 		: Export::Settings();
+ }
+ 
++void Account::writeProxySettings(const MTP::ProxyData &proxy) {
++	if (proxy.type == MTP::ProxyData::Type::None) {
++		if (_proxySettingsKey) {
++			ClearKey(_proxySettingsKey, _basePath);
++			_proxySettingsKey = 0;
++			writeMapDelayed();
++		}
++		return;
++	}
++	if (!_proxySettingsKey) {
++		_proxySettingsKey = GenerateKey(_basePath);
++		writeMapQueued();
++	}
++	quint32 size = sizeof(quint32) * 2
++		+ Serialize::stringSize(proxy.host)
++		+ Serialize::stringSize(proxy.user)
++		+ Serialize::stringSize(proxy.password);
++	EncryptedDescriptor data(size);
++	data.stream
++		<< quint32(proxy.type)
++		<< quint32(proxy.port)
++		<< proxy.host
++		<< proxy.user
++		<< proxy.password;
++
++	FileWriteDescriptor file(_proxySettingsKey, _basePath);
++	file.writeEncrypted(data, _localKey);
++}
++
++MTP::ProxyData Account::readProxySettings() {
++	if (!_proxySettingsKey) {
++		return MTP::ProxyData();
++	}
++
++	FileReadDescriptor file;
++	if (!ReadEncryptedFile(file, _proxySettingsKey, _basePath, _localKey)) {
++		ClearKey(_proxySettingsKey, _basePath);
++		_proxySettingsKey = 0;
++		writeMapDelayed();
++		return MTP::ProxyData();
++	}
++
++	quint32 type = 0, port = 0;
++	QString host, user, password;
++	file.stream >> type >> port >> host >> user >> password;
++	if (file.stream.status() != QDataStream::Ok) {
++		return MTP::ProxyData();
++	}
++	auto result = MTP::ProxyData();
++	result.type = static_cast<MTP::ProxyData::Type>(type);
++	result.port = port;
++	result.host = host;
++	result.user = user;
++	result.password = password;
++	return result;
++}
++
++void Account::writeFolderTag(const QString &folder) {
++	if (folder.isEmpty()) {
++		if (_accountFolderKey) {
++			ClearKey(_accountFolderKey, _basePath);
++			_accountFolderKey = 0;
++			writeMapDelayed();
++		}
++		return;
++	}
++	if (!_accountFolderKey) {
++		_accountFolderKey = GenerateKey(_basePath);
++		writeMapQueued();
++	}
++	const auto size = Serialize::stringSize(folder);
++	EncryptedDescriptor data(size);
++	data.stream << folder;
++
++	FileWriteDescriptor file(_accountFolderKey, _basePath);
++	file.writeEncrypted(data, _localKey);
++}
++
++QString Account::readFolderTag() {
++	if (!_accountFolderKey) {
++		return QString();
++	}
++
++	FileReadDescriptor file;
++	if (!ReadEncryptedFile(file, _accountFolderKey, _basePath, _localKey)) {
++		ClearKey(_accountFolderKey, _basePath);
++		_accountFolderKey = 0;
++		writeMapDelayed();
++		return QString();
++	}
++
++	QString folder;
++	file.stream >> folder;
++	if (file.stream.status() != QDataStream::Ok) {
++		return QString();
++	}
++	return folder;
++}
++
++void Account::writePinned(bool pinned) {
++	if (!pinned) {
++		if (_accountPinnedKey) {
++			ClearKey(_accountPinnedKey, _basePath);
++			_accountPinnedKey = 0;
++			writeMapDelayed();
++		}
++		return;
++	}
++	if (_accountPinnedKey) {
++		return;
++	}
++	_accountPinnedKey = GenerateKey(_basePath);
++	writeMapQueued();
++
++	EncryptedDescriptor data(0);
++	FileWriteDescriptor file(_accountPinnedKey, _basePath);
++	file.writeEncrypted(data, _localKey);
++}
++
++bool Account::readPinned() {
++	return _accountPinnedKey != 0;
++}
++
+ void Account::setMediaLastPlaybackPosition(DocumentId id, crl::time time) {
+ 	auto &map = _mediaLastPlaybackPosition;
+ 	const auto i = ranges::find(
+@@ -3843,4 +4003,17 @@ void Account::writePrefImpl<bool>(std::string_view key, bool value) {
+ 	writePrefGeneric(key, value ? "\x1"_q : QByteArray());
+ }
+ 
++template <>
++std::optional<QString> Account::readPrefImpl<QString>(std::string_view key) {
++	if (const auto data = readPrefGeneric(key)) {
++		return QString::fromUtf8(*data);
++	}
++	return {};
++}
++
++template <>
++void Account::writePrefImpl<QString>(std::string_view key, QString value) {
++	writePrefGeneric(key, value.toUtf8());
++}
++
+ } // namespace Storage
+diff --git a/Telegram/SourceFiles/storage/storage_account.h b/Telegram/SourceFiles/storage/storage_account.h
+index a35dcac..1e11094 100644
+--- a/Telegram/SourceFiles/storage/storage_account.h
++++ b/Telegram/SourceFiles/storage/storage_account.h
+@@ -37,6 +37,7 @@ namespace MTP {
+ class Config;
+ class AuthKey;
+ using AuthKeyPtr = std::shared_ptr<AuthKey>;
++struct ProxyData;
+ } // namespace MTP
+ 
+ namespace Storage {
+@@ -151,6 +152,15 @@ public:
+ 	void writeExportSettings(const Export::Settings &settings);
+ 	[[nodiscard]] Export::Settings readExportSettings();
+ 
++	void writeProxySettings(const MTP::ProxyData &proxy);
++	[[nodiscard]] MTP::ProxyData readProxySettings();
++
++	void writeFolderTag(const QString &folder);
++	[[nodiscard]] QString readFolderTag();
++
++	void writePinned(bool pinned);
++	[[nodiscard]] bool readPinned();
++
+ 	void setMediaLastPlaybackPosition(DocumentId id, crl::time time);
+ 	[[nodiscard]] crl::time mediaLastPlaybackPosition(DocumentId id) const;
+ 
+@@ -350,6 +360,9 @@ private:
+ 	FileKey _settingsKey = 0;
+ 	FileKey _recentHashtagsAndBotsKey = 0;
+ 	FileKey _exportSettingsKey = 0;
++	FileKey _proxySettingsKey = 0;
++	FileKey _accountFolderKey = 0;
++	FileKey _accountPinnedKey = 0;
+ 	FileKey _installedMasksKey = 0;
+ 	FileKey _recentMasksKey = 0;
+ 	FileKey _installedCustomEmojiKey = 0;
+diff --git a/Telegram/SourceFiles/storage/storage_tdata_export.cpp b/Telegram/SourceFiles/storage/storage_tdata_export.cpp
+new file mode 100644
+index 0000000..8583cdb
+--- /dev/null
++++ b/Telegram/SourceFiles/storage/storage_tdata_export.cpp
+@@ -0,0 +1,88 @@
++/*
++This file is part of Telegram Desktop,
++the official desktop application for the Telegram messaging service.
++
++For license and copyright information please follow this link:
++https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
++*/
++#include "storage/storage_tdata_export.h"
++
++#include "storage/details/storage_file_utilities.h"
++#include "storage/serialize_common.h"
++#include "mtproto/mtproto_auth_key.h"
++#include "main/main_account.h"
++#include "base/random.h"
++#include "config.h"
++
++#include <QtCore/QDir>
++
++namespace Storage {
++namespace {
++
++using namespace details;
++
++// Matches Storage::Account::writeMtpData()'s single-block file exactly.
++constexpr auto kDbiMtpAuthorization = quint32(0x4b);
++
++// Mirrors Main::Account's private ComputeDataNameKey() for the default,
++// single-account dataName - same hash storage_tdata_import.cpp reads back.
++[[nodiscard]] FileKey ComputeDataNameKey(const QString &dataName) {
++	const auto utf8 = dataName.toUtf8();
++	FileKey hash[2] = { 0 };
++	hashMd5(utf8.constData(), utf8.size(), hash);
++	return hash[0];
++}
++
++} // namespace
++
++bool ExportAccountAsTdata(
++		not_null<Main::Account*> account,
++		const QString &folderPath) {
++	if (!account->sessionExists()) {
++		return false;
++	}
++	const auto path = folderPath.endsWith('/')
++		? folderPath
++		: (folderPath + '/');
++	QDir().mkpath(path);
++
++	// A fresh, random data-encryption key for this export - unrelated to
++	// the live app's own local key, so the export stands on its own.
++	auto seedPass = QByteArray(MTP::AuthKey::kSize, Qt::Uninitialized);
++	auto seedSalt = QByteArray(LocalEncryptSaltSize, Qt::Uninitialized);
++	base::RandomFill(seedPass.data(), seedPass.size());
++	base::RandomFill(seedSalt.data(), seedSalt.size());
++	const auto localKey = CreateLocalKey(seedPass, seedSalt);
++
++	// Wrap it with an empty passcode, so re-importing needs no password -
++	// mirrors Domain::generateLocalKey() seeding a fresh, lockless install.
++	auto passcodeSalt = QByteArray(LocalEncryptSaltSize, Qt::Uninitialized);
++	base::RandomFill(passcodeSalt.data(), passcodeSalt.size());
++	const auto passcodeKey = CreateLocalKey(QByteArray(), passcodeSalt);
++	EncryptedDescriptor passKeyData(MTP::AuthKey::kSize);
++	localKey->write(passKeyData.stream);
++	const auto passcodeKeyEncrypted = PrepareEncrypted(
++		passKeyData,
++		passcodeKey);
++
++	FileWriteDescriptor key(u"key_data"_q, path);
++	key.writeData(passcodeSalt);
++	key.writeData(passcodeKeyEncrypted);
++
++	const auto keySize = sizeof(qint32) * 3;
++	EncryptedDescriptor keyData(keySize);
++	keyData.stream << qint32(1) << qint32(0) << qint32(0); // count/index/active
++	key.writeEncrypted(keyData, localKey);
++
++	const auto serialized = account->serializeMtpAuthorization();
++	const auto mtpSize = sizeof(quint32)
++		+ Serialize::bytearraySize(serialized);
++	FileWriteDescriptor mtp(ToFilePart(ComputeDataNameKey(u"data"_q)), path);
++	EncryptedDescriptor data(mtpSize);
++	data.stream << kDbiMtpAuthorization << serialized;
++	mtp.writeEncrypted(data, localKey);
++
++	return true;
++}
++
++} // namespace Storage
+diff --git a/Telegram/SourceFiles/storage/storage_tdata_export.h b/Telegram/SourceFiles/storage/storage_tdata_export.h
+new file mode 100644
+index 0000000..cb769c4
+--- /dev/null
++++ b/Telegram/SourceFiles/storage/storage_tdata_export.h
+@@ -0,0 +1,24 @@
++/*
++This file is part of Telegram Desktop,
++the official desktop application for the Telegram messaging service.
++
++For license and copyright information please follow this link:
++https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
++*/
++#pragma once
++
++namespace Main {
++class Account;
++} // namespace Main
++
++namespace Storage {
++
++// Writes a standalone, passcode-less tdata folder containing just this one
++// account's MTP authorization - readable back via our own tdata-import
++// feature (ReadForeignTdataAuthorizations) or by a real Telegram Desktop
++// install. The live app's own storage is untouched; this is a plain copy.
++[[nodiscard]] bool ExportAccountAsTdata(
++	not_null<Main::Account*> account,
++	const QString &folderPath);
++
++} // namespace Storage
+diff --git a/Telegram/SourceFiles/storage/storage_tdata_import.cpp b/Telegram/SourceFiles/storage/storage_tdata_import.cpp
+new file mode 100644
+index 0000000..07e725d
+--- /dev/null
++++ b/Telegram/SourceFiles/storage/storage_tdata_import.cpp
+@@ -0,0 +1,235 @@
++/*
++This file is part of Telegram Desktop,
++the official desktop application for the Telegram messaging service.
++
++For license and copyright information please follow this link:
++https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
++*/
++#include "storage/storage_tdata_import.h"
++
++#include "storage/details/storage_file_utilities.h"
++#include "storage/serialize_common.h"
++#include "mtproto/mtproto_auth_key.h"
++
++#include <QtCore/QDir>
++
++namespace Storage {
++namespace {
++
++using namespace details;
++
++// Matches Storage::Account::writeMtpData()'s single-block file exactly -
++// this file only ever contains this one dbi block, nothing else.
++constexpr auto kDbiMtpAuthorization = quint32(0x4b);
++
++[[nodiscard]] QString ComposeDataString(const QString &dataName, int index) {
++	auto result = dataName;
++	result.replace('#', QString());
++	if (index > 0) {
++		result += '#' + QString::number(index + 1);
++	}
++	return result;
++}
++
++[[nodiscard]] FileKey ComputeDataNameKey(const QString &dataName) {
++	const auto utf8 = dataName.toUtf8();
++	FileKey hash[2] = { 0 };
++	hashMd5(utf8.constData(), utf8.size(), hash);
++	return hash[0];
++}
++
++// ReadFile() already tries name+'s' then name+'0'/'1' internally, so the
++// logical (unsuffixed) key name is what we must pass in - "data" is the
++// standard default dataName used by the vast majority of installs. If a
++// folder was written under a different dataName, fall back to scanning
++// for "key_*" files on disk and stripping their write-safety suffix.
++[[nodiscard]] QStringList CandidateDataNames(const QString &folderPath) {
++	auto result = QStringList{ u"data"_q };
++	QDir dir(folderPath);
++	const auto entries = dir.entryList(
++		QStringList{ u"key_*"_q },
++		QDir::Files);
++	for (const auto &entry : entries) {
++		auto name = entry.mid(4); // strip "key_"
++		if (!name.isEmpty()
++			&& (name.endsWith('s') || name.endsWith('0') || name.endsWith('1'))) {
++			name.chop(1);
++		}
++		if (!name.isEmpty() && !result.contains(name)) {
++			result.push_back(name);
++		}
++	}
++	return result;
++}
++
++constexpr auto kLocateMaxDepth = 4;
++
++// The user may have picked a folder that merely *contains* the real tdata
++// folder somewhere inside it (e.g. an export tool wrapped it in its own
++// "Telegram Desktop" folder, or an older single-account export sits
++// alongside the real multi-account one) rather than the tdata folder
++// itself - search a few levels down and collect *every* directory that
++// looks like a tdata folder (has key_* files in it), instead of requiring
++// an exact match or stopping at the first candidate found.
++void CollectTdataFolderCandidates(
++		const QString &root,
++		int depthLeft,
++		std::vector<QString> &out) {
++	QDir dir(root);
++	if (!dir.entryList(QStringList{ u"key_*"_q }, QDir::Files).isEmpty()) {
++		out.push_back(root);
++	}
++	if (depthLeft <= 0) {
++		return;
++	}
++	for (const auto &subdir
++			: dir.entryList(QDir::Dirs | QDir::NoDotAndDotDot)) {
++		CollectTdataFolderCandidates(
++			dir.filePath(subdir),
++			depthLeft - 1,
++			out);
++	}
++}
++
++// Reads every account out of a single tdata folder (not recursing into
++// subfolders) - the actual folder must be exactly "path".
++[[nodiscard]] std::vector<QByteArray> ReadOneTdataFolder(
++		const QString &folderPath,
++		const QByteArray &passcode) {
++	const auto path = folderPath.endsWith('/')
++		? folderPath
++		: (folderPath + '/');
++
++	for (const auto &dataName : CandidateDataNames(path)) {
++		FileReadDescriptor keyData;
++		if (!ReadFile(keyData, "key_" + dataName, path)) {
++			continue;
++		}
++
++		QByteArray salt, keyEncrypted, infoEncrypted;
++		keyData.stream >> salt >> keyEncrypted >> infoEncrypted;
++		if (!CheckStreamStatus(keyData.stream)) {
++			continue;
++		}
++
++		const auto passcodeKey = CreateLocalKey(passcode, salt);
++		EncryptedDescriptor keyInnerData;
++		if (!DecryptLocal(keyInnerData, keyEncrypted, passcodeKey)) {
++			continue; // Wrong dataName guess, or this folder needs a passcode.
++		}
++		const auto key = Serialize::read<MTP::AuthKey::Data>(
++			keyInnerData.stream);
++		if (keyInnerData.stream.status() != QDataStream::Ok
++			|| !keyInnerData.stream.atEnd()) {
++			continue;
++		}
++		const auto localKey = std::make_shared<MTP::AuthKey>(key);
++
++		EncryptedDescriptor info;
++		if (!DecryptLocal(info, infoEncrypted, localKey)) {
++			continue;
++		}
++		auto count = qint32();
++		info.stream >> count;
++		if (count <= 0 || !CheckStreamStatus(info.stream)) {
++			continue;
++		}
++		LOG(("TdataImport: dataName '%1', info lists count=%2"
++			).arg(dataName).arg(count));
++
++		// A tdata folder can hold several accounts - read every index it
++		// lists, not just the first, so all of them get imported.
++		auto indices = std::vector<qint32>();
++		indices.reserve(count);
++		for (auto i = 0; i != count; ++i) {
++			auto index = qint32();
++			info.stream >> index;
++			if (!CheckStreamStatus(info.stream)) {
++				LOG(("TdataImport: failed reading index #%1 of %2"
++					).arg(i).arg(count));
++				break;
++			}
++			indices.push_back(index);
++		}
++		LOG(("TdataImport: read %1 indices: %2"
++			).arg(indices.size()
++			).arg([&] {
++				auto list = QStringList();
++				for (const auto index : indices) {
++					list << QString::number(index);
++				}
++				return list.join(", ");
++			}()));
++		if (indices.empty()) {
++			continue;
++		}
++
++		auto result = std::vector<QByteArray>();
++		for (const auto index : indices) {
++			const auto fileKey = ComputeDataNameKey(
++				ComposeDataString(dataName, index));
++
++			FileReadDescriptor mtp;
++			if (!ReadEncryptedFile(mtp, ToFilePart(fileKey), path, localKey)) {
++				LOG(("TdataImport: index %1 - could not read/decrypt file %2"
++					).arg(index).arg(ToFilePart(fileKey)));
++				continue;
++			}
++			auto blockId = quint32();
++			mtp.stream >> blockId;
++			if (!CheckStreamStatus(mtp.stream)
++				|| blockId != kDbiMtpAuthorization) {
++				LOG(("TdataImport: index %1 - bad block id (got %2, want %3)"
++					).arg(index).arg(blockId).arg(kDbiMtpAuthorization));
++				continue;
++			}
++			auto serialized = QByteArray();
++			mtp.stream >> serialized;
++			if (!CheckStreamStatus(mtp.stream) || serialized.isEmpty()) {
++				LOG(("TdataImport: index %1 - empty/bad serialized blob"
++					).arg(index));
++				continue;
++			}
++			LOG(("TdataImport: index %1 - OK, %2 bytes"
++				).arg(index).arg(serialized.size()));
++			result.push_back(serialized);
++		}
++		LOG(("TdataImport: dataName '%1' yielded %2 of %3 accounts"
++			).arg(dataName).arg(result.size()).arg(indices.size()));
++		if (!result.empty()) {
++			return result;
++		}
++	}
++	return {};
++}
++
++} // namespace
++
++std::vector<QByteArray> ReadForeignTdataAuthorizations(
++		const QString &folderPath,
++		const QByteArray &passcode) {
++	auto candidates = std::vector<QString>();
++	CollectTdataFolderCandidates(folderPath, kLocateMaxDepth, candidates);
++
++	// Several candidate folders can turn up either way: one real tdata
++	// folder plus a stray smaller export sitting alongside it, or several
++	// entirely separate single/few-account tdata folders (e.g. copies of
++	// multiple "Telegram Desktop" installs) grouped under one parent
++	// folder the user picked. Read every candidate and combine everything
++	// found - any genuine duplicate account gets caught later by
++	// Domain::addFromTdata's own userId check, so combining here is safe.
++	auto combined = std::vector<QByteArray>();
++	for (const auto &candidate : candidates) {
++		LOG(("TdataImport: trying candidate folder '%1'").arg(candidate));
++		auto read = ReadOneTdataFolder(candidate, passcode);
++		LOG(("TdataImport: candidate '%1' yielded %2 accounts"
++			).arg(candidate).arg(read.size()));
++		combined.insert(
++			combined.end(),
++			std::make_move_iterator(read.begin()),
++			std::make_move_iterator(read.end()));
++	}
++	return combined;
++}
++
++} // namespace Storage
+diff --git a/Telegram/SourceFiles/storage/storage_tdata_import.h b/Telegram/SourceFiles/storage/storage_tdata_import.h
+new file mode 100644
+index 0000000..a545ec7
+--- /dev/null
++++ b/Telegram/SourceFiles/storage/storage_tdata_import.h
+@@ -0,0 +1,25 @@
++/*
++This file is part of Telegram Desktop,
++the official desktop application for the Telegram messaging service.
++
++For license and copyright information please follow this link:
++https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
++*/
++#pragma once
++
++namespace Storage {
++
++// Reads a *foreign* tdata folder (e.g. copied in from another install) and
++// extracts the raw "mtp authorization" blob for every account stored in it
++// (a tdata folder can hold several, same as this app's own), in the exact
++// format Main::Account::setMtpAuthorization() expects - this is the on-disk
++// format Main::Account::serializeMtpAuthorization()/writeMtpData() already
++// produce, read back with the same primitives Storage::Domain and
++// Storage::Account use for their own (non-foreign) files, just pointed at
++// an external folder instead of our own tdata/. Returns an empty vector if
++// nothing readable was found (unreadable folder, wrong passcode, ...).
++[[nodiscard]] std::vector<QByteArray> ReadForeignTdataAuthorizations(
++	const QString &folderPath,
++	const QByteArray &passcode = QByteArray());
++
++} // namespace Storage
+diff --git a/Telegram/SourceFiles/window/notifications_manager.cpp b/Telegram/SourceFiles/window/notifications_manager.cpp
+index bb61be2..63ec8b2 100644
+--- a/Telegram/SourceFiles/window/notifications_manager.cpp
++++ b/Telegram/SourceFiles/window/notifications_manager.cpp
+@@ -353,6 +353,8 @@ System::SkipState System::computeSkipState(
+ 		: notification.reactionOrVoteSender;
+ 	if (Core::Quitting()) {
+ 		return { SkipState::Skip };
++	} else if (thread->session().account().muted()) {
++		return { SkipState::Skip };
+ 	} else if (!Core::App().settings().notifyFromAll()
+ 		&& &thread->session().account() != &Core::App().domain().active()) {
+ 		return { SkipState::Skip };
+diff --git a/Telegram/SourceFiles/window/window.style b/Telegram/SourceFiles/window/window.style
+index a91951f..9b1c102 100644
+--- a/Telegram/SourceFiles/window/window.style
++++ b/Telegram/SourceFiles/window/window.style
+@@ -124,6 +124,20 @@ mainMenuAccountLine: 2px;
+ mainMenuBadgeFont: font(11px bold);
+ mainMenuBadgeSize: 18px;
+ 
++// Connection status dot, just left of the account/folder userpic.
++mainMenuAccountStatusDot: 8px;
++mainMenuAccountStatusSkip: 4px;
++
++// Pin/mute badges, drawn as a standalone overlay pinned to the row's right
++// edge (independent of the account name's own layout, so free to size for
++// legibility) - drawn at a common size regardless of their source glyphs'
++// native resolution (dialogs_pinned is 20x20, dialogs_mute is 8x8) so the
++// two look consistent side by side.
++mainMenuAccountBadgeSize: 18px;
++mainMenuAccountBadgeSkip: 4px;
++// Clears the scrollbar that overlaps this same right edge.
++mainMenuAccountBadgeRightMargin: 16px;
++
+ mainMenuTelegramLabel: FlatLabel(defaultFlatLabel) {
+ 	align: align(left);
+ 	textFg: windowSubTextFg;

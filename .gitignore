@@ -1,0 +1,46 @@
+# OS files
+.DS_Store
+.AppleDouble
+.LSOverride
+._*
+*.ips
+*.log
+
+# Large media test assets (avoid GitHub 100MB limit)
+**/test_data/src/test/assets/media/**
+
+# Binaries & Distribution
+APP/
+backups/
+
+# Precompiled dependencies & toolchains (Mac / Windows / Android)
+desktop/Libraries/
+desktop/ThirdParty/
+**/jdk/
+**/keys/
+
+# Build outputs (anywhere in tree)
+**/build/
+**/.gradle/
+**/out/
+**/DerivedData/
+**/GeneratedFiles/
+**/*.a
+**/*.so
+**/*.dylib
+**/*.dbg
+**/*.o
+**/*.gch
+**/*.rlib
+**/*.rmeta
+
+# IDE & local user files
+**/.idea/
+**/*.iml
+**/local.properties
+**/xcuserdata/
+**/project.xcworkspace/xcuserdata/
+
+# Local session data
+**/tdata/
+**/ggtg_db/

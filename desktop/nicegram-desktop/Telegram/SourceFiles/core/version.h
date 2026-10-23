@@ -1,0 +1,32 @@
+/*
+This file is part of Telegram Desktop,
+the official desktop application for the Telegram messaging service.
+
+For license and copyright information please follow this link:
+https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
+*/
+#pragma once
+
+#include "base/const_string.h"
+
+#define TDESKTOP_REQUESTED_ALPHA_VERSION (0ULL)
+
+#ifdef TDESKTOP_ALLOW_CLOSED_ALPHA
+#define TDESKTOP_ALPHA_VERSION TDESKTOP_REQUESTED_ALPHA_VERSION
+#else // TDESKTOP_ALLOW_CLOSED_ALPHA
+#define TDESKTOP_ALPHA_VERSION (0ULL)
+#endif // TDESKTOP_ALLOW_CLOSED_ALPHA
+
+// used in Updater.cpp and Setup.iss for Windows
+constexpr auto AppId = "{7C8B1E2A-4F3D-4A6E-9B5C-2D8E6F1A9C3B}"_cs;
+constexpr auto AppNameOld = "Telegram Win (Unofficial)"_cs;
+constexpr auto AppName = "Telegram"_cs;
+constexpr auto AppFile = "GGTG"_cs;
+// The folder name the app's data lives under (%APPDATA%, Application
+// Support). Deliberately not renamed with the app: a new name would make
+// it look for its accounts in an empty folder.
+constexpr auto AppDataDirName = "NiceGram Desktop"_cs;
+constexpr auto AppVersion = 7003001;
+constexpr auto AppVersionStr = "7.3.1";
+constexpr auto AppBetaVersion = false;
+constexpr auto AppAlphaVersion = TDESKTOP_ALPHA_VERSION;

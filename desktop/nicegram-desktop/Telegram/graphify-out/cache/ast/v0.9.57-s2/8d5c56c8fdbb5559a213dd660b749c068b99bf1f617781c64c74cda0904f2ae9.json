@@ -1,0 +1,1 @@
+{"nodes": [{"id": "$graphify-root$_sourcefiles_platform_mac_text_recognition_mac_h", "label": "text_recognition_mac.h", "file_type": "code", "source_file": "SourceFiles/platform/mac/text_recognition_mac.h", "source_location": "L1"}], "edges": [], "raw_calls": [], "parse_errors": {"first_error_line": 8, "multiline_error": false}}

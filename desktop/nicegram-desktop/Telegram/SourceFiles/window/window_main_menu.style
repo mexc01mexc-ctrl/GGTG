@@ -1,0 +1,148 @@
+/*
+This file is part of Telegram Desktop,
+the official desktop application for the Telegram messaging service.
+
+For license and copyright information please follow this link:
+https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
+*/
+using "window/window.style";
+
+mainMenuWidth: 274px;
+mainMenuCoverHeight: 134px;
+mainMenuUserpicLeft: 24px;
+mainMenuUserpicTop: 20px;
+mainMenuCloudButton: IconButton {
+	width: 48px;
+	height: 48px;
+
+	icon: icon {
+//		{ "menu_cloud", mainMenuCloudFg },
+	};
+	iconPosition: point(22px, 22px);
+}
+mainMenuCloudSize: 32px;
+mainMenuResetScaleFont: font(20px semibold);
+mainMenuResetScaleLeft: 36px;
+mainMenuResetScaleRight: 12px;
+mainMenuResetScaleTop: 2px;
+mainMenuResetScaleIconLeft: 5px;
+mainMenuCoverNameLeft: 26px;
+mainMenuCoverNameTop: 84px;
+mainMenuCoverStatusLeft: mainMenuCoverNameLeft;
+mainMenuCoverStatusTop: 103px;
+mainMenuSkip: 6px;
+
+// The "GGTG" window's own left sidebar (window/window_main_menu.cpp's
+// GgtgShellHost / GgtgSidebarRow) - one row per section.
+ggtgSidebarWidth: 232px;
+// Icons-only width the sidebar collapses to (toggled by ggtgSidebarToggle) -
+// wide enough for the same icon left offset the expanded rows use, plus a
+// matching margin on the right, so a collapsed row's icon sits centered.
+ggtgSidebarCollapsedWidth: 60px;
+ggtgSidebarRowHeight: 46px;
+ggtgSidebarTopSkip: 8px;
+ggtgSidebarIconLeft: 18px;
+ggtgSidebarTextLeft: 56px;
+ggtgSidebarTextRight: 12px;
+ggtgSidebarToggleLeft: 10px;
+ggtgHeaderPadding: 20px;
+// A text field inside a card (the card is lighter than the window): the
+// field's own dark background would show as a block, so it is transparent.
+ggtgCardInputField: InputField(defaultInputField) {
+	textBg: transparent;
+	textBgActive: transparent;
+}
+ggtgHeaderGap: 4px;
+ggtgWindowWidth: 1180px;
+ggtgWindowHeight: 620px;
+// Small enough for a phone-like narrow window: below ggtgCompactWidth the
+// sidebar folds to icons, below ggtgNarrowWidth it turns into a menu button
+// in the header (see GgtgShellHost::layoutAll).
+ggtgWindowMinWidth: 340px;
+ggtgWindowMinHeight: 400px;
+ggtgCompactWidth: 860px;
+ggtgNarrowWidth: 560px;
+// Section hint ("i" next to the title) and the narrow-mode menu button.
+ggtgInfoButton: IconButton {
+	width: 32px;
+	height: 32px;
+	icon: icon {{ "menu/info", menuIconFg }};
+	iconOver: icon {{ "menu/info", menuIconFgOver }};
+	iconPosition: point(-1px, -1px);
+	rippleAreaPosition: point(0px, 0px);
+	rippleAreaSize: 32px;
+	ripple: defaultRippleAnimation;
+}
+mainMenuFooterHeightMin: 80px;
+mainMenu: Menu(defaultMenu) {
+	itemFg: windowBoldFg;
+	itemFgOver: windowBoldFgOver;
+	itemStyle: semiboldTextStyle;
+	itemIconPosition: point(26px, 8px);
+	itemPadding: margins(76px, 13px, 28px, 13px);
+	itemToggle: Toggle(defaultMenuToggle) {
+		toggledFg: mainMenuCoverBg;
+	}
+	itemToggleOver: Toggle(defaultMenuToggleOver) {
+		toggledFg: mainMenuCoverBg;
+	}
+	itemToggleShift: 11px;
+}
+mainMenuFooterLeft: 25px;
+mainMenuTelegramBottom: 38px;
+mainMenuVersionBottom: 17px;
+mainMenuToggleSize: 6px;
+mainMenuTogglePosition: point(30px, 30px);
+
+// Checkbox / radio rows inside GGTG boxes: Ui::Checkbox reports no margin
+// of its own to the layout, so rows would otherwise touch each other.
+ggtgChoiceRowPadding: margins(24px, 5px, 24px, 5px);
+
+// Small "insert [NAME]" chips under the SMS message field.
+ggtgTokenButton: RoundButton(defaultLightButton) {
+	textBg: windowBgOver;
+	textBgOver: windowBgRipple;
+	height: 26px;
+	textTop: 4px;
+	padding: margins(10px, 0px, 10px, 0px);
+}
+// A picked command chip (several can be picked at once).
+ggtgTokenButtonActive: RoundButton(defaultActiveButton) {
+	height: 26px;
+	textTop: 4px;
+	padding: margins(10px, 0px, 10px, 0px);
+}
+
+// The eye at the end of a recipients list row: opens that list.
+ggtgEyeButton: IconButton {
+	width: 32px;
+	height: 32px;
+	icon: icon {{ "menu/show_in_chat", menuIconFg }};
+	iconOver: icon {{ "menu/show_in_chat", menuIconFgOver }};
+	iconPosition: point(-1px, -1px);
+	rippleAreaPosition: point(0px, 0px);
+	rippleAreaSize: 32px;
+	ripple: defaultRippleAnimation;
+}
+ggtgSendButton: IconButton {
+	width: 32px;
+	height: 32px;
+	icon: icon {{ "menu/send", menuIconFg }};
+	iconOver: icon {{ "menu/send", menuIconFgOver }};
+	iconPosition: point(-1px, -1px);
+	rippleAreaPosition: point(0px, 0px);
+	rippleAreaSize: 32px;
+	ripple: defaultRippleAnimation;
+}
+
+// "Анализ и чистка базы" row: a chart, not the same paper plane as sending.
+ggtgAnalyzeButton: IconButton {
+	width: 32px;
+	height: 32px;
+	icon: icon {{ "menu/stats", menuIconFg }};
+	iconOver: icon {{ "menu/stats", menuIconFgOver }};
+	iconPosition: point(-1px, -1px);
+	rippleAreaPosition: point(0px, 0px);
+	rippleAreaSize: 32px;
+	ripple: defaultRippleAnimation;
+}

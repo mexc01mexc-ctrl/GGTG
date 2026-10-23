@@ -1,0 +1,8 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(cat > *GgtgSmsActivity.kt*)",
+      "Bash(python3 *GgtgHubActivity.kt*)"
+    ]
+  }
+}

@@ -1,0 +1,17 @@
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="24dp"
+    android:height="24dp"
+    android:viewportWidth="72"
+    android:viewportHeight="72">
+    <!-- ggtg: flask in the same bold, rounded style as the other main-tab icons -->
+    <path
+        android:fillColor="#FFFFFF"
+        android:pathData="M19.5,43H52.5L58.4,52.6A6.5,6.5 0 0 1 52.9,62.5H19.1A6.5,6.5 0 0 1 13.6,52.6Z" />
+    <path
+        android:fillColor="#00000000"
+        android:pathData="M26,9.5H46M30.5,10V27.5L13.6,52.6A6.5,6.5 0 0 0 19.1,62.5H52.9A6.5,6.5 0 0 0 58.4,52.6L41.5,27.5V10"
+        android:strokeColor="#FFFFFF"
+        android:strokeWidth="5.5"
+        android:strokeLineCap="round"
+        android:strokeLineJoin="round" />
+</vector>

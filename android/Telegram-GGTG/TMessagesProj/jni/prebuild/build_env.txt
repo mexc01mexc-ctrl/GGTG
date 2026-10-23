@@ -1,0 +1,28 @@
+Build environment
+Generated: 2026-09-30T08:24:32Z
+Host OS: Darwin
+Host arch: arm64
+ABIs: arm64-v8a
+API: 21
+Jobs: 10
+Android SDK: /opt/homebrew/share/android-commandlinetools
+Android NDK: /opt/homebrew/share/android-commandlinetools/ndk/27.2.12479018
+NDK version: 27.2.12479018
+NDK host tag: darwin-x86_64
+Clang            Android (12470979, +pgo, -bolt, +lto, -mlgo, based on r522817c) clang version 18.0.3 (https://android.googlesource.com/toolchain/llvm-project d8003a456d14a3deb8054cdaa529ffbf02d9b262) | /opt/homebrew/share/android-commandlinetools/ndk/27.2.12479018/toolchains/llvm/prebuilt/darwin-x86_64/bin/clang
+CMake            cmake version 4.4.2 | /opt/homebrew/bin/cmake
+Ninja            1.13.2 | /opt/homebrew/bin/ninja
+Make             GNU Make 3.81 | /usr/bin/make
+NASM             NASM version 3.02 compiled on Jun 29 2026 | /opt/homebrew/bin/nasm
+Yasm             <not installed>
+Meson            1.12.0 | /opt/homebrew/bin/meson
+pkg-config       3.0.5 | /opt/homebrew/bin/pkg-config
+gperf            GNU gperf 3.0.3 | /usr/bin/gperf
+Python           Python 3.14.6 | /opt/homebrew/bin/python3
+Rust             rustc 1.97.1 (8bab26f4f 2026-07-14) (Homebrew) | /opt/homebrew/bin/rustc
+Cargo            cargo 1.97.1 (c980f4866 2026-06-30) (Homebrew) | /opt/homebrew/bin/cargo
+Go               go version go1.27.1 darwin/arm64 | /opt/homebrew/bin/go
+Perl              | /usr/bin/perl
+SOURCE_DATE_EPOCH: 1
+TZ: UTC
+LC_ALL: C
