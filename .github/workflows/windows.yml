@@ -70,7 +70,24 @@ jobs:
       - name: Build GGTG EXE
         working-directory: D:\TBuild\tdesktop\out
         run: |
-          cmake --build . --config Release --target Telegram
+          cmake --build . --config Release --target Telegram -- /v:m /fl /flp:logfile=build.log;verbosity=normal
+
+      - name: Show compilation errors if failed
+        if: failure()
+        shell: pwsh
+        run: |
+          Write-Host "=== C++ COMPILATION ERRORS ===" -ForegroundColor Red
+          if (Test-Path D:\TBuild\tdesktop\out\build.log) {
+            Get-Content D:\TBuild\tdesktop\out\build.log | Select-String -Pattern "error C", ": error:", "FAILED:" -Context 2,2 | Select-Object -First 40
+          }
+
+      - name: Upload build log on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-build-failure-log
+          path: D:\TBuild\tdesktop\out\build.log
+          retention-days: 7
 
       - name: Locate and Upload Artifact
         uses: actions/upload-artifact@v4
