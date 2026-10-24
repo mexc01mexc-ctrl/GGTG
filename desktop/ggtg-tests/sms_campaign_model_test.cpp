@@ -258,6 +258,19 @@ void TestAfterStep() {
 			== RetireReason::NotFound);
 	}
 	{
+		// Intermittent "not found" interspersed with successful sends or skips
+		// does not trigger throttled lookups because notFound is a streak.
+		auto c = LaneCounters();
+		const auto many = LaneLimits{ .quota = 100 };
+		for (auto i = 0; i != 10; ++i) {
+			CHECK(AfterStep(StepKind::NotFound, c, many).retire
+				== RetireReason::None);
+			CHECK(AfterStep(StepKind::Sent, c, many).retire
+				== RetireReason::None);
+		}
+		CHECK(c.notFound == 0);
+	}
+	{
 		// FLOOD_WAIT, a dead session, a spam block: off at once.
 		auto c = LaneCounters();
 		auto v = AfterStep(StepKind::FloodWait, c, normal);

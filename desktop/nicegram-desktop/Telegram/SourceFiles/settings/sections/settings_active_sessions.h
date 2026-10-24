@@ -48,6 +48,8 @@ void AddSessionInfoRow(
 void ShowSessionInfo(
 	std::shared_ptr<Ui::Show> show,
 	const Api::Authorizations::Entry &entry,
-	Fn<void(uint64)> terminate);
+	Fn<void(uint64)> terminate,
+	Fn<void()> exportAction = nullptr,
+	Fn<void()> switchAction = nullptr);
 
 } // namespace Settings

@@ -797,6 +797,36 @@ void ResolveUsernameForAccount(
 	}).send();
 }
 
+void CheckSearchCanary(
+		not_null<Main::Account*> account,
+		Fn<void(bool ok)> done) {
+	if (!Main::AccountIsLive(account)) {
+		done(false);
+		return;
+	}
+	const auto called = std::make_shared<bool>(false);
+	const auto safeDone = [=](bool ok) {
+		if (!std::exchange(*called, true)) {
+			done(ok);
+		}
+	};
+	base::call_delayed(crl::time(10'000), &Core::App(), [=] {
+		safeDone(false);
+	});
+	const auto session = &account->session();
+	const auto api = static_cast<MTP::Sender*>(&session->api());
+	api->request(MTPcontacts_ResolveUsername(
+		MTP_flags(MTPcontacts_ResolveUsername::Flags(0)),
+		MTP_string(u"telegram"_q),
+		MTP_string(QString())
+	)).handleFloodErrors().done([=, api = api](
+			const MTPcontacts_ResolvedPeer &result) {
+		safeDone(true);
+	}).fail([=, api = api](const MTP::Error &error) {
+		safeDone(false);
+	}).send();
+}
+
 void SendTextToPeer(
 		not_null<Main::Account*> account,
 		not_null<PeerData*> peer,
@@ -5522,6 +5552,18 @@ void RunSmsCampaignNow(
 	// got an attempt (stopped, or every account was used up first) is only
 	// counted - no mark, they stay in the base for the next run.
 	state->finalize = [=] {
+		for (auto lane = 0; lane < int(state->laneNotFoundPending.size()); ++lane) {
+			const auto acc = state->laneAccount[lane];
+			const auto label = acc ? AccountLabel(acc) : QString();
+			for (const auto &missing : state->laneNotFoundPending[lane]) {
+				Data::MarkSmsStatus(
+					missing,
+					Data::SmsSendStatus::NotFound,
+					label,
+					baseIdOf(missing));
+			}
+			state->laneNotFoundPending[lane].clear();
+		}
 		state->unprocessed = std::max(
 			int(state->pendingIndices.size()) - state->nextPending,
 			0);
@@ -5659,6 +5701,14 @@ void RunSmsCampaignNow(
 				i = state->pendingIndices[state->nextPending++];
 			} else {
 				if (const auto left = state->laneAccount[lane]) {
+					for (const auto &missing : state->laneNotFoundPending[lane]) {
+						Data::MarkSmsStatus(
+							missing,
+							Data::SmsSendStatus::NotFound,
+							AccountLabel(left),
+							baseIdOf(missing));
+					}
+					state->laneNotFoundPending[lane].clear();
 					setAccountState(
 						left,
 						SmsModel::AccountState::Done,
@@ -5900,19 +5950,47 @@ void RunSmsCampaignNow(
 					settle(i, lane, SmsModel::Outcome::Skipped, message, account);
 					break;
 				case Kind::NotFound:
+					state->laneNotFoundPending[lane].push_back(username);
 					if (verdict.retire == SmsModel::RetireReason::NotFound) {
-						// Likely Telegram throttling this account's lookups,
-						// not this many deleted users: the recipient gets a
-						// mark, the earlier ones are not written off.
-						state->laneNotFoundPending[lane].clear();
-						markAccountFail(
-							i,
-							lane,
-							username,
-							u"поиск ограничен у "_q + accountLabel,
-							account);
+						verdictPending = true;
+						CheckSearchCanary(account, [=](bool canaryOk) {
+							if (std::exchange(*verdictDone, true)) {
+								return;
+							}
+							if (canaryOk) {
+								confirmNotFound();
+								state->laneCounters[lane].notFound = 0;
+								settle(
+									i,
+									lane,
+									SmsModel::Outcome::NotFound,
+									QString(),
+									account);
+								if (state->process) {
+									state->process->log(accountLabel
+										+ u": 5 раз «не найден», проверка поиска (@telegram) успешна — поиск работает, юзернеймов действительно нет"_q);
+								}
+							} else {
+								state->laneNotFoundPending[lane].clear();
+								markAccountFail(
+									i,
+									lane,
+									username,
+									u"поиск ограничен у "_q + accountLabel,
+									account);
+								retireAccount(
+									lane,
+									account,
+									SmsModel::AccountState::Retired,
+									QString::number(kNotFoundStreakLimit)
+										+ u" раз подряд «не найден»: похоже, Telegram "
+											"ограничил поиск по username"_q);
+							}
+							if (*holdProceed) {
+								(*holdProceed)();
+							}
+						});
 					} else {
-						state->laneNotFoundPending[lane].push_back(username);
 						settle(
 							i,
 							lane,
@@ -6098,6 +6176,7 @@ void RunSmsCampaignNow(
 					switch (verdict.retire) {
 					case Reason::None: break;
 					case Reason::Quota:
+						confirmNotFound();
 						retireAccount(
 							lane,
 							account,
@@ -6134,13 +6213,7 @@ void RunSmsCampaignNow(
 								+ u" сбоев за рассылку"_q);
 						break;
 					case Reason::NotFound:
-						retireAccount(
-							lane,
-							account,
-							SmsModel::AccountState::Retired,
-							QString::number(kNotFoundStreakLimit)
-								+ u" раз «не найден»: похоже, Telegram "
-									"ограничил поиск по username"_q);
+						// Handled asynchronously with canary check above.
 						break;
 					case Reason::FloodWait:
 						retireAccount(

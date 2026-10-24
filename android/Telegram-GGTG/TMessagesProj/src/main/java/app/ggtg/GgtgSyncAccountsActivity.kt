@@ -100,15 +100,15 @@ class GgtgSyncAccountsActivity : BaseFragment() {
                 try { copy.writeBytes(bytes) } catch (t: Throwable) { toast("Не удалось сохранить файл"); return@fetchIncoming }
                 if (!GgtgPackImporter.isPack(copy)) { copy.delete(); toast("Это не экспорт GGTG"); return@fetchIncoming }
                 if (GgtgPackImporter.needsProxyPool(copy)) {
-                    GgtgProxyChooser.show(context) { source -> runImport(copy, source) }
+                    GgtgProxyChooser.show(context) { source -> runImport(copy, source, remote) }
                 } else {
-                    runImport(copy, null)
+                    runImport(copy, null, remote)
                 }
             }
         }
     }
 
-    private fun runImport(file: File, source: GgtgProxySource?) {
+    private fun runImport(file: File, source: GgtgProxySource?, remote: GgtgSyncTransport.Remote? = null) {
         val activity = parentActivity ?: return
         val progress = app.ggtg.ui.TdataImportProgressDialog(activity)
         progress.show()
@@ -116,6 +116,13 @@ class GgtgSyncAccountsActivity : BaseFragment() {
             try {
                 val result = withContext(Dispatchers.IO) { GgtgPackImporter.import(file, source, progress) }
                 try { progress.dismiss() } catch (_: Throwable) {}
+                val fullySuccessful = (result.imported.isNotEmpty() || result.alreadyLoggedIn > 0)
+                    && result.failed == 0
+                    && result.noFreeSlot == 0
+                    && result.noFreeProxy == 0
+                if (fullySuccessful && remote != null) {
+                    GgtgSyncTransport.deleteIncoming(remote)
+                }
                 val act = parentActivity
                 val msg = GgtgImportSupport.buildResultMessage(result)
                 if (act != null && !act.isFinishing && !act.isDestroyed) {

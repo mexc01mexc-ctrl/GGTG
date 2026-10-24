@@ -30,6 +30,15 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
 
+      - name: Expand Pagefile (Virtual Memory)
+        shell: pwsh
+        run: |
+          Set-CimInstance -Query "Select * From Win32_ComputerSystem" -Property @{AutomaticManagedPagefile=$False}
+          $pagefile = Get-CimInstance Win32_PageFileSetting
+          if (-not $pagefile) {
+            New-CimInstance -ClassName Win32_PageFileSetting -Property @{Name="C:\pagefile.sys"; InitialSize=16384; MaximumSize=32768}
+          }
+
       - name: Visual Studio ATL component
         shell: pwsh
         run: |
@@ -120,14 +129,14 @@ jobs:
       - name: Configure CMake
         working-directory: D:\TBuild\tdesktop\Telegram
         run: |
-          call configure.bat x64 -D TDESKTOP_API_ID=2040 -D TDESKTOP_API_HASH=b18441a1ff607e10a989891a5462e627 -D CMAKE_AUTOGEN_SKIP_PRECOMPILE_HEADERS=ON
+          call configure.bat x64 -D TDESKTOP_API_ID=2040 -D TDESKTOP_API_HASH=b18441a1ff607e10a989891a5462e627 -D CMAKE_DISABLE_PRECOMPILE_HEADERS=ON -D CMAKE_AUTOGEN_SKIP_PRECOMPILE_HEADERS=ON
 
       - name: Build GGTG EXE
         working-directory: D:\TBuild\tdesktop\out
         run: |
           set "PreferredToolArchitecture=x64"
           set "_CL_=/Zm300 /FS"
-          cmake --build . --config Release --target Telegram --parallel 2 -- /m /p:PreferredToolArchitecture=x64 /p:TrackFileAccess=false /v:m /fl /flp:logfile=build.log;verbosity=normal
+          cmake --build . --config Release --target Telegram --parallel 2 -- /m:2 /p:PreferredToolArchitecture=x64 /p:TrackFileAccess=false /v:m /fl /flp:logfile=build.log;verbosity=normal
 
       - name: Show compilation errors if failed
         if: failure()

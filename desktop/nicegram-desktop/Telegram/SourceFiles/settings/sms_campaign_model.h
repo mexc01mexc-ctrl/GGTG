@@ -573,6 +573,7 @@ struct StepVerdict {
 	case StepKind::Sent:
 	case StepKind::Partial:
 		++counters.sent;
+		counters.notFound = 0;
 		if (kind == StepKind::Partial && cause == StepKind::FloodWait) {
 			retire = RetireReason::FloodWait;
 		} else if (kind == StepKind::Partial
@@ -583,6 +584,7 @@ struct StepVerdict {
 		}
 		break;
 	case StepKind::Refused:
+		counters.notFound = 0;
 		if (reached(++counters.refusals, limits.refusals)) {
 			retire = RetireReason::Refusals;
 		}
@@ -598,8 +600,13 @@ struct StepVerdict {
 		}
 		break;
 	case StepKind::Closed:
+		counters.notFound = 0;
+		break;
 	case StepKind::TextError:
+		counters.notFound = 0;
+		break;
 	case StepKind::Skipped:
+		counters.notFound = 0;
 		break;
 	}
 	return {

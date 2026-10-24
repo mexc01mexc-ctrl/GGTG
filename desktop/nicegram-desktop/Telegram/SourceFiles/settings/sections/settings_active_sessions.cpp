@@ -415,7 +415,9 @@ void RenameBox(not_null<Ui::GenericBox*> box) {
 void SessionInfoBox(
 		not_null<Ui::GenericBox*> box,
 		const EntryData &data,
-		Fn<void(uint64)> terminate) {
+		Fn<void(uint64)> terminate,
+		Fn<void()> exportAction,
+		Fn<void()> switchAction) {
 	box->setWidth(st::boxWideWidth);
 
 	const auto shown = box->lifetime().make_state<rpl::event_stream<>>();
@@ -481,15 +483,37 @@ void SessionInfoBox(
 	}
 
 	box->addButton(tr::lng_about_done(), [=] { box->closeBox(); });
-	if (const auto hash = data.hash) {
-		box->addLeftButton(tr::lng_sessions_terminate(), [=] {
-			const auto weak = base::make_weak(box.get());
-			terminate(hash);
-			if (weak) {
-				box->closeBox();
-			}
-		}, st::attentionBoxButton);
+	if (exportAction) {
+		box->addButton(rpl::single(u"Экспорт..."_q), [=] {
+			exportAction();
+		});
 	}
+	if (switchAction) {
+		box->addButton(rpl::single(u"Переключить"_q), [=] {
+			switchAction();
+			box->closeBox();
+		});
+	}
+	if (terminate) {
+		const auto hash = data.hash;
+		box->addLeftButton(
+			hash ? tr::lng_sessions_terminate() : rpl::single(u"Удалить из программы"_q),
+			[=] {
+				const auto weak = base::make_weak(box.get());
+				terminate(hash);
+				if (weak) {
+					box->closeBox();
+				}
+			},
+			st::attentionBoxButton);
+	}
+}
+
+void SessionInfoBox(
+		not_null<Ui::GenericBox*> box,
+		const EntryData &data,
+		Fn<void(uint64)> terminate) {
+	SessionInfoBox(box, data, std::move(terminate), nullptr, nullptr);
 }
 
 Row::Row(not_null<RowDelegate*> delegate, const EntryData &data)
@@ -736,10 +760,12 @@ void SessionsContent::setupContent() {
 
 	_inner->showRequests(
 	) | rpl::on_next([=](const EntryData &data) {
-		_controller->show(Box(
-			SessionInfoBox,
-			data,
-			[=](uint64 hash) { terminateOne(hash); }));
+		_controller->show(Box([=](not_null<Ui::GenericBox*> box) {
+			SessionInfoBox(
+				box,
+				data,
+				[=](uint64 hash) { terminateOne(hash); });
+		}));
 	}, lifetime());
 
 	_inner->terminateOne(
@@ -1558,8 +1584,17 @@ object_ptr<Ui::RpWidget> MakeSessionRow(
 void ShowSessionInfo(
 		std::shared_ptr<Ui::Show> show,
 		const Api::Authorizations::Entry &entry,
-		Fn<void(uint64)> terminate) {
-	show->showBox(Box(SessionInfoBox, entry, std::move(terminate)));
+		Fn<void(uint64)> terminate,
+		Fn<void()> exportAction,
+		Fn<void()> switchAction) {
+	show->showBox(Box([=](not_null<Ui::GenericBox*> box) {
+		SessionInfoBox(
+			box,
+			entry,
+			terminate,
+			exportAction,
+			switchAction);
+	}));
 }
 
 Type SessionsId() {

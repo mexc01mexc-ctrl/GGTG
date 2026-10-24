@@ -47,6 +47,9 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "mtproto/facade.h"
 #include "storage/storage_account.h"
 #include "storage/storage_tdata_export.h"
+#include "storage/storage_tdata_import.h"
+#include "settings/ggtg_export.h"
+#include "settings/ggtg_session_json.h"
 #include "core/ggtg_sessions.h"
 #include "main/main_domain.h"
 #include "main/session_duplicate.h"
@@ -109,6 +112,56 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 
 namespace Settings {
 namespace {
+
+bool CopyDirRecursive(const QString &from, const QString &to) {
+	if (!QDir().mkpath(to)) {
+		return false;
+	}
+	const auto filters = QDir::Files
+		| QDir::Dirs
+		| QDir::NoDotAndDotDot
+		| QDir::Hidden;
+	for (const auto &info : QDir(from).entryInfoList(filters)) {
+		const auto target = to + '/' + info.fileName();
+		if (info.isDir()) {
+			if (!CopyDirRecursive(info.filePath(), target)) {
+				return false;
+			}
+		} else {
+			QFile::remove(target);
+			if (!QFile::copy(info.filePath(), target)) {
+				return false;
+			}
+		}
+	}
+	return true;
+}
+
+[[nodiscard]] QJsonObject ProxyToObject(const MTP::ProxyData &proxy) {
+	if (proxy.type == MTP::ProxyData::Type::None || proxy.host.isEmpty()) {
+		return QJsonObject();
+	}
+	return QJsonObject{
+		{ "type", int(proxy.type) },
+		{ "host", proxy.host },
+		{ "port", int(proxy.port) },
+		{ "user", proxy.user },
+		{ "password", proxy.password },
+	};
+}
+
+[[nodiscard]] MTP::ProxyData ProxyFromObject(const QJsonObject &object) {
+	auto result = MTP::ProxyData();
+	if (object.isEmpty()) {
+		return result;
+	}
+	result.type = MTP::ProxyData::Type(object["type"].toInt());
+	result.host = object["host"].toString();
+	result.port = uint32(object["port"].toInt());
+	result.user = object["user"].toString();
+	result.password = object["password"].toString();
+	return result;
+}
 
 // The pause the user asked for: never hit the server for several accounts
 // in the same instant, always one at a time with a human-ish gap between.
@@ -7075,6 +7128,271 @@ void ShowInfoBox(
 	return result;
 }
 
+void ExportSpecificSession(
+		std::shared_ptr<Ui::Show> show,
+		not_null<Main::Account*> account,
+		const Core::GgtgSessions::StoredSession &stored) {
+	namespace Sessions = Core::GgtgSessions;
+	const auto vaultTdata = Sessions::VaultFolder(stored) + u"/tdata"_q;
+	if (!QDir(vaultTdata).exists()) {
+		Ggtg::Notice(show, u"Файлы сессии не найдены в хранилище"_q);
+		return;
+	}
+
+	show->showBox(Box([=](not_null<Ui::GenericBox*> box) {
+		box->setWidth(style::ConvertScale(480));
+		box->setTitle(rpl::single(u"Экспорт сессии"_q));
+
+		const auto devModel = stored.device.value(u"deviceModel"_q).toString();
+		const auto appVer = stored.device.value(u"appVersion"_q).toString();
+		const auto devTitle = devModel.isEmpty()
+			? Sessions::RoleTitle(stored.role)
+			: devModel;
+
+		auto descText = devTitle;
+		if (!appVer.isEmpty()) {
+			descText += u" · "_q + appVer;
+		}
+		descText += u"\nСохранена: "_q
+			+ QDateTime::fromSecsSinceEpoch(stored.createdAt).toString(u"dd.MM.yyyy hh:mm"_q)
+			+ u" ("_q + Sessions::RoleTitle(stored.role) + u")"_q;
+
+		box->addRow(
+			object_ptr<Ui::FlatLabel>(
+				box,
+				rpl::single(descText),
+				st::boxLabel),
+			st::boxRowPadding);
+
+		Ui::AddSkip(box->verticalLayout());
+		Ui::AddSubsectionTitle(box->verticalLayout(), rpl::single(u"Формат экспорта"_q));
+
+		const auto group = std::make_shared<Ui::RadiobuttonGroup>(0);
+		box->addRow(
+			object_ptr<Ui::Radiobutton>(
+				box,
+				group,
+				0,
+				u"GGTG Android (.ggtg)"_q),
+			st::ggtgChoiceRowPadding);
+		box->addRow(
+			object_ptr<Ui::FlatLabel>(
+				box,
+				rpl::single(u"Файл для импорта на Android без повторного входа и SMS"_q),
+				st::boxDividerLabel),
+			st::boxRowPadding);
+
+		box->addRow(
+			object_ptr<Ui::Radiobutton>(
+				box,
+				group,
+				1,
+				u"Session + JSON (.session / .json)"_q),
+			st::ggtgChoiceRowPadding);
+		box->addRow(
+			object_ptr<Ui::FlatLabel>(
+				box,
+				rpl::single(u"Формат Telethon / Pyrogram с параметрами устройства"_q),
+				st::boxDividerLabel),
+			st::boxRowPadding);
+
+		box->addRow(
+			object_ptr<Ui::Radiobutton>(
+				box,
+				group,
+				2,
+				u"Папка tdata (Telegram Desktop)"_q),
+			st::ggtgChoiceRowPadding);
+		box->addRow(
+			object_ptr<Ui::FlatLabel>(
+				box,
+				rpl::single(u"Папка tdata для запуска в Telegram Desktop"_q),
+				st::boxDividerLabel),
+			st::boxRowPadding);
+
+		box->addButton(rpl::single(u"Экспортировать"_q), [=] {
+			const auto auths = Storage::ReadForeignTdataAuthorizations(vaultTdata);
+			if (auths.empty()) {
+				Ggtg::Notice(show, u"Не удалось прочитать ключ сессии"_q);
+				return;
+			}
+			const auto serializedAuth = auths.front().data;
+			const auto choice = group->current();
+
+			if (choice == 0) {
+				// .ggtg
+				auto phoneClean = stored.phone;
+				phoneClean.remove('+');
+				phoneClean = phoneClean.trimmed();
+				if (phoneClean.isEmpty() && Main::AccountIsLive(account)) {
+					phoneClean = account->session().user()->phone();
+					phoneClean.remove('+');
+					phoneClean = phoneClean.trimmed();
+				}
+				if (phoneClean.isEmpty()) {
+					phoneClean = stored.userId.isEmpty() ? u"account"_q : stored.userId;
+				}
+				const auto initialName = phoneClean + u".ggtg"_q;
+				FileDialog::GetWritePath(
+					QPointer<QWidget>(box.get()),
+					u"Экспорт сессии в .ggtg"_q,
+					u"GGTG Pack (*.ggtg)"_q,
+					initialName,
+					[=](QString &&path) {
+						if (path.isEmpty()) {
+							return;
+						}
+						auto error = QString();
+						const auto proxy = stored.proxy.isEmpty()
+							? MTP::ProxyData()
+							: ProxyFromObject(stored.proxy);
+						const auto phone = !stored.phone.isEmpty()
+							? stored.phone
+							: (Main::AccountIsLive(account) ? account->session().user()->phone() : QString());
+						const auto name = !stored.name.isEmpty()
+							? stored.name
+							: (Main::AccountIsLive(account) ? account->session().user()->name() : QString());
+						const auto username = !stored.username.isEmpty()
+							? stored.username
+							: (Main::AccountIsLive(account) ? account->session().user()->username() : QString());
+						const auto twoFactor = !stored.twoFactor.isEmpty()
+							? stored.twoFactor
+							: (Main::AccountIsLive(account) ? account->twoFactorPassword() : QString());
+
+						if (!ExportAccountToGgtg(
+								path,
+								serializedAuth,
+								phone,
+								name,
+								QString(),
+								username,
+								twoFactor,
+								proxy,
+								stored.device,
+								stored.folder,
+								false,
+								&error)) {
+							Ggtg::Notice(show, error.isEmpty() ? u"Не удалось экспортировать .ggtg"_q : error);
+						} else {
+							Ggtg::Notice(show, u"Сессия экспортирована в "_q + QFileInfo(path).fileName());
+							box->closeBox();
+						}
+					});
+			} else if (choice == 1) {
+				// Session + JSON
+				FileDialog::GetFolder(
+					QPointer<QWidget>(box.get()),
+					u"Выбрать папку для Session + JSON"_q,
+					QString(),
+					[=](QString &&folder) {
+						if (folder.isEmpty() || !Main::AccountIsLive(account)) {
+							return;
+						}
+						auto error = QString();
+						auto customDev = std::optional<MTP::DeviceOverride>();
+						if (!stored.device.isEmpty()) {
+							customDev = DeviceOverrideFromJson(stored.device);
+						}
+						if (!ExportAccountAsSessionJson(
+								account,
+								folder,
+								serializedAuth,
+								customDev,
+								&error)) {
+							Ggtg::Notice(show, error.isEmpty() ? u"Не удалось экспортировать Session + JSON"_q : error);
+						} else {
+							Ggtg::Notice(show, u"Сессия успешно сохранена в Session + JSON"_q);
+							box->closeBox();
+						}
+					});
+			} else if (choice == 2) {
+				// tdata
+				FileDialog::GetFolder(
+					QPointer<QWidget>(box.get()),
+					u"Выбрать папку для tdata"_q,
+					QString(),
+					[=](QString &&folder) {
+						if (folder.isEmpty()) {
+							return;
+						}
+						const auto dest = folder + u"/tdata"_q;
+						if (!CopyDirRecursive(vaultTdata, dest)) {
+							Ggtg::Notice(show, u"Не удалось скопировать папку tdata"_q);
+							return;
+						}
+						const auto twoFactor = !stored.twoFactor.isEmpty()
+							? stored.twoFactor
+							: (Main::AccountIsLive(account) ? account->twoFactorPassword() : QString());
+						if (!twoFactor.isEmpty()) {
+							auto file = QFile(folder + u"/2fa.txt"_q);
+							if (file.open(QIODevice::WriteOnly | QIODevice::Truncate)) {
+								file.write(twoFactor.toUtf8());
+							}
+						}
+						if (!stored.device.isEmpty()) {
+							auto file = QFile(folder + u"/ggtg.json"_q);
+							if (file.open(QIODevice::WriteOnly | QIODevice::Truncate)) {
+								auto info = QJsonObject();
+								info["device"] = stored.device;
+								info["phone"] = stored.phone;
+								file.write(QJsonDocument(info).toJson(QJsonDocument::Indented));
+							}
+						}
+						Ggtg::Notice(show, u"Папка tdata успешно сохранена"_q);
+						box->closeBox();
+					});
+			}
+		});
+
+		box->addButton(tr::lng_cancel(), [=] { box->closeBox(); });
+	}));
+}
+
+void ShowStoredSessionPicker(
+		std::shared_ptr<Ui::Show> show,
+		not_null<Main::Account*> account,
+		const std::vector<Core::GgtgSessions::StoredSession> &stored) {
+	namespace Sessions = Core::GgtgSessions;
+	if (stored.empty()) {
+		Ggtg::Notice(show, u"Нет сохранённых сессий для экспорта"_q);
+		return;
+	}
+	if (stored.size() == 1) {
+		ExportSpecificSession(show, account, stored.front());
+		return;
+	}
+	show->showBox(Box([=](not_null<Ui::GenericBox*> box) {
+		box->setWidth(style::ConvertScale(440));
+		box->setTitle(rpl::single(u"Выбор сессии для экспорта"_q));
+
+		const auto group = std::make_shared<Ui::RadiobuttonGroup>(0);
+		for (size_t i = 0; i < stored.size(); ++i) {
+			const auto &item = stored[i];
+			const auto devModel = item.device.value(u"deviceModel"_q).toString();
+			const auto title = (devModel.isEmpty() ? Sessions::RoleTitle(item.role) : devModel)
+				+ u" ("_q + Sessions::RoleTitle(item.role) + u" · "_q
+				+ QDateTime::fromSecsSinceEpoch(item.createdAt).toString(u"dd.MM.yyyy"_q) + u")"_q;
+			box->addRow(
+				object_ptr<Ui::Radiobutton>(
+					box,
+					group,
+					int(i),
+					title),
+				st::ggtgChoiceRowPadding);
+		}
+
+		box->addButton(rpl::single(u"Далее"_q), [=] {
+			const auto idx = size_t(group->current());
+			if (idx < stored.size()) {
+				const auto item = stored[idx];
+				box->closeBox();
+				ExportSpecificSession(show, account, item);
+			}
+		});
+		box->addButton(tr::lng_cancel(), [=] { box->closeBox(); });
+	}));
+}
+
 // The account's sessions as in Settings > Privacy > Active sessions: this
 // one first, then the others by last activity - device, app, IP/location
 // and when it was last active. Filled in as soon as Telegram answers.
@@ -7202,6 +7520,23 @@ void AddSessionsSection(
 		const auto userId = QString::number(account->session().userId().bare);
 		auto stored = Sessions::StoredForUser(Sessions::LoadVault(), userId);
 
+		// Helper to match device strings flexibly (collapsing multiple spaces,
+		// case-insensitive, and handling brand prefixes like "Huawei  nova Y70 Plus" vs "Huawei nova Y70 Plus").
+		const auto matchDev = [](const QString &liveName, const QString &storedModel) {
+			const auto a = liveName.simplified().trimmed();
+			const auto b = storedModel.simplified().trimmed();
+			if (a.isEmpty() || b.isEmpty()) {
+				return false;
+			}
+			if (a.compare(b, Qt::CaseInsensitive) == 0) {
+				return true;
+			}
+			if (a.contains(b, Qt::CaseInsensitive) || b.contains(a, Qt::CaseInsensitive)) {
+				return true;
+			}
+			return false;
+		};
+
 		// First pass: match any stored sessions with hash == 0 (or mismatch)
 		// to an active session by matching device model
 		for (auto &item : stored) {
@@ -7209,7 +7544,7 @@ void AddSessionsSection(
 				const auto devModel = item.device.value(u"deviceModel"_q).toString();
 				if (!devModel.isEmpty()) {
 					for (const auto &entry : list) {
-						if (entry.hash != 0 && entry.name == devModel) {
+						if (entry.hash != 0 && matchDev(entry.name, devModel)) {
 							if (!item.hash || item.hash != entry.hash) {
 								item.hash = entry.hash;
 								item.state = u"ok"_q;
@@ -7232,7 +7567,7 @@ void AddSessionsSection(
 							return true;
 						}
 						const auto devModel = item.device.value(u"deviceModel"_q).toString();
-						return !devModel.isEmpty() && (entry.name == devModel);
+						return !devModel.isEmpty() && matchDev(entry.name, devModel);
 					});
 					if (aliveInList && item.state != u"ok"_q) {
 						item.state = u"ok"_q;
@@ -7253,7 +7588,19 @@ void AddSessionsSection(
 					++number;
 				}
 			}
-			return Sessions::RoleTitle(item.role)
+			auto baseRole = Sessions::RoleTitle(item.role);
+			if (!item.note.isEmpty()) {
+				if (item.note.contains(u"Android"_q, Qt::CaseInsensitive)) {
+					baseRole = (item.role == u"exported"_q)
+						? u"экспорт для Android"_q
+						: (baseRole + u" (Android)"_q);
+				} else if (item.note.contains(u"iOS"_q, Qt::CaseInsensitive)) {
+					baseRole = (item.role == u"exported"_q)
+						? u"экспорт для iOS"_q
+						: (baseRole + u" (iOS)"_q);
+				}
+			}
+			return baseRole
 				+ ((number > 1) ? (u" "_q + QString::number(number)) : QString());
 		};
 		const auto storedByHash = [&](uint64 hash, const QString &devName)
@@ -7269,7 +7616,7 @@ void AddSessionsSection(
 				for (const auto &item : stored) {
 					if (Sessions::HasKey(item)) {
 						const auto devModel = item.device.value(u"deviceModel"_q).toString();
-						if (!devModel.isEmpty() && devModel == devName) {
+						if (!devModel.isEmpty() && matchDev(devName, devModel)) {
 							return &item;
 						}
 					}
@@ -7315,9 +7662,18 @@ void AddSessionsSection(
 				entry,
 				suffix,
 				[=] {
-					ShowSessionInfo(box->uiShow(), entry, [=](uint64 one) {
-						terminate(one, device);
-					});
+					ShowSessionInfo(
+						box->uiShow(),
+						entry,
+						[=](uint64 one) {
+							terminate(one, device);
+						},
+						spare ? Fn<void()>([=] {
+							ExportSpecificSession(box->uiShow(), account, storedSpare);
+						}) : Fn<void()>(),
+						canSwitch ? Fn<void()>([=] {
+							(*confirmSwitch)(storedSpare);
+						}) : Fn<void()>());
 				},
 				hash
 					? Fn<void()>([=] { terminate(hash, device); })
@@ -7354,7 +7710,7 @@ void AddSessionsSection(
 					return true;
 				}
 				const auto devModel = item.device.value(u"deviceModel"_q).toString();
-				return !devModel.isEmpty() && (entry.name == devModel);
+				return !devModel.isEmpty() && matchDev(entry.name, devModel);
 			});
 			if (matchedAbove) {
 				continue;
@@ -7373,7 +7729,23 @@ void AddSessionsSection(
 				wrap,
 				synth,
 				u" (резервная · "_q + createdDt.toString(u"dd.MM.yyyy"_q) + u")"_q,
-				nullptr,
+				[=] {
+					ShowSessionInfo(
+						box->uiShow(),
+						synth,
+						[=](uint64) {
+							Sessions::RemoveStored(stored.id);
+							if (Main::AccountIsLive(account)) {
+								(*fillAgain)();
+							}
+						},
+						[=] {
+							ExportSpecificSession(box->uiShow(), account, stored);
+						},
+						[=] {
+							(*confirmSwitch)(stored);
+						});
+				},
 				[=] {
 					Sessions::RemoveStored(stored.id);
 					if (Main::AccountIsLive(account)) {
@@ -7411,6 +7783,22 @@ void AddSessionsSection(
 					(*fillAgain)();
 				}
 			});
+		});
+
+		wrap->add(
+			object_ptr<Ui::LinkButton>(
+				wrap,
+				u"Экспортировать сохранённую сессию..."_q),
+			style::margins(
+				st::boxRowPadding.left(),
+				0,
+				st::boxRowPadding.right(),
+				st::defaultVerticalListSkip)
+		)->setClickedCallback([=] {
+			if (!Main::AccountIsLive(account)) {
+				return;
+			}
+			ShowStoredSessionPicker(box->uiShow(), account, stored);
 		});
 	};
 	*fillAgain = [=] { fill(authorizations->list()); };
@@ -10050,32 +10438,6 @@ void RebuildAccountAccordion(
 }
 
 namespace {
-
-[[nodiscard]] QJsonObject ProxyToObject(const MTP::ProxyData &proxy) {
-	if (proxy.type == MTP::ProxyData::Type::None || proxy.host.isEmpty()) {
-		return QJsonObject();
-	}
-	return QJsonObject{
-		{ "type", int(proxy.type) },
-		{ "host", proxy.host },
-		{ "port", int(proxy.port) },
-		{ "user", proxy.user },
-		{ "password", proxy.password },
-	};
-}
-
-[[nodiscard]] MTP::ProxyData ProxyFromObject(const QJsonObject &object) {
-	auto result = MTP::ProxyData();
-	if (object.isEmpty()) {
-		return result;
-	}
-	result.type = MTP::ProxyData::Type(object["type"].toInt());
-	result.host = object["host"].toString();
-	result.port = uint32(object["port"].toInt());
-	result.user = object["user"].toString();
-	result.password = object["password"].toString();
-	return result;
-}
 
 // What identifies a live account, kept with a stored session so the account
 // can be brought back with it.

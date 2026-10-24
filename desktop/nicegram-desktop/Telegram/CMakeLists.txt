@@ -4,6 +4,9 @@
 # For license and copyright information please follow this link:
 # https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 
+if (WIN32)
+    set(CMAKE_DISABLE_PRECOMPILE_HEADERS ON)
+endif()
 set(CMAKE_AUTOGEN_SKIP_PRECOMPILE_HEADERS ON)
 
 add_executable(Telegram WIN32 MACOSX_BUNDLE)

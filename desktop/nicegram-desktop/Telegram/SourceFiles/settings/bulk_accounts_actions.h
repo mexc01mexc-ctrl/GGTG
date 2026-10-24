@@ -331,6 +331,12 @@ void SwitchAccountToFolder(
 	QString *error,
 	std::optional<MTP::DeviceOverride> device = std::nullopt);
 
+// Exports a specific stored session to .ggtg, Session + JSON, or tdata folder.
+void ExportSpecificSession(
+	std::shared_ptr<Ui::Show> show,
+	not_null<Main::Account*> account,
+	const Core::GgtgSessions::StoredSession &stored);
+
 // Ends the account's other sessions one by one, except the ones this app
 // made or handed out (everything in the session vault with a known number).
 // `report` says what was done.

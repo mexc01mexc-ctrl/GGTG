@@ -11,6 +11,7 @@ import kotlinx.coroutines.withTimeoutOrNull
 import org.telegram.messenger.AccountInstance
 import org.telegram.messenger.AndroidUtilities
 import org.telegram.messenger.ApplicationLoader
+import org.telegram.messenger.FileLog
 import org.telegram.messenger.SendMessagesHelper
 import org.telegram.messenger.UserConfig
 import org.telegram.tgnet.ConnectionsManager
@@ -282,7 +283,7 @@ object GgtgSyncTransport {
         }
     }
 
-    /** Downloads, decrypts and (when it worked) deletes one incoming file; [done] gets the payload or an error. */
+    /** Downloads and decrypts one incoming file; does not delete it yet; [done] gets the payload or an error. */
     fun fetchIncoming(remote: Remote, done: (ByteArray?, String) -> Unit) {
         val slot = mainSlot()
         val passphrase = GgtgSync.loadSettings().passphrase
@@ -290,17 +291,26 @@ object GgtgSyncTransport {
         scope.launch {
             val data = try { download(slot, remote.doc) } catch (t: Throwable) { null }
             val plain = data?.let { GgtgSync.unpack(it, passphrase) }
-            if (plain != null) {
-                val req = TLRPC.TL_messages_deleteMessages()
-                req.id.add(remote.msgId)
-                rpc(slot, req)
-            }
             AndroidUtilities.runOnUIThread {
                 when {
                     data == null -> done(null, "Не скачался файл")
                     plain == null -> done(null, "Не удалось расшифровать: проверьте, что фраза одинаковая на обоих устройствах")
                     else -> done(plain, "")
                 }
+            }
+        }
+    }
+
+    /** Deletes an incoming message once it has been successfully imported. */
+    fun deleteIncoming(remote: Remote) {
+        val slot = mainSlot() ?: return
+        scope.launch {
+            try {
+                val req = TLRPC.TL_messages_deleteMessages()
+                req.id.add(remote.msgId)
+                rpc(slot, req)
+            } catch (t: Throwable) {
+                FileLog.e(t)
             }
         }
     }

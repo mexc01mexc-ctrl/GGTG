@@ -40,6 +40,8 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "styles/style_window_main_menu.h"
 
 #include "core/ggtg_sync_transport.h"
+#include "core/ggtg_sessions.h"
+#include "storage/storage_tdata_import.h"
 #include "settings/ggtg_api_override_box.h"
 #include "base/call_delayed.h"
 
@@ -476,6 +478,70 @@ void ExportNext(std::shared_ptr<ExportRun> run, size_t index) {
 		fail(u"аккаунт больше не залогинен"_q);
 		return;
 	}
+
+	// If this account already has an active, valid stored Android session in Session Vault,
+	// reuse it directly so we don't spam duplicate sessions or trigger 2FA again.
+	namespace Sessions = Core::GgtgSessions;
+	const auto userId = QString::number(account->session().userId().bare);
+	const auto vault = Sessions::StoredForUser(Sessions::LoadVault(), userId);
+	const auto existingAndroid = [&]() -> const Sessions::StoredSession* {
+		for (const auto &item : vault) {
+			if (item.state != u"revoked"_q
+				&& Sessions::HasKey(item)
+				&& (item.role == u"exported"_q
+					|| item.role == u"android"_q
+					|| item.note.contains(u"Android"_q, Qt::CaseInsensitive))) {
+				const auto vaultFolder = Sessions::VaultFolder(item) + u"/tdata"_q;
+				if (QDir(vaultFolder).exists()) {
+					return &item;
+				}
+			}
+		}
+		return nullptr;
+	}();
+
+	if (existingAndroid) {
+		const auto vaultPath = Sessions::VaultFolder(*existingAndroid) + u"/tdata"_q;
+		const auto auths = Storage::ReadForeignTdataAuthorizations(vaultPath);
+		if (!auths.empty()) {
+			const auto parsed = ParseAuthorization(auths.front().data);
+			if (parsed) {
+				auto entry = run->metas[index];
+				if (run->options.twoFactor) {
+					if (!existingAndroid->twoFactor.isEmpty()) {
+						entry["twoFactor"] = existingAndroid->twoFactor;
+					} else if (!account->twoFactorPassword().isEmpty()) {
+						entry["twoFactor"] = account->twoFactorPassword();
+					}
+				}
+				if (!existingAndroid->device.isEmpty()) {
+					entry["device"] = existingAndroid->device;
+				}
+				if (!existingAndroid->proxy.isEmpty()) {
+					entry["proxy"] = existingAndroid->proxy;
+				}
+				entry["userId"] = QString::number(parsed->userId);
+				entry["mainDcId"] = parsed->mainDcId;
+				auto keys = QJsonArray();
+				for (const auto &[dcId, key] : parsed->keys) {
+					auto item = QJsonObject();
+					item["dcId"] = dcId;
+					item["key"] = QString::fromLatin1(key.toHex());
+					keys.push_back(item);
+				}
+				entry["keys"] = keys;
+				entry["handoff"] = false;
+				run->exported.push_back(entry);
+
+				const auto devName = existingAndroid->device.value(u"deviceModel"_q).toString();
+				process->log(label + u": использована готовая сессия ("_q
+					+ (devName.isEmpty() ? u"Android"_q : devName) + u")"_q);
+				next();
+				return;
+			}
+		}
+	}
+
 	process->log(label + u": создаём новую сессию..."_q);
 	const auto weakAccount = run->accounts[index];
 	const auto targetDevice = Settings::DeviceOverrideFromJson(run->metas[index].value(u"device"_q).toObject());

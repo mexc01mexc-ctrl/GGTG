@@ -519,8 +519,19 @@ object GgtgSms {
                 // PEER_FLOOD refusals of the current account that may turn out to be its own spam block
                 var peerStreak = 0
                 val peerLimited = ArrayList<Pair<String, Long>>()
+                val notFoundPending = ArrayList<Pair<String, Long>>()
+                fun confirmNotFound() {
+                    for ((name, base) in notFoundPending) {
+                        GgtgDb.markSmsStatus(name, GgtgDb.SmsStatus.NotFound, GgtgAccounts.label(account), base)
+                    }
+                    notFoundPending.clear()
+                }
                 // takes the account out of this campaign: [state] and [reason] stay on its row
                 fun retire(state: SmsAccountState, reason: String) {
+                    if (state == SmsAccountState.Done) {
+                        confirmNotFound()
+                    }
+                    notFoundPending.clear()
                     run.setAccount(account, state, reason)
                     run.setLive(lane, -1, "")
                     process.log("${GgtgAccounts.label(account)} ${if (state == SmsAccountState.Done) "отработал" else "снят"}: $reason")
@@ -548,6 +559,7 @@ object GgtgSms {
                         account = candidate
                         laneSuccesses = 0; errorStreak = 0; notFoundStreak = 0; floodCount = 0
                         peerStreak = 0; peerLimited.clear()
+                        notFoundPending.clear()
                         if (config.dailyLimit > 0 && daySent(account) >= config.dailyLimit) {
                             run.setAccount(account, SmsAccountState.Done, "дневной лимит уже исчерпан")
                             account = -1; continue
@@ -595,6 +607,7 @@ object GgtgSms {
                     when (outcome) {
                         Outcome.Sent -> {
                             peerStreak = 0; peerLimited.clear()
+                            confirmNotFound()
                             GgtgDb.markSmsSent(username, GgtgAccounts.label(account), baseId)
                             run.settle(i, lane, SmsOutcome.Sent, "", slot)
                             laneSuccesses++; errorStreak = 0; notFoundStreak = 0
@@ -603,6 +616,7 @@ object GgtgSms {
                             else if (config.dailyLimit > 0 && daySent(account) >= config.dailyLimit) retire(SmsAccountState.Done, "дневной лимит ${config.dailyLimit}")
                         }
                         Outcome.SpamBlock -> {
+                            notFoundStreak = 0
                             // PEER_FLOOD: whose fault? If @spambot already called the account limited, the
                             // account's; if not, Telegram just refused this pair and the account stays in the game.
                             val userId = UserConfig.getInstance(account).clientUserId
@@ -636,11 +650,13 @@ object GgtgSms {
                             }
                         }
                         Outcome.AccountDead -> {
+                            notFoundPending.clear()
                             synchronized(queue) { queue.addLast(username) }
                             run.requeue(i)
                             retire(SmsAccountState.Retired, "сессия недействительна ($message)")
                         }
                         Outcome.FloodWait -> {
+                            notFoundPending.clear()
                             synchronized(queue) { queue.addLast(username) }
                             run.requeue(i)
                             val secs = floodWaitSeconds(message)
@@ -648,16 +664,28 @@ object GgtgSms {
                             else delay((secs + 5) * 1000L)
                         }
                         Outcome.NotFound -> {
+                            notFoundPending.add(username to baseId)
                             if (++notFoundStreak >= NOT_FOUND_STREAK) {
-                                synchronized(queue) { queue.addLast(username) }
-                                run.requeue(i)
-                                retire(SmsAccountState.Retired, "$NOT_FOUND_STREAK раз подряд «не найден»: Telegram ограничил поиск")
+                                val req = TLRPC.TL_contacts_resolveUsername().apply { this.username = "telegram" }
+                                val pair = GgtgAccounts.request(account, req)
+                                val canaryOk = pair?.first is TLRPC.TL_contacts_resolvedPeer
+                                if (canaryOk) {
+                                    confirmNotFound()
+                                    notFoundStreak = 0
+                                    process.log("${GgtgAccounts.label(account)}: $NOT_FOUND_STREAK раз «не найден», проверка поиска (@telegram) успешна — поиск работает, юзернеймов действительно нет")
+                                    run.settle(i, lane, SmsOutcome.NotFound, "", slot)
+                                } else {
+                                    notFoundPending.clear()
+                                    run.settle(i, lane, SmsOutcome.Fail, "поиск ограничен у ${GgtgAccounts.label(account)}", slot)
+                                    retire(SmsAccountState.Retired, "$NOT_FOUND_STREAK раз подряд «не найден»: Telegram ограничил поиск")
+                                }
                             } else {
-                                GgtgDb.markSmsStatus(username, GgtgDb.SmsStatus.NotFound, GgtgAccounts.label(account), baseId)
                                 run.settle(i, lane, SmsOutcome.NotFound, "", slot)
                             }
                         }
                         Outcome.Skip -> {
+                            confirmNotFound()
+                            notFoundStreak = 0
                             if (message.contains("фейк")) {
                                 GgtgDb.markSmsStatus(username, GgtgDb.SmsStatus.SuspectedFake, GgtgAccounts.label(account), baseId)
                             }
@@ -669,6 +697,8 @@ object GgtgSms {
                             run.requeue(i)
                             if (++errorStreak >= ERROR_STREAK) retire(SmsAccountState.Retired, "нет ответа от сервера")
                         } else {
+                            confirmNotFound()
+                            notFoundStreak = 0
                             // the sticker is already out when the text then fails: say so, the recipient did get something
                             val stickerOnly = trail.contains("отправил привет-стикер")
                             reason = (if (stickerOnly) "стикер ушёл, текст нет: " else "") + humanError(message)
@@ -699,7 +729,10 @@ object GgtgSms {
                     delay(pause)
                 }
                 // the lane is done: the account it still holds finished its share (or was stopped with it)
-                if (account >= 0) run.setAccount(account, SmsAccountState.Done, if (cancelled) "рассылка остановлена" else "получатели кончились")
+                if (account >= 0) {
+                    confirmNotFound()
+                    run.setAccount(account, SmsAccountState.Done, if (cancelled) "рассылка остановлена" else "получатели кончились")
+                }
                 run.setLive(lane, -1, "")
                 process.clearLive(lane)
             }

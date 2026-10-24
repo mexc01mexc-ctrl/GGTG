@@ -96,29 +96,44 @@ class TdataImportProgressDialog(context: Context, title: String = LocaleControll
     }
 
     private fun updateButtonVisibility() {
-        val showButtons = passwordLayout.visibility == View.VISIBLE
-        dialog.getButton(AlertDialog.BUTTON_NEGATIVE)?.visibility = if (showButtons) View.VISIBLE else View.GONE
-        dialog.getButton(AlertDialog.BUTTON_POSITIVE)?.visibility = if (showButtons) View.VISIBLE else View.GONE
+        try {
+            val showButtons = passwordLayout.visibility == View.VISIBLE
+            dialog.getButton(AlertDialog.BUTTON_NEGATIVE)?.visibility = if (showButtons) View.VISIBLE else View.GONE
+            dialog.getButton(AlertDialog.BUTTON_POSITIVE)?.visibility = if (showButtons) View.VISIBLE else View.GONE
+        } catch (_: Throwable) {}
     }
 
     fun show() {
-        AndroidUtilities.runOnUIThread { ensureShown(); updateButtonVisibility() }
+        AndroidUtilities.runOnUIThread {
+            try {
+                ensureShown()
+                updateButtonVisibility()
+            } catch (_: Throwable) {}
+        }
     }
 
     private fun ensureShown() {
-        if (!dialog.isShowing) dialog.show()
+        try {
+            if (!dialog.isShowing) dialog.show()
+        } catch (_: Throwable) {}
     }
 
     /** Back to the spinner state right after Done/Skip, keeping the window on screen. */
     private fun showChecking(skipping: Boolean) {
-        workingLayout.visibility = View.VISIBLE
-        passwordLayout.visibility = View.GONE
-        if (!skipping) statusText.text = LocaleController.getString(R.string.NicegramTdataPasswordChecking)
-        updateButtonVisibility()
+        try {
+            workingLayout.visibility = View.VISIBLE
+            passwordLayout.visibility = View.GONE
+            if (!skipping) statusText.text = LocaleController.getString(R.string.NicegramTdataPasswordChecking)
+            updateButtonVisibility()
+        } catch (_: Throwable) {}
     }
 
     fun dismiss() {
-        AndroidUtilities.runOnUIThread { dialog.dismiss() }
+        AndroidUtilities.runOnUIThread {
+            try {
+                if (dialog.isShowing) dialog.dismiss()
+            } catch (_: Throwable) {}
+        }
     }
 
     fun setWorking(phone: String?, index: Int, total: Int) {
@@ -133,11 +148,13 @@ class TdataImportProgressDialog(context: Context, title: String = LocaleControll
     /** Same spinner state as [setWorking], with an arbitrary caption - used by the export flow. */
     fun setWorkingText(text: String) {
         AndroidUtilities.runOnUIThread {
-            ensureShown()
-            workingLayout.visibility = View.VISIBLE
-            passwordLayout.visibility = View.GONE
-            statusText.text = text
-            updateButtonVisibility()
+            try {
+                ensureShown()
+                workingLayout.visibility = View.VISIBLE
+                passwordLayout.visibility = View.GONE
+                statusText.text = text
+                updateButtonVisibility()
+            } catch (_: Throwable) {}
         }
     }
 
@@ -145,16 +162,18 @@ class TdataImportProgressDialog(context: Context, title: String = LocaleControll
         this.onSubmit = onSubmit
         this.onSkip = onSkip
         AndroidUtilities.runOnUIThread {
-            ensureShown()
-            workingLayout.visibility = View.GONE
-            passwordLayout.visibility = View.VISIBLE
-            phoneLabel.text = LocaleController.formatString(
-                "NicegramTdataPasswordNeededText", R.string.NicegramTdataPasswordNeededText, phone ?: "?"
-            )
-            errorLabel.text = hint ?: LocaleController.getString(R.string.NicegramTdataPasswordWrong)
-            errorLabel.visibility = if (wrongPassword || hint != null) View.VISIBLE else View.GONE
-            passwordInput.setText("")
-            updateButtonVisibility()
+            try {
+                ensureShown()
+                workingLayout.visibility = View.GONE
+                passwordLayout.visibility = View.VISIBLE
+                phoneLabel.text = LocaleController.formatString(
+                    "NicegramTdataPasswordNeededText", R.string.NicegramTdataPasswordNeededText, phone ?: "?"
+                )
+                errorLabel.text = hint ?: LocaleController.getString(R.string.NicegramTdataPasswordWrong)
+                errorLabel.visibility = if (wrongPassword || hint != null) View.VISIBLE else View.GONE
+                passwordInput.setText("")
+                updateButtonVisibility()
+            } catch (_: Throwable) {}
         }
     }
 
