@@ -344,7 +344,7 @@ class GgtgRegistrationActivity : BaseFragment() {
 
         tokenApiKeyInput = GgtgUi.input(context, "API-ключ TokenFast / AntiSafety", currentConfig.tokenApiKey)
         bindAutoSave(tokenApiKeyInput) { currentConfig = currentConfig.copy(tokenApiKey = it) }
-        GgtgUi.labeled(context, tokenCard, "API-ключ токенов", "TokenFast ключ или AntiSafety в формате КЛЮЧ:AID", tokenApiKeyInput)
+        GgtgUi.labeled(context, tokenCard, "API-ключ токенов", "Master API key сервиса TokenFast или AntiSafety", tokenApiKeyInput)
 
         replaceTokenCheck = checkBox(context, "Заменять токен при лимите флуда (FLOOD)", currentConfig.replaceTokenOnFlood)
         replaceTokenCheck.setOnCheckedChangeListener { _, isChecked ->

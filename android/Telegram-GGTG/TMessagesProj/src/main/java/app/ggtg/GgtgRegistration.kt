@@ -685,7 +685,7 @@ object GgtgRegistration {
                         if (status == "error" || obj.has("message") || obj.has("detail")) {
                             val msg = obj.optString("message", "")
                             if (msg == "App not found") {
-                                throw Exception("AntiSafety: укажите ключ в формате КЛЮЧ:AID (где AID — ID приложения из кабинета antisafety.net)")
+                                throw Exception("AntiSafety: приложение не найдено. Создайте приложение в кабинете antisafety.net (раздел MyApps -> Add App)")
                             } else if (msg == "Api key not found") {
                                 throw Exception("AntiSafety: неверный API-ключ")
                             }

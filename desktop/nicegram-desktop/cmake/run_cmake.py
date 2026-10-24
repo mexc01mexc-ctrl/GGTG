@@ -25,7 +25,7 @@ def run(project, arguments, buildType=''):
     if sys.platform == 'win32' and not explicitGenerator:
         if vsArch == 'x64':
             cmake.append('-Ax64')
-            cmake.append('-T v143')
+            cmake.append('-T v143,host=x64')
         elif vsArch == 'arm':
             cmake.append('-AARM64')
         else:

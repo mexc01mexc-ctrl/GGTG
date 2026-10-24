@@ -19,6 +19,8 @@ jobs:
       Platform: x64
       TBUILD: D:\TBuild
       LibrariesPath: D:\TBuild\Libraries\win64
+      PreferredToolArchitecture: x64
+      _CL_: /Zm200 /FS
 
     defaults:
       run:
@@ -123,7 +125,9 @@ jobs:
       - name: Build GGTG EXE
         working-directory: D:\TBuild\tdesktop\out
         run: |
-          cmake --build . --config Release --target Telegram --parallel -- /m /v:m /fl /flp:logfile=build.log;verbosity=normal
+          set "PreferredToolArchitecture=x64"
+          set "_CL_=/Zm200 /FS"
+          cmake --build . --config Release --target Telegram --parallel 2 -- /m /p:PreferredToolArchitecture=x64 /p:TrackFileAccess=false /v:m /fl /flp:logfile=build.log;verbosity=normal
 
       - name: Show compilation errors if failed
         if: failure()

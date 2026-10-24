@@ -1851,7 +1851,7 @@ inline void CheckMobileTokenBalance(
 					if (status == u"error"_q || obj.contains(u"message"_q) || obj.contains(u"detail"_q)) {
 						const auto msg = obj.value(u"message"_q).toString();
 						if (msg == u"App not found"_q) {
-							done(QString(), u"AntiSafety: укажите ключ в формате КЛЮЧ:AID (где AID — ID приложения из кабинета antisafety.net)"_q);
+							done(QString(), u"AntiSafety: приложение не найдено. Создайте приложение в кабинете antisafety.net (раздел MyApps -> Add App)"_q);
 							return;
 						} else if (msg == u"Api key not found"_q) {
 							done(QString(), u"AntiSafety: неверный API-ключ"_q);
