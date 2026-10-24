@@ -10,7 +10,7 @@
 **/test_data/src/test/assets/media/**
 
 # Binaries & Distribution
-APP/
+/APP/
 backups/
 
 # Precompiled local dependencies & toolchains (Mac / Windows / Android)
@@ -28,6 +28,8 @@ desktop/nicegram-desktop/Telegram/Telegram.xcodeproj/xcuserdata/
 desktop/nicegram-desktop/Telegram/Telegram.xcodeproj/project.xcworkspace/xcuserdata/
 
 android/Telegram-GGTG/build/
+android/Telegram-GGTG/TMessagesProj/jni/**/app/
+android/Telegram-GGTG/TMessagesProj/lib/**/app/
 android/Telegram-GGTG/**/build/
 android/Telegram-GGTG/.gradle/
 android/Telegram-GGTG/**/.gradle/

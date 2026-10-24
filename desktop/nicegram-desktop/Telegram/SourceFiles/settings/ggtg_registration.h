@@ -901,11 +901,11 @@ inline void SendApiGet(
 	const auto reply = NetManager().get(request);
 	QObject::connect(reply, &QNetworkReply::finished, reply, [=] {
 		reply->deleteLater();
+		const auto raw = QString::fromUtf8(reply->readAll()).trimmed();
 		if (reply->error() != QNetworkReply::NoError) {
-			if (done) done(QString(), reply->errorString());
+			if (done) done(raw, reply->errorString());
 			return;
 		}
-		const auto raw = QString::fromUtf8(reply->readAll()).trimmed();
 		if (done) done(raw, QString());
 	});
 }
@@ -1826,8 +1826,60 @@ inline void CheckMobileTokenBalance(
 			}
 			done(resp, QString());
 		}, headers);
+	} else if (provider == MobileTokenProvider::AntiSafety) {
+		const auto raw = apiKey.trimmed();
+		auto key = raw;
+		auto aid = QString();
+		const auto colonIdx = raw.indexOf(':');
+		const auto slashIdx = raw.indexOf('/');
+		const auto sepIdx = (colonIdx >= 0) ? colonIdx : slashIdx;
+		if (sepIdx >= 0) {
+			key = raw.left(sepIdx).trimmed();
+			aid = raw.mid(sepIdx + 1).trimmed();
+		}
+		auto query = u"https://antisafety.net/api/tasks/balance?api_key="_q + QString::fromUtf8(QUrl::toPercentEncoding(key));
+		if (!aid.isEmpty()) {
+			query += u"&aid="_q + QString::fromUtf8(QUrl::toPercentEncoding(aid));
+		}
+		const auto url = QUrl(query);
+		SendApiGet(url, [=](const QString &resp, const QString &err) {
+			if (!resp.isEmpty()) {
+				const auto doc = QJsonDocument::fromJson(resp.toUtf8());
+				if (doc.isObject()) {
+					const auto obj = doc.object();
+					const auto status = obj.value(u"status"_q).toString();
+					if (status == u"error"_q || obj.contains(u"message"_q) || obj.contains(u"detail"_q)) {
+						const auto msg = obj.value(u"message"_q).toString();
+						if (msg == u"App not found"_q) {
+							done(QString(), u"AntiSafety: укажите ключ в формате КЛЮЧ:AID (где AID — ID приложения из кабинета antisafety.net)"_q);
+							return;
+						} else if (msg == u"Api key not found"_q) {
+							done(QString(), u"AntiSafety: неверный API-ключ"_q);
+							return;
+						}
+						done(QString(), u"AntiSafety: "_q + (msg.isEmpty() ? resp : msg));
+						return;
+					}
+					if (obj.contains(u"balance"_q)) {
+						double balVal = obj.value(u"balance"_q).toVariant().toDouble();
+						if (balVal >= 10000.0) {
+							balVal /= 1000000.0;
+						}
+						const auto balStr = QString::number(balVal, 'f', 2);
+						const auto cur = obj.value(u"currency"_q).toString(u"USD"_q);
+						done(balStr + ' ' + cur, QString());
+						return;
+					}
+				}
+			}
+			if (!err.isEmpty()) {
+				done(QString(), u"Ошибка AntiSafety: "_q + err);
+				return;
+			}
+			done(resp, QString());
+		});
 	} else {
-		done(u"AntiSafety: API-ключ задан"_q, QString());
+		done(QString(), u"Неизвестный провайдер"_q);
 	}
 }
 
