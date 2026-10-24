@@ -120,13 +120,13 @@ jobs:
       - name: Configure CMake
         working-directory: D:\TBuild\tdesktop\Telegram
         run: |
-          call configure.bat x64 -D TDESKTOP_API_ID=2040 -D TDESKTOP_API_HASH=b18441a1ff607e10a989891a5462e627
+          call configure.bat x64 -D TDESKTOP_API_ID=2040 -D TDESKTOP_API_HASH=b18441a1ff607e10a989891a5462e627 -D CMAKE_AUTOGEN_SKIP_PRECOMPILE_HEADERS=ON
 
       - name: Build GGTG EXE
         working-directory: D:\TBuild\tdesktop\out
         run: |
           set "PreferredToolArchitecture=x64"
-          set "_CL_=/Zm200 /FS"
+          set "_CL_=/Zm300 /FS"
           cmake --build . --config Release --target Telegram --parallel 2 -- /m /p:PreferredToolArchitecture=x64 /p:TrackFileAccess=false /v:m /fl /flp:logfile=build.log;verbosity=normal
 
       - name: Show compilation errors if failed

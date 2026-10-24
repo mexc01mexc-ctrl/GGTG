@@ -4,7 +4,10 @@
 # For license and copyright information please follow this link:
 # https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 
+set(CMAKE_AUTOGEN_SKIP_PRECOMPILE_HEADERS ON)
+
 add_executable(Telegram WIN32 MACOSX_BUNDLE)
+set_property(TARGET Telegram PROPERTY AUTOGEN_SKIP_PRECOMPILE_HEADERS ON)
 init_non_host_target(Telegram)
 
 add_subdirectory(lib_rpl)
@@ -116,6 +119,7 @@ if (NOT DESKTOP_APP_DISABLE_SWIFT6)
 endif()
 
 target_precompile_headers(Telegram PRIVATE $<$<COMPILE_LANGUAGE:CXX,OBJCXX>:${src_loc}/stdafx.h>)
+set_property(TARGET Telegram PROPERTY AUTOGEN_SKIP_PRECOMPILE_HEADERS ON)
 nice_target_sources(Telegram ${src_loc}
 PRIVATE
     ${style_files}
