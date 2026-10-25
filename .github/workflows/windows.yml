@@ -76,6 +76,9 @@ jobs:
       - name: Set up NASM
         uses: ilammy/setup-nasm@v1
 
+      - name: Set up Yasm
+        run: choco install yasm -y
+
       - name: NuGet sources
         run: |
           nuget sources Disable -Name "Microsoft Visual Studio Offline Packages" 2>nul & exit 0
@@ -94,7 +97,7 @@ jobs:
         uses: actions/cache/restore@v4
         with:
           path: D:\TBuild\ThirdParty
-          key: ${{ runner.os }}-x64-thirdparty-v3
+          key: ${{ runner.os }}-x64-thirdparty-v4
           restore-keys: |
             ${{ runner.os }}-x64-thirdparty-v2
             ${{ runner.os }}-x64-thirdparty-
@@ -104,7 +107,7 @@ jobs:
         uses: actions/cache/restore@v4
         with:
           path: D:\TBuild\Libraries\win64
-          key: ${{ runner.os }}-x64-libraries-v3
+          key: ${{ runner.os }}-x64-libraries-v4
           restore-keys: |
             ${{ runner.os }}-x64-libraries-v2
             ${{ runner.os }}-x64-libraries-
@@ -120,14 +123,14 @@ jobs:
         uses: actions/cache/save@v4
         with:
           path: D:\TBuild\ThirdParty
-          key: ${{ runner.os }}-x64-thirdparty-v3
+          key: ${{ runner.os }}-x64-thirdparty-v4
 
       - name: Save Libraries Cache (Immediate)
         if: always()
         uses: actions/cache/save@v4
         with:
           path: D:\TBuild\Libraries\win64
-          key: ${{ runner.os }}-x64-libraries-v3
+          key: ${{ runner.os }}-x64-libraries-v4
 
       - name: Configure CMake
         working-directory: D:\TBuild\tdesktop\Telegram
