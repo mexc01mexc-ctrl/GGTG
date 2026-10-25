@@ -681,8 +681,9 @@ object GgtgRegistration {
                         if (status == "error" || obj.has("message") || obj.has("detail")) {
                             val msg = obj.optString("message", "")
                             if (msg.contains("validate credentials", ignoreCase = true)
-                                || msg.contains("authenticated", ignoreCase = true)) {
-                                throw Exception("AntiSafety: неверный API-ключ")
+                                || msg.contains("authenticated", ignoreCase = true)
+                                || msg.contains("App not found", ignoreCase = true)) {
+                                throw Exception("AntiSafety: сервис требует App ID. Для работы чисто по API выберите TokenFast (api.tokenfast.shop)")
                             }
                             throw Exception("AntiSafety: ${if (msg.isNotEmpty()) msg else resp}")
                         }

@@ -88,6 +88,7 @@ object GgtgImportSupport {
         user.self = true
         user.flags = user.flags or 1024
         val uc = UserConfig.getInstance(targetSlot)
+        uc.loadConfig()
         uc.setCurrentUser(user)
         uc.saveConfig(true)
         val prefsName = if (targetSlot == 0) "userconfing" else "userconfig$targetSlot"
@@ -111,13 +112,19 @@ object GgtgImportSupport {
 
     /** The slot the login screen is bound to stays empty after an import - move to the imported account instead. */
     fun selectImportedSlotIfIdle(firstImportedSlot: Int?) {
-        if (!UserConfig.getInstance(UserConfig.selectedAccount).isClientActivated) {
-            firstImportedSlot?.let { slot ->
-                UserConfig.selectedAccount = slot
-                UserConfig.getInstance(0).saveConfig(true)
-                ApplicationLoader.applicationContext.getSharedPreferences("userconfing", Context.MODE_PRIVATE)
-                    .edit().putInt("selectedAccount", slot).commit()
+        try {
+            if (!UserConfig.getInstance(UserConfig.selectedAccount).isClientActivated) {
+                firstImportedSlot?.let { slot ->
+                    if (slot in 0 until UserConfig.MAX_ACCOUNT_COUNT) {
+                        UserConfig.selectedAccount = slot
+                        UserConfig.getInstance(0).saveConfig(true)
+                        ApplicationLoader.applicationContext.getSharedPreferences("userconfing", Context.MODE_PRIVATE)
+                            .edit().putInt("selectedAccount", slot).commit()
+                    }
+                }
             }
+        } catch (t: Throwable) {
+            org.telegram.messenger.FileLog.e(t)
         }
     }
 }

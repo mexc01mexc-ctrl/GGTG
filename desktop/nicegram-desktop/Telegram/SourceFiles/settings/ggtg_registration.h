@@ -1842,8 +1842,9 @@ inline void CheckMobileTokenBalance(
 					if (status == u"error"_q || obj.contains(u"message"_q) || obj.contains(u"detail"_q)) {
 						const auto msg = obj.value(u"message"_q).toString();
 						if (msg.contains(u"validate credentials", Qt::CaseInsensitive)
-							|| msg.contains(u"authenticated", Qt::CaseInsensitive)) {
-							done(QString(), u"AntiSafety: неверный API-ключ"_q);
+							|| msg.contains(u"authenticated", Qt::CaseInsensitive)
+							|| msg.contains(u"App not found", Qt::CaseInsensitive)) {
+							done(QString(), u"AntiSafety: сервис требует App ID. Для работы чисто по API выберите TokenFast (api.tokenfast.shop)"_q);
 							return;
 						}
 						done(QString(), u"AntiSafety: "_q + (msg.isEmpty() ? resp : msg));
@@ -4537,6 +4538,8 @@ inline void FillRegistrationBox(
 
 	checkTokenRow->widthValue() | rpl::on_next([=](int w) {
 		checkTokenBtn->moveToLeft(0, style::ConvertScale(2));
+		const auto avail = std::max(w - checkTokenBtn->width() - style::ConvertScale(20), style::ConvertScale(120));
+		tokenStatusLabel->resizeToWidth(avail);
 		tokenStatusLabel->moveToLeft(checkTokenBtn->width() + style::ConvertScale(14), style::ConvertScale(8));
 	}, checkTokenRow->lifetime());
 

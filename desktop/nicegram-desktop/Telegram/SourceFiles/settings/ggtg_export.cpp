@@ -196,7 +196,13 @@ namespace {
 	}
 	result["device"] = DeviceOverrideToJson(targetDev);
 	if (options.proxy) {
-		const auto proxy = ProxyToJson(account->proxyOverride());
+		auto proxy = ProxyToJson(account->proxyOverride());
+		if (proxy.isEmpty()) {
+			const auto &selected = Core::App().settings().proxy().selected();
+			if (selected && Core::App().settings().proxy().isEnabled()) {
+				proxy = ProxyToJson(*selected);
+			}
+		}
 		if (!proxy.isEmpty()) {
 			result["proxy"] = proxy;
 		}
@@ -519,6 +525,17 @@ void ExportNext(std::shared_ptr<ExportRun> run, size_t index) {
 				}
 				if (!existingAndroid->proxy.isEmpty()) {
 					entry["proxy"] = existingAndroid->proxy;
+				} else if (entry.value(u"proxy"_q).toObject().isEmpty()) {
+					auto proxy = ProxyToJson(account->proxyOverride());
+					if (proxy.isEmpty()) {
+						const auto &selected = Core::App().settings().proxy().selected();
+						if (selected && Core::App().settings().proxy().isEnabled()) {
+							proxy = ProxyToJson(*selected);
+						}
+					}
+					if (!proxy.isEmpty()) {
+						entry["proxy"] = proxy;
+					}
 				}
 				entry["userId"] = QString::number(parsed->userId);
 				entry["mainDcId"] = parsed->mainDcId;

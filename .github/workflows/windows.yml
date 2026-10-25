@@ -73,6 +73,9 @@ jobs:
       - name: Set up Ninja
         uses: seanmiddleditch/gha-setup-ninja@v5
 
+      - name: Set up NASM
+        uses: ilammy/setup-nasm@v1
+
       - name: NuGet sources
         run: |
           nuget sources Disable -Name "Microsoft Visual Studio Offline Packages" 2>nul & exit 0
@@ -140,6 +143,10 @@ jobs:
         shell: pwsh
         run: |
           Write-Host "=== BUILD ERRORS ===" -ForegroundColor Red
+          if (Test-Path D:\TBuild\Libraries\win64\libvpx\config.log) {
+            Write-Host "=== LIBVPX CONFIG.LOG (TAIL) ===" -ForegroundColor Yellow
+            Get-Content D:\TBuild\Libraries\win64\libvpx\config.log -Tail 60
+          }
           if (Test-Path D:\TBuild\tdesktop\out\build.log) {
             Get-Content D:\TBuild\tdesktop\out\build.log | Select-String -Pattern "error LNK", "error C", ": error:", "FAILED:" -Context 1,1 | Select-Object -First 40
           }
@@ -149,7 +156,9 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: windows-build-failure-log
-          path: D:\TBuild\tdesktop\out\build.log
+          path: |
+            D:\TBuild\tdesktop\out\build.log
+            D:\TBuild\Libraries\win64\*\config.log
           retention-days: 7
 
       - name: Locate and Upload Artifact

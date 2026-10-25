@@ -319,19 +319,27 @@ public class UserConfig extends BaseController {
     private void checkPremiumSelf(TLRPC.User oldUser, TLRPC.User newUser) {
         if (oldUser != null && newUser != null && oldUser.premium != newUser.premium) {
             AndroidUtilities.runOnUIThread(() -> {
-                getMessagesController().updatePremium(newUser.premium);
-                NotificationCenter.getInstance(currentAccount).postNotificationName(NotificationCenter.currentUserPremiumStatusChanged);
-                NotificationCenter.getGlobalInstance().postNotificationName(NotificationCenter.premiumStatusChangedGlobal);
+                try {
+                    getMessagesController().updatePremium(newUser.premium);
+                    NotificationCenter.getInstance(currentAccount).postNotificationName(NotificationCenter.currentUserPremiumStatusChanged);
+                    NotificationCenter.getGlobalInstance().postNotificationName(NotificationCenter.premiumStatusChangedGlobal);
 
-                getMediaDataController().loadPremiumPromo(false);
-                getMediaDataController().loadReactions(false, null);
-                getMessagesController().getStoriesController().invalidateStoryLimit();
+                    getMediaDataController().loadPremiumPromo(false);
+                    getMediaDataController().loadReactions(false, null);
+                    getMessagesController().getStoriesController().invalidateStoryLimit();
+                } catch (Throwable t) {
+                    FileLog.e(t);
+                }
             });
         } else if (oldUser == null) {
             AndroidUtilities.runOnUIThread(() -> {
-                getMessagesController().updatePremium(newUser.premium);
-                NotificationCenter.getInstance(currentAccount).postNotificationName(NotificationCenter.currentUserPremiumStatusChanged);
-                getMediaDataController().loadPremiumPromo(true);
+                try {
+                    getMessagesController().updatePremium(newUser.premium);
+                    NotificationCenter.getInstance(currentAccount).postNotificationName(NotificationCenter.currentUserPremiumStatusChanged);
+                    getMediaDataController().loadPremiumPromo(true);
+                } catch (Throwable t) {
+                    FileLog.e(t);
+                }
             });
         }
     }

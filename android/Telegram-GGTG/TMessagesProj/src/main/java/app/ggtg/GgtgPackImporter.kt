@@ -61,12 +61,15 @@ object GgtgPackImporter {
         false
     }
 
-    /** True when some not-yet-logged-in account in the pack has no proxy Android can use itself. */
+    /** True when some not-yet-logged-in account in the pack has no proxy Android can use itself, and pools exist. */
     fun needsProxyPool(file: File): Boolean {
-        val accounts = try { readPack(file) } catch (t: Throwable) { return true }
+        val accounts = try { readPack(file) } catch (t: Throwable) { return false }
+        val names = org.telegram.ui.Components.GgtgProxyPoolStore.getListNames()
+        val hasPools = names.any { org.telegram.ui.Components.GgtgProxyPoolStore.getCount(it) > 0 }
+        if (!hasPools) return false
         return accounts.any { account ->
             val loggedIn = (0 until UserConfig.MAX_ACCOUNT_COUNT).any { UserConfig.getInstance(it).clientUserId == account.userId }
-            !loggedIn && account.proxy?.type.let { it != "socks5" && it != "mtproto" }
+            !loggedIn && (account.proxy == null || (account.proxy.type != "socks5" && account.proxy.type != "mtproto"))
         }
     }
 
@@ -110,10 +113,10 @@ object GgtgPackImporter {
                 break
             }
             // the account's own proxy from the Mac if Android can use it, else a fresh one from the
-            // chosen pool - never the raw connection, same rule as everywhere else in this app
+            // chosen pool; if no pool was chosen, direct/global connection is allowed.
             val proxy = account.proxy?.takeIf { it.type == "socks5" || it.type == "mtproto" }
                 ?: proxySource?.popNext()?.let { PackProxy("socks5", it.host, it.port, it.username ?: "", it.password ?: "", "") }
-            if (proxy == null) {
+            if (proxy == null && proxySource != null) {
                 noFreeProxy++
                 freeSlots.add(0, slot)
                 continue
@@ -121,19 +124,31 @@ object GgtgPackImporter {
             progressDialog.setWorking(account.phone.takeIf { it.isNotEmpty() }?.let { "+$it" }, i + 1, total)
             // If the pack contains auth keys (standard .ggtg export / sync), install them directly.
             // Only legacy packs without keys fall back to handoff.
-            var result = if (account.keys.isNotEmpty()) {
-                install(account, slot, proxy)
-            } else if (account.handoff && tempSlot != null) {
-                handoff(account, slot, tempSlot, proxy, i + 1, total, progressDialog, keepTransitSession = createBackup)
-            } else {
-                install(account, slot, proxy)
+            var result = try {
+                if (account.keys.isNotEmpty()) {
+                    install(account, slot, proxy)
+                } else if (account.handoff && tempSlot != null) {
+                    if (proxy == null) {
+                        Result.failure(Exception("Требуется прокси для передачи сессии"))
+                    } else {
+                        handoff(account, slot, tempSlot, proxy, i + 1, total, progressDialog, keepTransitSession = createBackup)
+                    }
+                } else {
+                    install(account, slot, proxy)
+                }
+            } catch (t: Throwable) {
+                Result.failure(t)
             }
-            if (result.isFailure && account.handoff && tempSlot != null && account.keys.isNotEmpty()
+            if (result.isFailure && account.handoff && tempSlot != null && account.keys.isNotEmpty() && proxy != null
                 && result.exceptionOrNull() !is TdataImportHelper.PasswordSkippedException) {
                 // If direct install failed, try handoff as fallback
                 FileLog.e("ggtg pack: direct install failed for userId=${account.userId}, trying handoff", result.exceptionOrNull())
-                ConnectionsManager.getInstance(slot).cleanup(true)
-                result = handoff(account, slot, tempSlot, proxy, i + 1, total, progressDialog, keepTransitSession = createBackup)
+                try { ConnectionsManager.getInstance(slot).cleanup(true) } catch (_: Throwable) {}
+                result = try {
+                    handoff(account, slot, tempSlot, proxy, i + 1, total, progressDialog, keepTransitSession = createBackup)
+                } catch (t: Throwable) {
+                    Result.failure(t)
+                }
             }
             result.onSuccess { userId ->
                 imported += userId
@@ -142,7 +157,7 @@ object GgtgPackImporter {
 
                 if (createBackup) {
                     val id = "${System.currentTimeMillis()}_${(1000..9999).random()}"
-                    val proxyJson = proxy.let {
+                    val proxyJson = proxy?.let {
                         JSONObject().apply {
                             put("type", it.type)
                             put("host", it.host)
@@ -151,7 +166,7 @@ object GgtgPackImporter {
                             put("password", it.password)
                             put("secret", it.secret)
                         }
-                    }
+                    } ?: JSONObject()
                     val uc = UserConfig.getInstance(slot)
                     val transitDeviceJson = if (account.handoff) {
                         JSONObject().apply {
@@ -251,9 +266,13 @@ object GgtgPackImporter {
         uc.saveConfig(false)
     }
 
-    private suspend fun install(account: PackAccount, slot: Int, proxy: PackProxy): Result<Long> {
-        // proxy first: the slot's ConnectionsManager must never open a connection without it
-        ConnectionsManager.setProxySettingsForAccount(slot, true, proxy.host, proxy.port, proxy.user, proxy.password, proxy.secret)
+    private suspend fun install(account: PackAccount, slot: Int, proxy: PackProxy?): Result<Long> = runCatching {
+        // proxy first: per-account proxy if provided, else reset to defaults
+        if (proxy != null) {
+            ConnectionsManager.setProxySettingsForAccount(slot, true, proxy.host, proxy.port, proxy.user, proxy.password, proxy.secret)
+        } else {
+            ConnectionsManager.setProxySettingsForAccount(slot, false, "", 0, "", "", "")
+        }
         // device identity: the export's own, else a random phone (set before the ConnectionsManager exists)
         GgtgDevice.assignNew(slot, account.device)
         val cm = ConnectionsManager.getInstance(slot)
@@ -284,7 +303,7 @@ object GgtgPackImporter {
         } else null
         val result = GgtgImportSupport.activateSlot(slot, fallback, account.mainDcId)
         result.onSuccess { applyMeta(account, slot) }
-        return result
+        result.getOrThrow()
     }
 
     private fun readPack(file: File): List<PackAccount> {
