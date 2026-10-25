@@ -79,7 +79,7 @@ object GgtgAnalysis {
 
     // ---- classifying one user ----
 
-    private fun seenBucket(slot: Int, user: TLRPC.User): Int {
+    fun seenBucket(slot: Int, user: TLRPC.User): Int {
         val now = ConnectionsManager.getInstance(slot).currentTime
         return when (val status = user.status) {
             is TLRPC.TL_userStatusOnline -> 1

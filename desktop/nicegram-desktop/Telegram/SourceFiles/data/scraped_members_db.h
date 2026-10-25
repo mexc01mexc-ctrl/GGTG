@@ -119,6 +119,12 @@ void SaveScrapedGroupEntries(
 // bases that MarkSmsSent has so far only applied in memory (see there).
 void FlushBasePrunes();
 
+// Removes a single member from base `baseId` (if it contains them).
+void PruneSentFromBase(uint64 baseId, const QString &username);
+
+// Removes a member from any user base they appear in.
+void PruneMemberFromAllBases(const QString &username);
+
 // A username belongs to one base only (the same goes for a group's public
 // username among the groups bases): the Save* functions above leave out
 // names another base already holds, and this cleans up what was saved
@@ -182,6 +188,9 @@ enum class SmsSendStatus {
 	// Identified as a probable fake/bot during pre-send profile verification.
 	// Skipped from sending and marked for manual review.
 	SuspectedFake,
+	// Recipient last seen long ago ("был(а) давно"): skipped from campaign
+	// and removed from bases.
+	LongAgo,
 };
 
 struct SmsSendRecord {
@@ -298,6 +307,7 @@ struct BaseStats {
 	int peerLimit = 0;
 	int accountFail = 0;
 	int suspectedFake = 0;
+	int longAgo = 0;
 	int bots = 0;
 	int remaining = 0;
 

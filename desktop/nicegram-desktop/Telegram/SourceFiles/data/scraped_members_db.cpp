@@ -189,6 +189,7 @@ void RememberName(const QString &username, const QString &name) {
 	case SmsSendStatus::PeerLimit: return u"peer_limit"_q;
 	case SmsSendStatus::AccountFail: return u"account_fail"_q;
 	case SmsSendStatus::SuspectedFake: return u"suspected_fake"_q;
+	case SmsSendStatus::LongAgo: return u"long_ago"_q;
 	case SmsSendStatus::Sent: break;
 	}
 	return u"ok"_q;
@@ -207,6 +208,8 @@ void RememberName(const QString &username, const QString &name) {
 		return SmsSendStatus::AccountFail;
 	} else if (raw == u"suspected_fake"_q) {
 		return SmsSendStatus::SuspectedFake;
+	} else if (raw == u"long_ago"_q) {
+		return SmsSendStatus::LongAgo;
 	}
 	return SmsSendStatus::Sent;
 }
@@ -338,8 +341,6 @@ void SaveSmsSentCacheNow() {
 	WriteJson(SmsSentPath(), QJsonDocument(object));
 }
 
-void PruneSentFromBase(uint64 baseId, const QString &username);
-
 void SetSmsSendRecord(
 		const QString &username,
 		SmsSendStatus status,
@@ -386,10 +387,8 @@ void SetSmsSendRecord(
 		// would mean writing to the same person again next time.
 		SaveSmsSentCacheNow();
 	}
-	// Delivered for good: the base it came from no longer needs it. The
-	// registry above stays the source of truth (it still makes any other
-	// copy of the name get skipped), so this is only housekeeping.
-	if (status == SmsSendStatus::Sent && baseId) {
+	// Delivered for good or permanently inactive: the base it came from no longer needs it.
+	if ((status == SmsSendStatus::Sent || status == SmsSendStatus::LongAgo) && baseId) {
 		PruneSentFromBase(baseId, normalized);
 	}
 }
@@ -483,33 +482,6 @@ void AppendToIndex(
 [[nodiscard]] base::flat_set<uint64> &DirtyPrunedBases() {
 	static auto result = base::flat_set<uint64>();
 	return result;
-}
-
-void PruneSentFromBase(uint64 baseId, const QString &username) {
-	const auto index = LoadScrapedGroupsIndex();
-	const auto meta = ranges::find(index, baseId, &ScrapedGroupMeta::id);
-	if (meta == end(index) || meta->kind != BaseKind::Users) {
-		return;
-	}
-	// Goes through the same cache the campaign screen reads, so the two
-	// never disagree; a plain lookup (not LoadScrapedGroupUsernames' copy)
-	// because it's edited in place.
-	LoadScrapedGroupUsernames(baseId);
-	auto &list = UsernamesCache()[baseId];
-	const auto it = ranges::find_if(list, [&](const QString &name) {
-		return NormalizeUsername(name) == username;
-	});
-	if (it == list.end()) {
-		return;
-	}
-	list.erase(it);
-	++StatsGeneration();
-	DirtyPrunedBases().emplace(baseId);
-
-	static auto timer = base::Timer([] { FlushBasePrunes(); });
-	if (!timer.isActive()) {
-		timer.callOnce(1500);
-	}
 }
 
 void FinishScrape(
@@ -1341,6 +1313,42 @@ int RemoveDuplicatesAcrossBases() {
 	return removed;
 }
 
+void PruneSentFromBase(uint64 baseId, const QString &username) {
+	const auto index = LoadScrapedGroupsIndex();
+	const auto meta = ranges::find(index, baseId, &ScrapedGroupMeta::id);
+	if (meta == end(index) || meta->kind != BaseKind::Users) {
+		return;
+	}
+	(void)LoadScrapedGroupUsernames(baseId);
+	auto &list = UsernamesCache()[baseId];
+	const auto it = ranges::find_if(list, [&](const QString &name) {
+		return NormalizeUsername(name) == username;
+	});
+	if (it == list.end()) {
+		return;
+	}
+	list.erase(it);
+	++StatsGeneration();
+	DirtyPrunedBases().emplace(baseId);
+
+	static auto timer = base::Timer([] { FlushBasePrunes(); });
+	if (!timer.isActive()) {
+		timer.callOnce(1500);
+	}
+}
+
+void PruneMemberFromAllBases(const QString &username) {
+	const auto normalized = NormalizeUsername(username);
+	if (normalized.isEmpty()) {
+		return;
+	}
+	for (const auto &meta : LoadScrapedGroupsIndex()) {
+		if (meta.kind == BaseKind::Users) {
+			PruneSentFromBase(meta.id, normalized);
+		}
+	}
+}
+
 void FlushBasePrunes() {
 	auto dirty = std::exchange(DirtyPrunedBases(), {});
 	if (dirty.empty()) {
@@ -1468,6 +1476,7 @@ std::vector<SmsSendStatus> SmsMarkKinds() {
 		SmsSendStatus::Restricted,
 		SmsSendStatus::AccountFail,
 		SmsSendStatus::SuspectedFake,
+		SmsSendStatus::LongAgo,
 	};
 }
 
@@ -1479,6 +1488,7 @@ QString SmsMarkTitle(SmsSendStatus status) {
 	case SmsSendStatus::Restricted: return u"получатель закрыл ЛС"_q;
 	case SmsSendStatus::AccountFail: return u"аккаунт не смог написать"_q;
 	case SmsSendStatus::SuspectedFake: return u"предположительный фейк"_q;
+	case SmsSendStatus::LongAgo: return u"был(а) давно"_q;
 	case SmsSendStatus::Sent: break;
 	}
 	return u"OK"_q;
@@ -1603,6 +1613,7 @@ BaseStats ComputeBaseStats(const QStringList &usernames) {
 		case SmsSendStatus::PeerLimit: ++result.peerLimit; break;
 		case SmsSendStatus::AccountFail: ++result.accountFail; break;
 		case SmsSendStatus::SuspectedFake: ++result.suspectedFake; break;
+		case SmsSendStatus::LongAgo: ++result.longAgo; break;
 		}
 	}
 	return result;
@@ -1760,7 +1771,7 @@ int PruneDeliveredFromBases() {
 		kept.reserve(names.size());
 		for (const auto &name : names) {
 			const auto record = FindSmsSendRecord(name);
-			if (record && record->status == SmsSendStatus::Sent) {
+			if (record && (record->status == SmsSendStatus::Sent || record->status == SmsSendStatus::LongAgo)) {
 				++removed;
 			} else {
 				kept.push_back(name);

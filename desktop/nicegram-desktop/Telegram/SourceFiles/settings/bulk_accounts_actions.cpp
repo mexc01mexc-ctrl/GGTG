@@ -2018,6 +2018,7 @@ void OpenUsernamePeer(
 	case Data::SmsSendStatus::PeerLimit: return u"Telegram не дал написать"_q;
 	case Data::SmsSendStatus::AccountFail: return u"аккаунт не смог написать"_q;
 	case Data::SmsSendStatus::SuspectedFake: return u"предположительный фейк"_q;
+	case Data::SmsSendStatus::LongAgo: return u"был(а) в сети давно"_q;
 	case Data::SmsSendStatus::Sent: break;
 	}
 	return u"OK"_q;
@@ -3867,6 +3868,8 @@ void ShowSentRecordActionsBox(
 			case 4: return u"Фильтр: нельзя писать"_q;
 			case 5: return u"Фильтр: не пустило (аккаунт свободен)"_q;
 			case 6: return u"Фильтр: аккаунт не смог написать"_q;
+			case 7: return u"Фильтр: предположительный фейк"_q;
+			case 8: return u"Фильтр: был(а) давно"_q;
 			}
 			return u"Фильтр: все статусы"_q;
 		};
@@ -3907,7 +3910,9 @@ void ShowSentRecordActionsBox(
 					|| (state->filter == 6
 						&& record.status == Data::SmsSendStatus::AccountFail)
 					|| (state->filter == 7
-						&& record.status == Data::SmsSendStatus::SuspectedFake);
+						&& record.status == Data::SmsSendStatus::SuspectedFake)
+					|| (state->filter == 8
+						&& record.status == Data::SmsSendStatus::LongAgo);
 				if (!wanted) {
 					continue;
 				}
@@ -4068,7 +4073,7 @@ void ShowSentRecordActionsBox(
 		box->addRow(object_ptr<Ui::SettingsButton>(
 			box, filterText->value())
 		)->setClickedCallback([=] {
-			state->filter = (state->filter + 1) % 7;
+			state->filter = (state->filter + 1) % 9;
 			state->shown = kSentPageSize;
 			*filterText = filterLabel(state->filter);
 			(*refresh)();
@@ -9224,10 +9229,10 @@ object_ptr<Ui::BoxContent> MakeAccountManagerBox(
 		updateBarButtons();
 
 		const auto showFolderContextMenu = [=](QString tag, QPoint pos) {
-			*folderContextMenu = base::make_unique_q<Ui::PopupMenu>(box, st::popupMenuWithIcons);
+			*folderContextMenu = base::make_unique_q<Ui::PopupMenu>(box, st::folderContextMenu);
 			const auto menu = folderContextMenu->get();
 			if (tag.isEmpty()) {
-				menu->addAction(u"Перевести все аккаунты в Онлайн"_q, [=] {
+				menu->addAction(u"Все в онлайн"_q, [=] {
 					for (const auto &acc : Core::App().domain().orderedAccounts()) {
 						if (!tag.isEmpty() && acc->folderTag() != tag) continue;
 						acc->setAlwaysOffline(false);
@@ -9236,7 +9241,7 @@ object_ptr<Ui::BoxContent> MakeAccountManagerBox(
 					state->rebuildCards();
 					state->rebuildTable();
 				});
-				menu->addAction(u"Перевести все аккаунты в Офлайн (Спящий режим)"_q, [=] {
+				menu->addAction(u"Все в спящий режим"_q, [=] {
 					for (const auto &acc : Core::App().domain().orderedAccounts()) {
 						if (!tag.isEmpty() && acc->folderTag() != tag) continue;
 						acc->setAlwaysOffline(true);
@@ -9264,7 +9269,7 @@ object_ptr<Ui::BoxContent> MakeAccountManagerBox(
 					}
 				});
 			} else {
-				menu->addAction(u"Переименовать папку «%1»..."_q.arg(tag), [=] {
+				menu->addAction(u"Переименовать папку..."_q, [=] {
 					ShowAccountFolderNamePrompt(
 						show(),
 						u"Переименовать папку"_q,
@@ -9284,7 +9289,7 @@ object_ptr<Ui::BoxContent> MakeAccountManagerBox(
 							state->rebuildTable();
 						});
 				});
-				menu->addAction(u"Перевести папку в Онлайн"_q, [=] {
+				menu->addAction(u"Перевести в онлайн"_q, [=] {
 					auto count = 0;
 					for (const auto &acc : Core::App().domain().orderedAccounts()) {
 						if (acc->folderTag() == tag) {
@@ -9296,7 +9301,7 @@ object_ptr<Ui::BoxContent> MakeAccountManagerBox(
 					state->rebuildCards();
 					state->rebuildTable();
 				});
-				menu->addAction(u"Перевести папку в Офлайн (Спящий режим)"_q, [=] {
+				menu->addAction(u"В спящий режим"_q, [=] {
 					auto count = 0;
 					for (const auto &acc : Core::App().domain().orderedAccounts()) {
 						if (acc->folderTag() == tag) {
@@ -9308,7 +9313,7 @@ object_ptr<Ui::BoxContent> MakeAccountManagerBox(
 					state->rebuildCards();
 					state->rebuildTable();
 				});
-				menu->addAction(u"Назначить прокси для всей папки..."_q, [=] {
+				menu->addAction(u"Назначить прокси..."_q, [=] {
 					auto list = std::vector<not_null<Main::Account*>>();
 					for (const auto &acc : Core::App().domain().orderedAccounts()) {
 						if (acc->folderTag() == tag && Main::AccountIsLive(acc)) {
@@ -9321,7 +9326,7 @@ object_ptr<Ui::BoxContent> MakeAccountManagerBox(
 					}
 					ShowBulkProxyBox(controller, std::move(list));
 				});
-				menu->addAction(u"Проверить SpamBot для всей папки"_q, [=] {
+				menu->addAction(u"Проверить SpamBot"_q, [=] {
 					auto list = std::vector<not_null<Main::Account*>>();
 					for (const auto &acc : Core::App().domain().orderedAccounts()) {
 						if (acc->folderTag() == tag && Main::AccountIsLive(acc)) {
@@ -9341,7 +9346,7 @@ object_ptr<Ui::BoxContent> MakeAccountManagerBox(
 						.failPrefix = QString(),
 					});
 				});
-				menu->addAction(u"Убрать папку (аккаунты останутся)"_q, [=] {
+				menu->addAction(u"Убрать из папки"_q, [=] {
 					for (const auto &acc : Core::App().domain().orderedAccounts()) {
 						if (acc->folderTag() == tag) {
 							acc->setFolderTag(QString());
@@ -9353,7 +9358,7 @@ object_ptr<Ui::BoxContent> MakeAccountManagerBox(
 					state->rebuildCards();
 					state->rebuildTable();
 				});
-				menu->addAction(u"Переместить всю папку в корзину"_q, [=] {
+				menu->addAction(u"Переместить в корзину"_q, [=] {
 					auto list = std::vector<not_null<Main::Account*>>();
 					for (const auto &acc : Core::App().domain().orderedAccounts()) {
 						if (acc->folderTag() == tag) {
@@ -9372,7 +9377,7 @@ object_ptr<Ui::BoxContent> MakeAccountManagerBox(
 		};
 
 		const auto showFolderPicker = [=](not_null<Main::Account*> account) {
-			*folderMenu = base::make_unique_q<Ui::PopupMenu>(box, st::popupMenuWithIcons);
+			*folderMenu = base::make_unique_q<Ui::PopupMenu>(box, st::folderContextMenu);
 			auto folders = std::vector<QString>();
 			for (const auto &acc : Core::App().domain().orderedAccounts()) {
 				const auto tag = acc->folderTag();
@@ -9401,7 +9406,7 @@ object_ptr<Ui::BoxContent> MakeAccountManagerBox(
 		};
 
 		const auto showAccountContextMenu = [=](not_null<Main::Account*> account, QPoint pos) {
-			*accountContextMenu = base::make_unique_q<Ui::PopupMenu>(box, st::popupMenuWithIcons);
+			*accountContextMenu = base::make_unique_q<Ui::PopupMenu>(box, st::folderContextMenu);
 			const auto menu = accountContextMenu->get();
 			const auto currentAccount = &controller->session().account();
 			const auto isCurrent = (account.get() == currentAccount);
@@ -9473,7 +9478,7 @@ object_ptr<Ui::BoxContent> MakeAccountManagerBox(
 			if (isLive && !inTrash) {
 				const auto offline = account->alwaysOffline();
 				menu->addAction(
-					offline ? u"Пробудить (Перевести в онлайн)"_q : u"Перевести в офлайн (Спящий режим)"_q,
+					offline ? u"Пробудить (В онлайн)"_q : u"В спящий режим"_q,
 					[=] {
 						account->setAlwaysOffline(!offline);
 						Ggtg::Notice(show(), !offline ? u"Аккаунт переведён в спящий режим"_q : u"Аккаунт пробуждён"_q);
@@ -9496,7 +9501,7 @@ object_ptr<Ui::BoxContent> MakeAccountManagerBox(
 			}
 
 			if (!inTrash) {
-				menu->addAction(u"Массовые действия с этим аккаунтом..."_q, [=] {
+				menu->addAction(u"Массовые действия..."_q, [=] {
 					if (CurrentBulkRun()) {
 						OpenBulkActions(controller);
 						return;
@@ -9798,7 +9803,7 @@ object_ptr<Ui::BoxContent> MakeAccountManagerBox(
 					state->trash,
 					open(std::nullopt, true),
 					[=](QPoint pos) {
-						*folderContextMenu = base::make_unique_q<Ui::PopupMenu>(box, st::popupMenuWithIcons);
+						*folderContextMenu = base::make_unique_q<Ui::PopupMenu>(box, st::folderContextMenu);
 						(*folderContextMenu)->addAction(u"Очистить корзину навсегда..."_q, [=] {
 							auto trashedAccs = std::vector<not_null<Main::Account*>>();
 							for (const auto &acc : Core::App().domain().orderedAccounts()) {

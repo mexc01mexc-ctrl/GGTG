@@ -300,6 +300,10 @@ object GgtgSms {
             return (if (notFound) Outcome.NotFound else Outcome.Skip) to error.ifEmpty { "не найден" }
         }
         val user = MessagesController.getInstance(slot).getUser(clean)
+        if (user != null && GgtgAnalysis.seenBucket(slot, user) == 5) {
+            step("был(а) давно, пропуск")
+            return Outcome.Skip to "был(а) в сети давно"
+        }
         if (skipSuspectedFakes && user != null) {
             val fakeCheck = GgtgFakeDetector.analyzeUser(user, null)
             if (fakeCheck.fakeProbability >= 65) {
@@ -688,6 +692,12 @@ object GgtgSms {
                             notFoundStreak = 0
                             if (message.contains("фейк")) {
                                 GgtgDb.markSmsStatus(username, GgtgDb.SmsStatus.SuspectedFake, GgtgAccounts.label(account), baseId)
+                            } else if (message.contains("давно")) {
+                                GgtgDb.markSmsStatus(username, GgtgDb.SmsStatus.LongAgo, GgtgAccounts.label(account), baseId)
+                                if (baseId != 0L) {
+                                    GgtgDb.pruneFromBase(baseId, username)
+                                }
+                                GgtgDb.pruneFromAllBases(username)
                             }
                             run.settle(i, lane, SmsOutcome.Fail, message, slot)
                         }

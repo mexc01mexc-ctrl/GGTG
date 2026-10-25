@@ -1759,7 +1759,7 @@ inline void FetchMobileToken(
 			PollTokenFastStatus(key, orderId, 20, done);
 		});
 	} else if (provider == MobileTokenProvider::AntiSafety) {
-		const auto url = QUrl(u"https://api.antisafety.net/api/v1/tokens/get"_q);
+		const auto url = QUrl(u"https://antisafety.net/api/v1/tokens/get"_q);
 		auto headers = QMap<QByteArray, QByteArray>();
 		headers.insert("X-API-Key", apiKey.trimmed().toUtf8());
 		headers.insert("Authorization", "Bearer " + apiKey.trimmed().toUtf8());
@@ -1827,21 +1827,12 @@ inline void CheckMobileTokenBalance(
 			done(resp, QString());
 		}, headers);
 	} else if (provider == MobileTokenProvider::AntiSafety) {
-		const auto raw = apiKey.trimmed();
-		auto key = raw;
-		auto aid = QString();
-		const auto colonIdx = raw.indexOf(':');
-		const auto slashIdx = raw.indexOf('/');
-		const auto sepIdx = (colonIdx >= 0) ? colonIdx : slashIdx;
-		if (sepIdx >= 0) {
-			key = raw.left(sepIdx).trimmed();
-			aid = raw.mid(sepIdx + 1).trimmed();
-		}
-		auto query = u"https://antisafety.net/api/tasks/balance?api_key="_q + QString::fromUtf8(QUrl::toPercentEncoding(key));
-		if (!aid.isEmpty()) {
-			query += u"&aid="_q + QString::fromUtf8(QUrl::toPercentEncoding(aid));
-		}
-		const auto url = QUrl(query);
+		const auto key = apiKey.trimmed();
+		const auto url = QUrl(u"https://antisafety.net/api/auth/user"_q);
+		const auto headers = QMap<QByteArray, QByteArray>{
+			{ "Authorization", "Bearer " + key.toUtf8() },
+			{ "Accept", "application/json" }
+		};
 		SendApiGet(url, [=](const QString &resp, const QString &err) {
 			if (!resp.isEmpty()) {
 				const auto doc = QJsonDocument::fromJson(resp.toUtf8());
@@ -1850,24 +1841,28 @@ inline void CheckMobileTokenBalance(
 					const auto status = obj.value(u"status"_q).toString();
 					if (status == u"error"_q || obj.contains(u"message"_q) || obj.contains(u"detail"_q)) {
 						const auto msg = obj.value(u"message"_q).toString();
-						if (msg == u"App not found"_q) {
-							done(QString(), u"AntiSafety: приложение не найдено. Создайте приложение в кабинете antisafety.net (раздел MyApps -> Add App)"_q);
-							return;
-						} else if (msg == u"Api key not found"_q) {
+						if (msg.contains(u"validate credentials", Qt::CaseInsensitive)
+							|| msg.contains(u"authenticated", Qt::CaseInsensitive)) {
 							done(QString(), u"AntiSafety: неверный API-ключ"_q);
 							return;
 						}
 						done(QString(), u"AntiSafety: "_q + (msg.isEmpty() ? resp : msg));
 						return;
 					}
-					if (obj.contains(u"balance"_q)) {
-						double balVal = obj.value(u"balance"_q).toVariant().toDouble();
-						if (balVal >= 10000.0) {
-							balVal /= 1000000.0;
-						}
-						const auto balStr = QString::number(balVal, 'f', 2);
-						const auto cur = obj.value(u"currency"_q).toString(u"USD"_q);
-						done(balStr + ' ' + cur, QString());
+					const auto userObj = obj.value(u"user"_q).toObject();
+					if (userObj.contains(u"balance_usd"_q) || obj.contains(u"balance_usd"_q)) {
+						const auto val = userObj.contains(u"balance_usd"_q)
+							? userObj.value(u"balance_usd"_q).toDouble()
+							: obj.value(u"balance_usd"_q).toDouble();
+						const auto usd = val / 1000000.0;
+						done(QString::number(usd, 'f', 2) + u" USD"_q, QString());
+						return;
+					} else if (userObj.contains(u"balance"_q) || obj.contains(u"balance"_q)) {
+						double val = userObj.contains(u"balance"_q)
+							? userObj.value(u"balance"_q).toVariant().toDouble()
+							: obj.value(u"balance"_q).toVariant().toDouble();
+						if (val >= 10000.0) val /= 1000000.0;
+						done(QString::number(val, 'f', 2) + u" USD"_q, QString());
 						return;
 					}
 				}
@@ -1877,7 +1872,7 @@ inline void CheckMobileTokenBalance(
 				return;
 			}
 			done(resp, QString());
-		});
+		}, headers);
 	} else {
 		done(QString(), u"Неизвестный провайдер"_q);
 	}

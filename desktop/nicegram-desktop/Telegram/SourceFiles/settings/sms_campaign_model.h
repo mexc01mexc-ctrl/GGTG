@@ -629,7 +629,9 @@ struct StepVerdict {
 		int notFound,
 		int spam,
 		int accountFail,
-		int bots) {
+		int bots,
+		int suspectedFake = 0,
+		int longAgo = 0) {
 	auto parts = QStringList();
 	const auto add = [&](int value, const QString &title) {
 		if (value) {
@@ -643,6 +645,8 @@ struct StepVerdict {
 	add(spam, InlineTitle(Outcome::Spam));
 	add(accountFail, u"аккаунт не смог"_q);
 	add(bots, u"боты"_q);
+	add(suspectedFake, u"фейки"_q);
+	add(longAgo, u"был(а) давно"_q);
 	return parts.join(u" · "_q);
 }
 

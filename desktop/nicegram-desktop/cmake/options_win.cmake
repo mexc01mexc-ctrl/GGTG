@@ -4,8 +4,6 @@
 # For license and copyright information please follow this link:
 # https://github.com/desktop-app/legal/blob/master/LEGAL
 
-set(CMAKE_DISABLE_PRECOMPILE_HEADERS ON PARENT_SCOPE)
-set(CMAKE_DISABLE_PRECOMPILE_HEADERS ON)
 
 target_compile_definitions(common_options
 INTERFACE

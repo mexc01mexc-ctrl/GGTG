@@ -486,6 +486,7 @@ class GgtgBaseListActivity(private val baseId: Long, private val isGroups: Boole
             GgtgDb.SmsStatus.NotFound -> "не найден"
             GgtgDb.SmsStatus.Restricted -> "закрыт для ЛС"
             GgtgDb.SmsStatus.SuspectedFake -> "предположительный фейк"
+            GgtgDb.SmsStatus.LongAgo -> "был(а) давно"
             else -> "OK"
         }
     }

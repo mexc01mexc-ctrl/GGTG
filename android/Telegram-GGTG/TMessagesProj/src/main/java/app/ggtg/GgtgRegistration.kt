@@ -668,36 +668,39 @@ object GgtgRegistration {
                 }
             }
             2 -> {
-                val raw = key
-                val colonIdx = raw.indexOf(':')
-                val slashIdx = raw.indexOf('/')
-                val sepIdx = if (colonIdx >= 0) colonIdx else slashIdx
-                val apiKey = if (sepIdx >= 0) raw.substring(0, sepIdx).trim() else raw
-                val aid = if (sepIdx >= 0) raw.substring(sepIdx + 1).trim() else ""
-                var url = "https://antisafety.net/api/tasks/balance?api_key=" + java.net.URLEncoder.encode(apiKey, "UTF-8")
-                if (aid.isNotEmpty()) {
-                    url += "&aid=" + java.net.URLEncoder.encode(aid, "UTF-8")
-                }
-                fetchApiGet(url).map { resp ->
+                val apiKey = key.trim()
+                val url = "https://antisafety.net/api/auth/user"
+                val headers = mapOf(
+                    "Authorization" to "Bearer $apiKey",
+                    "Accept" to "application/json"
+                )
+                fetchApiGet(url, headers).map { resp ->
                     try {
                         val obj = JSONObject(resp)
                         val status = obj.optString("status", "")
                         if (status == "error" || obj.has("message") || obj.has("detail")) {
                             val msg = obj.optString("message", "")
-                            if (msg == "App not found") {
-                                throw Exception("AntiSafety: приложение не найдено. Создайте приложение в кабинете antisafety.net (раздел MyApps -> Add App)")
-                            } else if (msg == "Api key not found") {
+                            if (msg.contains("validate credentials", ignoreCase = true)
+                                || msg.contains("authenticated", ignoreCase = true)) {
                                 throw Exception("AntiSafety: неверный API-ключ")
                             }
                             throw Exception("AntiSafety: ${if (msg.isNotEmpty()) msg else resp}")
                         }
-                        if (obj.has("balance")) {
+                        val userObj = obj.optJSONObject("user")
+                        if (userObj != null && userObj.has("balance_usd")) {
+                            val balUsd = userObj.optDouble("balance_usd", 0.0) / 1000000.0
+                            String.format(java.util.Locale.US, "%.2f USD", balUsd)
+                        } else if (obj.has("balance_usd")) {
+                            val balUsd = obj.optDouble("balance_usd", 0.0) / 1000000.0
+                            String.format(java.util.Locale.US, "%.2f USD", balUsd)
+                        } else if (userObj != null && userObj.has("balance")) {
+                            var balVal = userObj.optDouble("balance", 0.0)
+                            if (balVal >= 10000.0) balVal /= 1000000.0
+                            String.format(java.util.Locale.US, "%.2f USD", balVal)
+                        } else if (obj.has("balance")) {
                             var balVal = obj.optDouble("balance", 0.0)
-                            if (balVal >= 10000.0) {
-                                balVal /= 1000000.0
-                            }
-                            val cur = obj.optString("currency", "USD")
-                            String.format(java.util.Locale.US, "%.2f %s", balVal, cur)
+                            if (balVal >= 10000.0) balVal /= 1000000.0
+                            String.format(java.util.Locale.US, "%.2f USD", balVal)
                         } else {
                             resp
                         }
@@ -788,7 +791,7 @@ object GgtgRegistration {
             put("phone", phone)
         }.toString()
 
-        val res = fetchApiPostJson("https://api.antisafety.net/api/v1/tokens/get", body, headers)
+        val res = fetchApiPostJson("https://antisafety.net/api/v1/tokens/get", body, headers)
         if (res.isFailure) return Result.failure(Exception("Ошибка AntiSafety: ${res.exceptionOrNull()?.message}"))
 
         val resp = res.getOrThrow()

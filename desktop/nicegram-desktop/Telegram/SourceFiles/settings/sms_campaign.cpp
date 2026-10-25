@@ -3283,7 +3283,9 @@ void RefreshRecipientsPreview(not_null<CampaignState*> state) {
 			stats.notFound,
 			stats.spamAcc,
 			stats.accountFail,
-			stats.bots);
+			stats.bots,
+			stats.suspectedFake,
+			stats.longAgo);
 		label->setText(skipped.isEmpty()
 			? QString()
 			: (u"Пропущено: "_q + skipped));
@@ -5946,6 +5948,19 @@ void RunSmsCampaignNow(
 							accountLabel,
 							baseIdOf(username));
 						Data::SetSmsNote(username, message);
+					} else if (message.contains(u"давно"_q)) {
+						confirmNotFound();
+						Data::MarkSmsStatus(
+							username,
+							Data::SmsSendStatus::LongAgo,
+							accountLabel,
+							baseIdOf(username));
+						Data::SetSmsNote(username, message);
+						if (const auto baseId = baseIdOf(username)) {
+							Data::PruneSentFromBase(baseId, username);
+						}
+						Data::PruneMemberFromAllBases(username);
+						Data::FlushBasePrunes();
 					}
 					settle(i, lane, SmsModel::Outcome::Skipped, message, account);
 					break;

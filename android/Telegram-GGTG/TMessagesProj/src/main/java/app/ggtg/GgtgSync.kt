@@ -140,6 +140,7 @@ object GgtgSync {
         GgtgDb.SmsStatus.Restricted -> "restricted"
         GgtgDb.SmsStatus.PeerLimit -> "peer_limit"
         GgtgDb.SmsStatus.SuspectedFake -> "suspected_fake"
+        GgtgDb.SmsStatus.LongAgo -> "long_ago"
         GgtgDb.SmsStatus.Sent -> "ok"
     }
 
@@ -150,6 +151,7 @@ object GgtgSync {
         "restricted" -> GgtgDb.SmsStatus.Restricted
         "peer_limit" -> GgtgDb.SmsStatus.PeerLimit
         "suspected_fake" -> GgtgDb.SmsStatus.SuspectedFake
+        "long_ago" -> GgtgDb.SmsStatus.LongAgo
         "ok", "", null -> GgtgDb.SmsStatus.Sent
         else -> null
     }

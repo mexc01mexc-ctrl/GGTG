@@ -34,7 +34,7 @@ object GgtgDb {
 
     // PeerLimit: PEER_FLOOD while the account itself is not limited (@spambot says it is free) -
     // Telegram refused this particular pair; another account may still try the recipient.
-    enum class SmsStatus { Sent, SpamAcc, NotFound, Restricted, PeerLimit, SuspectedFake }
+    enum class SmsStatus { Sent, SpamAcc, NotFound, Restricted, PeerLimit, SuspectedFake, LongAgo }
 
     data class SmsRecord(
         val username: String, // normalized: no '@', lowercase
@@ -327,6 +327,7 @@ object GgtgDb {
         SmsStatus.Restricted -> "restricted"
         SmsStatus.PeerLimit -> "peer_limit"
         SmsStatus.SuspectedFake -> "suspected_fake"
+        SmsStatus.LongAgo -> "long_ago"
         SmsStatus.Sent -> "ok"
     }
 
@@ -336,6 +337,7 @@ object GgtgDb {
         "restricted" -> SmsStatus.Restricted
         "peer_limit" -> SmsStatus.PeerLimit
         "suspected_fake" -> SmsStatus.SuspectedFake
+        "long_ago" -> SmsStatus.LongAgo
         else -> SmsStatus.Sent
     }
 
@@ -455,6 +457,37 @@ object GgtgDb {
         }
         smsSentCache()[normalized] = SmsRecord(normalized, status, account, System.currentTimeMillis() / 1000, base, source)
         saveSmsCache()
+        if ((status == SmsStatus.Sent || status == SmsStatus.LongAgo) && base != 0L) {
+            pruneFromBase(base, normalized)
+        }
+    }
+
+    fun pruneFromBase(baseId: Long, username: String): Boolean = synchronized(lock) {
+        val names = loadUsernames(baseId)
+        val normalized = normalizeUsername(username)
+        val kept = names.filter { normalizeUsername(it) != normalized }
+        if (kept.size == names.size) return false
+        val array = JSONArray()
+        kept.forEach { array.put(it) }
+        writeJson(groupPath(baseId), array.toString())
+        val index = loadIndex().toMutableList()
+        val i = index.indexOfFirst { it.id == baseId }
+        if (i >= 0) {
+            index[i] = index[i].copy(count = kept.size)
+            writeIndex(index)
+        }
+        statsGeneration++
+        true
+    }
+
+    fun pruneFromAllBases(username: String): Int = synchronized(lock) {
+        var count = 0
+        for (meta in loadIndex()) {
+            if (meta.kind == BaseKind.Users) {
+                if (pruneFromBase(meta.id, username)) count++
+            }
+        }
+        count
     }
 
     fun markSmsSent(username: String, account: String, baseId: Long = 0) =
@@ -572,7 +605,10 @@ object GgtgDb {
         for ((i, meta) in index.withIndex()) {
             if (meta.kind != BaseKind.Users) continue
             val names = loadUsernames(meta.id)
-            val kept = names.filter { cache[normalizeUsername(it)]?.status != SmsStatus.Sent }
+            val kept = names.filter {
+                val s = cache[normalizeUsername(it)]?.status
+                s != SmsStatus.Sent && s != SmsStatus.LongAgo
+            }
             if (kept.size == names.size) continue
             removed += names.size - kept.size
             val array = JSONArray()
@@ -668,7 +704,8 @@ object GgtgDb {
 
     data class BaseStats(
         var total: Int = 0, var sent: Int = 0, var spamAcc: Int = 0,
-        var notFound: Int = 0, var restricted: Int = 0, var peerLimit: Int = 0, var suspectedFake: Int = 0, var bots: Int = 0, var remaining: Int = 0
+        var notFound: Int = 0, var restricted: Int = 0, var peerLimit: Int = 0,
+        var suspectedFake: Int = 0, var longAgo: Int = 0, var bots: Int = 0, var remaining: Int = 0
     )
 
     fun computeBaseStats(usernames: List<String>): BaseStats = synchronized(lock) {
@@ -686,6 +723,7 @@ object GgtgDb {
                 SmsStatus.Restricted -> stats.restricted++
                 SmsStatus.PeerLimit -> stats.peerLimit++
                 SmsStatus.SuspectedFake -> stats.suspectedFake++
+                SmsStatus.LongAgo -> stats.longAgo++
                 null -> stats.remaining++
             }
         }

@@ -37,6 +37,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "ui/wrap/slide_wrap.h"
 #include "ui/wrap/vertical_layout.h"
 #include "window/window_session_controller.h"
+#include "styles/style_boxes.h"
 #include "styles/style_info.h"
 #include "styles/style_layers.h"
 #include "styles/style_menu_icons.h"
@@ -418,7 +419,7 @@ void SessionInfoBox(
 		Fn<void(uint64)> terminate,
 		Fn<void()> exportAction,
 		Fn<void()> switchAction) {
-	box->setWidth(st::boxWideWidth);
+	box->setWidth(st::accountsBoxWidth);
 
 	const auto shown = box->lifetime().make_state<rpl::event_stream<>>();
 	box->setShowFinishedCallback([=] {
@@ -482,18 +483,36 @@ void SessionInfoBox(
 		AddDividerText(container, tr::lng_sessions_location_about());
 	}
 
+	if (switchAction || exportAction) {
+		Ui::AddSkip(container, st::sessionSubtitleSkip);
+		Ui::AddDivider(container);
+		Ui::AddSkip(container, st::sessionSubtitleSkip);
+		Ui::AddSubsectionTitle(container, rpl::single(u"Действия"_q));
+
+		if (switchAction) {
+			const auto btn = container->add(
+				object_ptr<Ui::SettingsButton>(
+					container,
+					rpl::single(u"Переключить на эту сессию"_q),
+					st::settingsButton));
+			btn->setClickedCallback([=] {
+				switchAction();
+				box->closeBox();
+			});
+		}
+		if (exportAction) {
+			const auto btn = container->add(
+				object_ptr<Ui::SettingsButton>(
+					container,
+					rpl::single(u"Экспортировать сессию..."_q),
+					st::settingsButton));
+			btn->setClickedCallback([=] {
+				exportAction();
+			});
+		}
+	}
+
 	box->addButton(tr::lng_about_done(), [=] { box->closeBox(); });
-	if (exportAction) {
-		box->addButton(rpl::single(u"Экспорт..."_q), [=] {
-			exportAction();
-		});
-	}
-	if (switchAction) {
-		box->addButton(rpl::single(u"Переключить"_q), [=] {
-			switchAction();
-			box->closeBox();
-		});
-	}
 	if (terminate) {
 		const auto hash = data.hash;
 		box->addLeftButton(

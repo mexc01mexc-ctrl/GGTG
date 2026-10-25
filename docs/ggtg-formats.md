@@ -74,7 +74,7 @@
   "format": 1, "device": "<hex>", "deviceName": "Mac|Android", "createdAt": "1790000000",
   "bases": [ { "id": "беззнаковое десятичное", "kind": "users|groups", "title": "…", "savedAt": "…",
                "items": ["username", …] | [ {"username","title","membersCount","link","checked"} ] } ],
-  "sent":  { "username": { "status": "ok|spam_acc|not_found|restricted|peer_limit|account_fail",
+  "sent":  { "username": { "status": "ok|spam_acc|not_found|restricted|peer_limit|account_fail|suspected_fake|long_ago",
                            "account": "…", "at": "…", "base": "id", "source": "…", "note": "…" } },
   "tomb":  { "base:<id>": "unix", "sent:<username>": "unix" },
   "files": { "ai_profile.json": { "mtime": "unix", "text": "…" }, "ai_knowledge/<id>.json": {…} }

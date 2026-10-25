@@ -49,11 +49,12 @@ class GgtgSentActivity : BaseFragment() {
         GgtgDb.SmsStatus.Restricted -> "закрыт для ЛС"
         GgtgDb.SmsStatus.PeerLimit -> "отказ Telegram"
         GgtgDb.SmsStatus.SuspectedFake -> "предположительный фейк"
+        GgtgDb.SmsStatus.LongAgo -> "был(а) давно"
         GgtgDb.SmsStatus.Sent -> "OK"
     }
 
     private fun filterLabel() = when (filter) {
-        7 -> "Фильтр: предположительный фейк"; 6 -> "Фильтр: ответили"; 1 -> "Фильтр: OK"; 2 -> "Фильтр: спам-блок аккаунта"; 3 -> "Фильтр: не найден"; 4 -> "Фильтр: закрыт для ЛС"; 5 -> "Фильтр: отказ Telegram"
+        8 -> "Фильтр: был(а) давно"; 7 -> "Фильтр: предположительный фейк"; 6 -> "Фильтр: ответили"; 1 -> "Фильтр: OK"; 2 -> "Фильтр: спам-блок аккаунта"; 3 -> "Фильтр: не найден"; 4 -> "Фильтр: закрыт для ЛС"; 5 -> "Фильтр: отказ Telegram"
         else -> "Фильтр: все статусы"
     }
 
@@ -109,7 +110,7 @@ class GgtgSentActivity : BaseFragment() {
         val chips = LinearLayout(context).apply { orientation = LinearLayout.HORIZONTAL }
         chipsScroll.addView(chips)
         chipViews.clear()
-        for ((index, label) in listOf("Все", "OK", "Спам-блок акк.", "Не найден", "Закрыт для ЛС", "Отказ Telegram", "Ответили").withIndex()) {
+        for ((index, label) in listOf("Все", "OK", "Спам-блок акк.", "Не найден", "Закрыт для ЛС", "Отказ Telegram", "Ответили", "Фейки", "Был(а) давно").withIndex()) {
             val chip = TextView(context).apply {
                 text = label
                 textSize = 14f
@@ -161,6 +162,7 @@ class GgtgSentActivity : BaseFragment() {
                 5 -> r.status == GgtgDb.SmsStatus.PeerLimit
                 6 -> GgtgDb.findReply(r.username) != null
                 7 -> r.status == GgtgDb.SmsStatus.SuspectedFake
+                8 -> r.status == GgtgDb.SmsStatus.LongAgo
                 else -> true
             }
             okFilter && (query.isEmpty() || r.username.contains(query) || r.account.lowercase().contains(query)

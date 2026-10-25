@@ -553,6 +553,14 @@ foldersMenu: PopupMenu(popupMenuWithIcons) {
 	}
 }
 
+folderContextMenu: PopupMenu(defaultPopupMenu) {
+	menu: Menu(defaultMenu) {
+		itemPadding: margins(18px, 8px, 18px, 8px);
+		widthMin: 180px;
+		widthMax: 340px;
+	}
+}
+
 futureOwnerBox: Box(defaultBox) {
 	buttonPadding: margins(0px, 0px, 0px, 14px);
 	buttonHeight: 0px;

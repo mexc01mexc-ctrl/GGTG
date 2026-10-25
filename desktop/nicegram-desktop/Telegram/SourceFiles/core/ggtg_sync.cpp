@@ -107,6 +107,7 @@ void WriteAtomic(const QString &path, const QByteArray &data, qint64 mtime) {
 	case Data::SmsSendStatus::PeerLimit: return u"peer_limit"_q;
 	case Data::SmsSendStatus::AccountFail: return u"account_fail"_q;
 	case Data::SmsSendStatus::SuspectedFake: return u"suspected_fake"_q;
+	case Data::SmsSendStatus::LongAgo: return u"long_ago"_q;
 	case Data::SmsSendStatus::Sent: break;
 	}
 	return u"ok"_q;
@@ -125,6 +126,8 @@ void WriteAtomic(const QString &path, const QByteArray &data, qint64 mtime) {
 		return Data::SmsSendStatus::AccountFail;
 	} else if (raw == u"suspected_fake"_q) {
 		return Data::SmsSendStatus::SuspectedFake;
+	} else if (raw == u"long_ago"_q) {
+		return Data::SmsSendStatus::LongAgo;
 	}
 	return Data::SmsSendStatus::Sent;
 }
