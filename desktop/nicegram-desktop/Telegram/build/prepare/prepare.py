@@ -195,6 +195,12 @@ if 'TARGET' in modifiedEnv:
     del modifiedEnv['TARGET']
 if 'TARGET' in os.environ:
     del os.environ['TARGET']
+if '_CL_' in modifiedEnv:
+    del modifiedEnv['_CL_']
+if '_CL_' in os.environ:
+    del os.environ['_CL_']
+if win:
+    modifiedEnv['MSYS2_ARG_CONV_EXCL'] = '*'
 
 modifiedEnv['PATH'] = environment['PATH_PREFIX'] + modifiedEnv['PATH']
 
@@ -382,7 +388,7 @@ def run(commands):
         if os.path.exists("command.bat"):
             os.remove("command.bat")
         with open("command.bat", 'w') as file:
-            file.write('@echo OFF\r\nset "NoDefaultCurrentDirectoryInExePath="\r\nset "TARGET="\r\n' + winFailOnEach(commands))
+            file.write('@echo OFF\r\nset "NoDefaultCurrentDirectoryInExePath="\r\nset "TARGET="\r\nset "_CL_="\r\nset "MSYS2_ARG_CONV_EXCL=*"\r\n' + winFailOnEach(commands))
         batPath = os.path.abspath("command.bat")
         result = subprocess.run(batPath, shell=True, env=modifiedEnv).returncode == 0
         if result and os.path.exists("command.bat"):

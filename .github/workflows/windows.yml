@@ -20,7 +20,6 @@ jobs:
       TBUILD: D:\TBuild
       LibrariesPath: D:\TBuild\Libraries\win64
       PreferredToolArchitecture: x64
-      _CL_: /FS /bigobj
 
     defaults:
       run:
@@ -118,6 +117,8 @@ jobs:
         run: |
           set Platform=x64
           set TARGET=
+          set _CL_=
+          set MSYS2_ARG_CONV_EXCL=*
           call build\prepare\win.bat silent
 
       - name: Save ThirdParty Cache (Immediate)
@@ -143,6 +144,7 @@ jobs:
         working-directory: D:\TBuild\tdesktop\out
         run: |
           set "PreferredToolArchitecture=x64"
+          set "_CL_=/FS /bigobj"
           cmake --build . --config Release --target Telegram -- /m:2 /p:CL_MPcount=2 /p:PreferredToolArchitecture=x64 /p:TrackFileAccess=false /v:m /fl /flp:logfile=build.log;verbosity=normal
 
       - name: Show compilation errors if failed
