@@ -97,7 +97,7 @@ jobs:
         uses: actions/cache/restore@v4
         with:
           path: D:\TBuild\ThirdParty
-          key: ${{ runner.os }}-x64-thirdparty-v4
+          key: ${{ runner.os }}-x64-thirdparty-v5
           restore-keys: |
             ${{ runner.os }}-x64-thirdparty-v2
             ${{ runner.os }}-x64-thirdparty-
@@ -107,12 +107,13 @@ jobs:
         uses: actions/cache/restore@v4
         with:
           path: D:\TBuild\Libraries\win64
-          key: ${{ runner.os }}-x64-libraries-v4
+          key: ${{ runner.os }}-x64-libraries-v5
           restore-keys: |
             ${{ runner.os }}-x64-libraries-v2
             ${{ runner.os }}-x64-libraries-
 
       - name: Prepare dependencies
+        id: prepare-deps
         working-directory: D:\TBuild\tdesktop\Telegram
         run: |
           set Platform=x64
@@ -120,18 +121,18 @@ jobs:
           call build\prepare\win.bat silent
 
       - name: Save ThirdParty Cache (Immediate)
-        if: always()
+        if: steps.prepare-deps.outcome == 'success'
         uses: actions/cache/save@v4
         with:
           path: D:\TBuild\ThirdParty
-          key: ${{ runner.os }}-x64-thirdparty-v4
+          key: ${{ runner.os }}-x64-thirdparty-v5
 
       - name: Save Libraries Cache (Immediate)
-        if: always()
+        if: steps.prepare-deps.outcome == 'success'
         uses: actions/cache/save@v4
         with:
           path: D:\TBuild\Libraries\win64
-          key: ${{ runner.os }}-x64-libraries-v4
+          key: ${{ runner.os }}-x64-libraries-v5
 
       - name: Configure CMake
         working-directory: D:\TBuild\tdesktop\Telegram

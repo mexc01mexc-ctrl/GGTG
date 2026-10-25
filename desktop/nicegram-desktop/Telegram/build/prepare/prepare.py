@@ -525,8 +525,6 @@ stage('patches', """
     git clone https://github.com/desktop-app/patches.git
     cd patches
     git checkout aec474953ff7ee9b6e4cd9b8658288ea86d124f3
-win:
-    powershell -Command "$f = 'build_libvpx_win.sh'; $c = Get-Content $f -Raw; if (-not $c.StartsWith('unset TARGET')) { Set-Content $f ('unset TARGET`n' + $c) }"
 mac:
     sed -i '' "s/10.13/$MACOSX_DEPLOYMENT_TARGET/g" macos_meson_*.txt
     git clone https://github.com/desktop-app/qt6_highsierra_patches.git qt6_highsierra
