@@ -2909,18 +2909,20 @@ void ShowEditBaseBox(
 				// with: users can be removed from it while this is open.
 				const auto stats = Data::ComputeBaseStats(
 					Data::LoadScrapedGroupUsernames(id));
-				return u"Юзернеймов: "_q + QString::number(stats.total)
+				auto text = u"Юзернеймов: "_q + QString::number(stats.total)
 					+ u". Осталось написать: "_q
 					+ QString::number(stats.remaining)
-					+ u"\nOK (уже написано): "_q + QString::number(stats.sent)
-					+ u"\nАккаунт был в спам-блоке: "_q
-					+ QString::number(stats.spamAcc)
-					+ u", Telegram не дал написать (аккаунт свободен): "_q
-					+ QString::number(stats.peerLimit)
-					+ u", не найдено: "_q + QString::number(stats.notFound)
-					+ u", получатель закрыл ЛС: "_q
-					+ QString::number(stats.restricted)
-					+ u", боты: "_q + QString::number(stats.bots);
+					+ u"\nOK (уже написано): "_q + QString::number(stats.sent);
+				if (stats.longAgo > 0) {
+					text += u", были давно: "_q + QString::number(stats.longAgo);
+				}
+				if (stats.bots > 0) {
+					text += u", боты: "_q + QString::number(stats.bots);
+				}
+				text += u"\nНе найдено: "_q + QString::number(stats.notFound)
+					+ u", закрыт ЛС: "_q + QString::number(stats.restricted)
+					+ u", лимит диалогов: "_q + QString::number(stats.peerLimit);
+				return text;
 			};
 			const auto statsLabel = box->addRow(object_ptr<Ui::FlatLabel>(
 				box,
@@ -3032,15 +3034,6 @@ void ShowEditBaseBox(
 					actions.sendToBase(id);
 				});
 			}
-			AddIconRowButton(
-				box,
-				u"Очистить от фейков и ботов…"_q,
-				st::ggtgAnalyzeButton
-			)->setClickedCallback([=] {
-				Ggtg::FakeDetector::ShowCleanBaseBox(show, id, title, [=] {
-					box->closeBox();
-				});
-			});
 		}
 		state->title = box->addRow(object_ptr<Ui::InputField>(
 			box,
@@ -3119,34 +3112,82 @@ void ShowEditBaseBox(
 							+ QString::number(usernames.size()));
 					});
 			});
-			addOp(u"Убрать ботов (username на \"bot\")"_q, [=] {
+			addOp(u"Очистить от неактивных («был(а) давно»)..."_q, [=] {
 				if (!Core::GuardAllows(show, Core::GuardedAction::EditBases)) {
 					return;
 				}
+				const auto currentList = Data::LoadScrapedGroupUsernames(id);
 				auto kept = QStringList();
-				for (const auto &username : usernames) {
-					if (!Data::IsBotUsername(username)) {
-						kept.push_back(username);
+				auto removed = 0;
+				for (const auto &u : currentList) {
+					const auto norm = u.trimmed().remove('@').toLower();
+					const auto rec = Data::FindSmsSendRecord(norm);
+					if (rec && rec->status == Data::SmsSendStatus::LongAgo) {
+						++removed;
+					} else {
+						kept.push_back(u);
 					}
 				}
-				const auto removed = int(usernames.size() - kept.size());
 				if (!removed) {
-					Ggtg::Notice(show, u"Ботов в списке нет"_q);
+					Ggtg::Notice(show, u"Неактивных («был(а) давно») в базе нет"_q);
 					return;
 				}
 				show->show(Ui::MakeConfirmBox({
-					.text = u"Убрать из списка ботов: "_q
+					.text = u"Удалить из списка неактивных («был(а) давно»): "_q
 						+ QString::number(removed)
 						+ u"? Список изменится насовсем."_q,
 					.confirmed = [=](Fn<void()> &&close) {
 						close();
 						Data::SaveScrapedGroupUsernames(id, title, kept);
-						Ggtg::Notice(show, u"Убрано ботов: "_q
-							+ QString::number(removed));
+						if (const auto field = state->list.data()) {
+							field->setText(kept.join('\n'));
+						}
+						Ggtg::Notice(show, u"Удалено неактивных: "_q + QString::number(removed));
 						reopen();
 					},
-					.confirmText = u"Убрать"_q,
+					.confirmText = u"Удалить"_q,
 				}));
+			});
+			addOp(u"Удалить уже написанных (статус OK)..."_q, [=] {
+				if (!Core::GuardAllows(show, Core::GuardedAction::EditBases)) {
+					return;
+				}
+				const auto currentList = Data::LoadScrapedGroupUsernames(id);
+				auto kept = QStringList();
+				auto removed = 0;
+				for (const auto &u : currentList) {
+					const auto norm = u.trimmed().remove('@').toLower();
+					const auto rec = Data::FindSmsSendRecord(norm);
+					if (rec && rec->status == Data::SmsSendStatus::Sent) {
+						++removed;
+					} else {
+						kept.push_back(u);
+					}
+				}
+				if (!removed) {
+					Ggtg::Notice(show, u"Написанных (OK) в базе нет"_q);
+					return;
+				}
+				show->show(Ui::MakeConfirmBox({
+					.text = u"Удалить из списка уже написанных (OK): "_q
+						+ QString::number(removed)
+						+ u"? Список изменится насовсем."_q,
+					.confirmed = [=](Fn<void()> &&close) {
+						close();
+						Data::SaveScrapedGroupUsernames(id, title, kept);
+						if (const auto field = state->list.data()) {
+							field->setText(kept.join('\n'));
+						}
+						Ggtg::Notice(show, u"Удалено написанных: "_q + QString::number(removed));
+						reopen();
+					},
+					.confirmText = u"Удалить"_q,
+				}));
+			});
+			addOp(u"Очистить от фейков и ботов…"_q, [=] {
+				Ggtg::FakeDetector::ShowCleanBaseBox(show, id, title, [=] {
+					reopen();
+				});
 			});
 			// A person lives in one base only (SaveScrapedGroupUsernames
 			// drops names another base holds), so a "new merged base" came

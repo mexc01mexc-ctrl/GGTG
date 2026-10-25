@@ -119,12 +119,6 @@ class GgtgBaseActivity(private val baseId: Long) : BaseFragment() {
         val main = card(context)
         if (!isGroups) {
             actionRow(main, "💾", "Сохранить изменения") { save() }
-            actionRow(main, "🤖", "Очистить от фейков и ботов…") {
-                val ctx = context ?: parentActivity
-                if (ctx != null) {
-                    GgtgFakeDetector.showCleanBaseDialog(ctx, baseId, meta?.title ?: "База") { reload() }
-                }
-            }
         }
         actionRow(main, "📋", "Открыть списком (кликабельно)", chevron = true) { presentFragment(GgtgBaseListActivity(baseId, isGroups)) }
         root.addView(main)
@@ -134,9 +128,16 @@ class GgtgBaseActivity(private val baseId: Long) : BaseFragment() {
         val ops = card(context)
         actionRow(ops, "📤", "Экспорт в файл (txt / csv)…") { chooseExport() }
         if (!isGroups) {
+            actionRow(ops, "💤", "Удалить неактивных («был(а) давно»)…") { removeInactive() }
+            actionRow(ops, "✅", "Удалить написанных (статус OK)…") { removeSent() }
+            actionRow(ops, "🤖", "Очистить от фейков и ботов…") {
+                val ctx = context ?: parentActivity
+                if (ctx != null) {
+                    GgtgFakeDetector.showCleanBaseDialog(ctx, baseId, meta?.title ?: "База") { reload() }
+                }
+            }
             actionRow(ops, "➕", "Объединить") { merge() }
             actionRow(ops, "✂️", "Разбить на части…") { split() }
-            actionRow(ops, "📊", "Анализ и чистка базы…") { GgtgAnalysis.open(this, baseId, meta?.title ?: "База") { reload() } }
         }
         root.addView(ops)
 
@@ -231,6 +232,24 @@ class GgtgBaseActivity(private val baseId: Long) : BaseFragment() {
         val title = meta?.title ?: return
         GgtgDb.saveUsernames(baseId, title, parsed.valid)
         toast("Сохранено: ${parsed.valid.size}" + if (parsed.rejected.isNotEmpty()) ", не распознано строк: ${parsed.rejected.size}" else "")
+        reload()
+    }
+
+    private fun removeInactive() {
+        val list = GgtgDb.loadUsernames(baseId)
+        val inactive = list.count { GgtgDb.findSmsRecord(it)?.status == GgtgDb.SmsStatus.LongAgo }
+        if (inactive == 0) { toast("Неактивных («был(а) давно») в базе нет"); return }
+        GgtgDb.saveUsernames(baseId, meta?.title ?: return, list.filter { GgtgDb.findSmsRecord(it)?.status != GgtgDb.SmsStatus.LongAgo })
+        toast("Удалено неактивных: $inactive")
+        reload()
+    }
+
+    private fun removeSent() {
+        val list = GgtgDb.loadUsernames(baseId)
+        val sent = list.count { GgtgDb.findSmsRecord(it)?.status == GgtgDb.SmsStatus.Sent }
+        if (sent == 0) { toast("Написанных (OK) в базе нет"); return }
+        GgtgDb.saveUsernames(baseId, meta?.title ?: return, list.filter { GgtgDb.findSmsRecord(it)?.status != GgtgDb.SmsStatus.Sent })
+        toast("Удалено написанных: $sent")
         reload()
     }
 

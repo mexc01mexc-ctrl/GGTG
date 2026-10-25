@@ -320,6 +320,7 @@ struct BaseStats {
 		peerLimit += other.peerLimit;
 		accountFail += other.accountFail;
 		suspectedFake += other.suspectedFake;
+		longAgo += other.longAgo;
 		bots += other.bots;
 		remaining += other.remaining;
 		return *this;
