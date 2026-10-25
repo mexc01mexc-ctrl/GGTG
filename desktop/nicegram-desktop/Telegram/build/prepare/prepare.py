@@ -538,12 +538,12 @@ win:
     SET CHERE_INVOKING=enabled_from_arguments
     SET MSYS2_PATH_TYPE=inherit
 
-    powershell -Command "iwr -OutFile ./msys64.exe https://github.com/msys2/msys2-installer/releases/download/2026-09-27/msys2-base-x86_64-20260927.sfx.exe"
-    msys64.exe
-    del msys64.exe
+    if exist C:\\msys64 if not exist msys64 mklink /J msys64 C:\\msys64
+    if not exist msys64 powershell -Command "iwr -OutFile ./msys64.exe https://github.com/msys2/msys2-installer/releases/download/2026-09-27/msys2-base-x86_64-20260927.sfx.exe"
+    if not exist msys64 .\\msys64.exe -y
+    if exist msys64.exe del /f /q msys64.exe
 
-    bash -c "pacman-key --init; pacman-key --populate; pacman -Syu --noconfirm"
-    pacman -Syu --noconfirm ^
+    pacman -S --noconfirm --needed ^
         make ^
         mingw-w64-ucrt-x86_64-diffutils ^
         mingw-w64-ucrt-x86_64-gperf ^

@@ -150,6 +150,10 @@ jobs:
         shell: pwsh
         run: |
           Write-Host "=== BUILD ERRORS ===" -ForegroundColor Red
+          Get-ChildItem -Path D:\TBuild -Filter "command.bat" -Recurse -ErrorAction SilentlyContinue | ForEach-Object {
+            Write-Host "=== FAILED COMMAND.BAT ($($_.FullName)) ===" -ForegroundColor Magenta
+            Get-Content $_.FullName -Tail 50
+          }
           if (Test-Path D:\TBuild\Libraries\win64\libvpx\config.log) {
             Write-Host "=== LIBVPX CONFIG.LOG (TAIL) ===" -ForegroundColor Yellow
             Get-Content D:\TBuild\Libraries\win64\libvpx\config.log -Tail 60
@@ -166,6 +170,7 @@ jobs:
           path: |
             D:\TBuild\tdesktop\out\build.log
             D:\TBuild\Libraries\win64\*\config.log
+            D:\TBuild\**\command.bat
           retention-days: 7
 
       - name: Locate and Upload Artifact
