@@ -94,8 +94,9 @@ jobs:
         uses: actions/cache/restore@v4
         with:
           path: D:\TBuild\ThirdParty
-          key: ${{ runner.os }}-x64-thirdparty-v2
+          key: ${{ runner.os }}-x64-thirdparty-v3
           restore-keys: |
+            ${{ runner.os }}-x64-thirdparty-v2
             ${{ runner.os }}-x64-thirdparty-
 
       - name: Restore Libraries Cache
@@ -103,9 +104,21 @@ jobs:
         uses: actions/cache/restore@v4
         with:
           path: D:\TBuild\Libraries\win64
-          key: ${{ runner.os }}-x64-libraries-v2
+          key: ${{ runner.os }}-x64-libraries-v3
           restore-keys: |
+            ${{ runner.os }}-x64-libraries-v2
             ${{ runner.os }}-x64-libraries-
+
+      - name: Clean incomplete dependencies
+        shell: pwsh
+        run: |
+          $libsDir = "D:\TBuild\Libraries\win64"
+          if (Test-Path "$libsDir\libvpx") {
+            if (-not (Test-Path "$libsDir\local\lib\vpx.lib")) {
+              Write-Host "Cleaning incomplete libvpx directory before build..."
+              Remove-Item -Path "$libsDir\libvpx" -Recurse -Force -ErrorAction SilentlyContinue
+            }
+          }
 
       - name: Prepare dependencies
         working-directory: D:\TBuild\tdesktop\Telegram
@@ -118,14 +131,14 @@ jobs:
         uses: actions/cache/save@v4
         with:
           path: D:\TBuild\ThirdParty
-          key: ${{ runner.os }}-x64-thirdparty-v2
+          key: ${{ runner.os }}-x64-thirdparty-v3
 
       - name: Save Libraries Cache (Immediate)
         if: always()
         uses: actions/cache/save@v4
         with:
           path: D:\TBuild\Libraries\win64
-          key: ${{ runner.os }}-x64-libraries-v2
+          key: ${{ runner.os }}-x64-libraries-v3
 
       - name: Configure CMake
         working-directory: D:\TBuild\tdesktop\Telegram

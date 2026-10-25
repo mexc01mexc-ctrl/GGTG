@@ -10458,9 +10458,9 @@ void FillStoredMeta(
 	entry.twoFactor = account->twoFactorPassword();
 	entry.proxy = ProxyToObject(account->proxyOverride());
 	if (entry.proxy.isEmpty()) {
-		const auto &selected = Core::App().settings().proxy().selected();
+		const auto selected = Core::App().settings().proxy().selected();
 		if (selected && Core::App().settings().proxy().isEnabled()) {
-			entry.proxy = ProxyToObject(*selected);
+			entry.proxy = ProxyToObject(selected);
 		}
 	}
 	entry.device = DeviceOverrideToJson(EffectiveDeviceOverride(account));

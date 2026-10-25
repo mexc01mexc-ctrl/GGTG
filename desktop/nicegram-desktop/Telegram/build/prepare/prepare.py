@@ -279,7 +279,7 @@ stages = []
 
 def removeDir(folder):
     if win:
-        return 'if exist ' + folder + ' rmdir /Q /S ' + folder + '\nif exist ' + folder + ' exit /b 1'
+        return 'if exist ' + folder + ' (attrib -r -s -h ' + folder + '\\* /s /d 2>nul & rmdir /Q /S ' + folder + ' 2>nul & if exist ' + folder + ' powershell -Command "Remove-Item -LiteralPath ' + folder + ' -Force -Recurse -ErrorAction SilentlyContinue")\nif exist ' + folder + ' exit /b 1'
     return 'rm -rf ' + folder
 
 def setVar(key, multilineValue):

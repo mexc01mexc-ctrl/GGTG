@@ -13,6 +13,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "base/weak_ptr.h"
 #include "base/zlib_help.h"
 #include "core/application.h"
+#include "core/core_settings.h"
 #include "core/process_manager.h"
 #include "data/data_user.h"
 #include "main/main_account.h"
@@ -198,9 +199,9 @@ namespace {
 	if (options.proxy) {
 		auto proxy = ProxyToJson(account->proxyOverride());
 		if (proxy.isEmpty()) {
-			const auto &selected = Core::App().settings().proxy().selected();
+			const auto selected = Core::App().settings().proxy().selected();
 			if (selected && Core::App().settings().proxy().isEnabled()) {
-				proxy = ProxyToJson(*selected);
+				proxy = ProxyToJson(selected);
 			}
 		}
 		if (!proxy.isEmpty()) {
@@ -528,9 +529,9 @@ void ExportNext(std::shared_ptr<ExportRun> run, size_t index) {
 				} else if (entry.value(u"proxy"_q).toObject().isEmpty()) {
 					auto proxy = ProxyToJson(account->proxyOverride());
 					if (proxy.isEmpty()) {
-						const auto &selected = Core::App().settings().proxy().selected();
+						const auto selected = Core::App().settings().proxy().selected();
 						if (selected && Core::App().settings().proxy().isEnabled()) {
-							proxy = ProxyToJson(*selected);
+							proxy = ProxyToJson(selected);
 						}
 					}
 					if (!proxy.isEmpty()) {
