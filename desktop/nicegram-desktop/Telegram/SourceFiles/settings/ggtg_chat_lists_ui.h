@@ -31,6 +31,7 @@ For license and exceptions, see https://github.com/telegramdesktop/tdesktop/blob
 #include "window/window_session_controller_link_info.h"
 #include "window/ggtg_widgets.h"
 #include "styles/style_boxes.h"
+#include "styles/style_media_player.h"
 #include "styles/style_menu_icons.h"
 #include "styles/style_layers.h"
 #include "styles/style_widgets.h"
@@ -153,18 +154,21 @@ inline void FillGgtgListsMenu(
 		const auto id = list.id;
 		const auto name = list.name;
 		const auto has = Lists::Has(id, account, peerId);
-		menu->addAction((has ? u""_q : QString()) + name, [=] {
-			if (has) {
-				Lists::Remove(id, account, peerId);
-			} else {
-				Lists::Add(id, entry());
-			}
-			if (const auto strong = weak.get()) {
-				strong->showToast(has
-					? (u"Убран из списка «"_q + name + u"»"_q)
-					: (u"Добавлен в список «"_q + name + u"»"_q));
-			}
-		});
+		menu->addAction(
+			name,
+			[=] {
+				if (has) {
+					Lists::Remove(id, account, peerId);
+				} else {
+					Lists::Add(id, entry());
+				}
+				if (const auto strong = weak.get()) {
+					strong->showToast(has
+						? (u"Убран из списка «"_q + name + u"»"_q)
+						: (u"Добавлен в список «"_q + name + u"»"_q));
+				}
+			},
+			has ? &st::mediaPlayerMenuCheck : nullptr);
 	}
 	if (!Lists::Lists().empty()) {
 		menu->addSeparator();
@@ -186,7 +190,7 @@ inline void FillGgtgListsMenu(
 						u"Список «"_q + name + u"» создан, чат добавлен"_q);
 				}
 			});
-	});
+	}, &st::menuIconAdd);
 }
 
 namespace ChatListsUi {

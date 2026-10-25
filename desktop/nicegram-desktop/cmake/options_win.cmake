@@ -32,7 +32,7 @@ if (MSVC)
         # /Qspectre
         /utf-8
         /W4
-        /MP     # Enable multi process build.
+        /MP2    # Enable multi process build (capped at 2 to prevent PCH virtual memory exhaustion).
         /EHsc   # Catch C++ exceptions only, extern C functions never throw a C++ exception.
         /w15038 # wrong initialization order
         /w14265 # class has virtual functions, but destructor is not virtual

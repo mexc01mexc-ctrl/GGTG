@@ -672,6 +672,7 @@ object GgtgRegistration {
                 val url = "https://antisafety.net/api/auth/user"
                 val headers = mapOf(
                     "Authorization" to "Bearer $apiKey",
+                    "X-API-Key" to apiKey,
                     "Accept" to "application/json"
                 )
                 fetchApiGet(url, headers).map { resp ->
@@ -682,8 +683,8 @@ object GgtgRegistration {
                             val msg = obj.optString("message", "")
                             if (msg.contains("validate credentials", ignoreCase = true)
                                 || msg.contains("authenticated", ignoreCase = true)
-                                || msg.contains("App not found", ignoreCase = true)) {
-                                throw Exception("AntiSafety: сервис требует App ID. Для работы чисто по API выберите TokenFast (api.tokenfast.shop)")
+                                || msg.contains("not found", ignoreCase = true)) {
+                                throw Exception("AntiSafety: неверный Master API key")
                             }
                             throw Exception("AntiSafety: ${if (msg.isNotEmpty()) msg else resp}")
                         }

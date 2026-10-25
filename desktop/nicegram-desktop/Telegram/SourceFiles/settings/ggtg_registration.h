@@ -1831,6 +1831,7 @@ inline void CheckMobileTokenBalance(
 		const auto url = QUrl(u"https://antisafety.net/api/auth/user"_q);
 		const auto headers = QMap<QByteArray, QByteArray>{
 			{ "Authorization", "Bearer " + key.toUtf8() },
+			{ "X-API-Key", key.toUtf8() },
 			{ "Accept", "application/json" }
 		};
 		SendApiGet(url, [=](const QString &resp, const QString &err) {
@@ -1843,8 +1844,8 @@ inline void CheckMobileTokenBalance(
 						const auto msg = obj.value(u"message"_q).toString();
 						if (msg.contains(u"validate credentials", Qt::CaseInsensitive)
 							|| msg.contains(u"authenticated", Qt::CaseInsensitive)
-							|| msg.contains(u"App not found", Qt::CaseInsensitive)) {
-							done(QString(), u"AntiSafety: сервис требует App ID. Для работы чисто по API выберите TokenFast (api.tokenfast.shop)"_q);
+							|| msg.contains(u"not found", Qt::CaseInsensitive)) {
+							done(QString(), u"AntiSafety: неверный Master API key"_q);
 							return;
 						}
 						done(QString(), u"AntiSafety: "_q + (msg.isEmpty() ? resp : msg));

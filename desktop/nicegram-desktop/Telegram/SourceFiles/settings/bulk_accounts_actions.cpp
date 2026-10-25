@@ -9240,7 +9240,7 @@ object_ptr<Ui::BoxContent> MakeAccountManagerBox(
 					Ggtg::Notice(show(), u"Все аккаунты переведены в онлайн"_q);
 					state->rebuildCards();
 					state->rebuildTable();
-				});
+				}, &st::menuIconShowInChat);
 				menu->addAction(u"Все в спящий режим"_q, [=] {
 					for (const auto &acc : Core::App().domain().orderedAccounts()) {
 						if (!tag.isEmpty() && acc->folderTag() != tag) continue;
@@ -9249,8 +9249,8 @@ object_ptr<Ui::BoxContent> MakeAccountManagerBox(
 					Ggtg::Notice(show(), u"Все аккаунты переведены в спящий режим"_q);
 					state->rebuildCards();
 					state->rebuildTable();
-				});
-				menu->addAction(u"Проверить SpamBot для всех"_q, [=] {
+				}, &st::menuIconMute);
+				menu->addAction(u"Проверить SpamBot"_q, [=] {
 					auto list = std::vector<not_null<Main::Account*>>();
 					for (const auto &acc : Core::App().domain().orderedAccounts()) {
 						if (Main::AccountIsLive(acc) && !acc->trashed()) {
@@ -9267,9 +9267,9 @@ object_ptr<Ui::BoxContent> MakeAccountManagerBox(
 							.failPrefix = QString(),
 						});
 					}
-				});
+				}, &st::menuIconFactcheck);
 			} else {
-				menu->addAction(u"Переименовать папку..."_q, [=] {
+				menu->addAction(u"Переименовать..."_q, [=] {
 					ShowAccountFolderNamePrompt(
 						show(),
 						u"Переименовать папку"_q,
@@ -9288,8 +9288,8 @@ object_ptr<Ui::BoxContent> MakeAccountManagerBox(
 							state->rebuildCards();
 							state->rebuildTable();
 						});
-				});
-				menu->addAction(u"Перевести в онлайн"_q, [=] {
+				}, &st::menuIconEdit);
+				menu->addAction(u"В онлайн"_q, [=] {
 					auto count = 0;
 					for (const auto &acc : Core::App().domain().orderedAccounts()) {
 						if (acc->folderTag() == tag) {
@@ -9300,7 +9300,7 @@ object_ptr<Ui::BoxContent> MakeAccountManagerBox(
 					Ggtg::Notice(show(), u"В онлайне: %1 акк."_q.arg(count));
 					state->rebuildCards();
 					state->rebuildTable();
-				});
+				}, &st::menuIconShowInChat);
 				menu->addAction(u"В спящий режим"_q, [=] {
 					auto count = 0;
 					for (const auto &acc : Core::App().domain().orderedAccounts()) {
@@ -9312,7 +9312,7 @@ object_ptr<Ui::BoxContent> MakeAccountManagerBox(
 					Ggtg::Notice(show(), u"В спящем режиме: %1 акк."_q.arg(count));
 					state->rebuildCards();
 					state->rebuildTable();
-				});
+				}, &st::menuIconMute);
 				menu->addAction(u"Назначить прокси..."_q, [=] {
 					auto list = std::vector<not_null<Main::Account*>>();
 					for (const auto &acc : Core::App().domain().orderedAccounts()) {
@@ -9325,7 +9325,7 @@ object_ptr<Ui::BoxContent> MakeAccountManagerBox(
 						return;
 					}
 					ShowBulkProxyBox(controller, std::move(list));
-				});
+				}, &st::menuIconSettings);
 				menu->addAction(u"Проверить SpamBot"_q, [=] {
 					auto list = std::vector<not_null<Main::Account*>>();
 					for (const auto &acc : Core::App().domain().orderedAccounts()) {
@@ -9345,7 +9345,7 @@ object_ptr<Ui::BoxContent> MakeAccountManagerBox(
 						.title = u"Проверка SpamBot"_q,
 						.failPrefix = QString(),
 					});
-				});
+				}, &st::menuIconFactcheck);
 				menu->addAction(u"Убрать из папки"_q, [=] {
 					for (const auto &acc : Core::App().domain().orderedAccounts()) {
 						if (acc->folderTag() == tag) {
@@ -9357,8 +9357,8 @@ object_ptr<Ui::BoxContent> MakeAccountManagerBox(
 					}
 					state->rebuildCards();
 					state->rebuildTable();
-				});
-				menu->addAction(u"Переместить в корзину"_q, [=] {
+				}, &st::menuIconRemove);
+				menu->addAction(u"В корзину"_q, [=] {
 					auto list = std::vector<not_null<Main::Account*>>();
 					for (const auto &acc : Core::App().domain().orderedAccounts()) {
 						if (acc->folderTag() == tag) {
@@ -9371,7 +9371,7 @@ object_ptr<Ui::BoxContent> MakeAccountManagerBox(
 						state->rebuildCards();
 						state->rebuildTable();
 					}
-				});
+				}, &st::menuIconDeleteAttention);
 			}
 			menu->popup(pos);
 		};
@@ -9812,7 +9812,7 @@ object_ptr<Ui::BoxContent> MakeAccountManagerBox(
 							if (!trashedAccs.empty()) {
 								ConfirmDeleteAccountsForever(show(), trashedAccs);
 							}
-						});
+						}, &st::menuIconDeleteAttention);
 						(*folderContextMenu)->popup(pos);
 					});
 			}

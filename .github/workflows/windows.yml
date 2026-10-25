@@ -109,17 +109,6 @@ jobs:
             ${{ runner.os }}-x64-libraries-v2
             ${{ runner.os }}-x64-libraries-
 
-      - name: Clean incomplete dependencies
-        shell: pwsh
-        run: |
-          $libsDir = "D:\TBuild\Libraries\win64"
-          if (Test-Path "$libsDir\libvpx") {
-            if (-not (Test-Path "$libsDir\local\lib\vpx.lib")) {
-              Write-Host "Cleaning incomplete libvpx directory before build..."
-              Remove-Item -Path "$libsDir\libvpx" -Recurse -Force -ErrorAction SilentlyContinue
-            }
-          }
-
       - name: Prepare dependencies
         working-directory: D:\TBuild\tdesktop\Telegram
         run: |
@@ -149,7 +138,7 @@ jobs:
         working-directory: D:\TBuild\tdesktop\out
         run: |
           set "PreferredToolArchitecture=x64"
-          cmake --build . --config Release --target Telegram -- /p:PreferredToolArchitecture=x64 /p:TrackFileAccess=false /v:m /fl /flp:logfile=build.log;verbosity=normal
+          cmake --build . --config Release --target Telegram -- /m:2 /p:CL_MPcount=2 /p:PreferredToolArchitecture=x64 /p:TrackFileAccess=false /v:m /fl /flp:logfile=build.log;verbosity=normal
 
       - name: Show compilation errors if failed
         if: failure()

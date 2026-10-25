@@ -121,7 +121,7 @@ if (WIN32)
         "${CMAKE_CURRENT_BINARY_DIR}/Telegram_autogen/mocs_compilation_Release.cpp"
         "${CMAKE_CURRENT_BINARY_DIR}/Telegram_autogen/mocs_compilation_Debug.cpp"
         "${CMAKE_CURRENT_BINARY_DIR}/Telegram_autogen/mocs_compilation.cpp"
-        PROPERTIES GENERATED TRUE SKIP_PRECOMPILE_HEADERS ON
+        PROPERTIES GENERATED TRUE SKIP_PRECOMPILE_HEADERS ON COMPILE_FLAGS "/Y- /bigobj"
     )
 endif()
 nice_target_sources(Telegram ${src_loc}

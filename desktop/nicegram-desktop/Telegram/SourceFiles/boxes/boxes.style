@@ -553,11 +553,11 @@ foldersMenu: PopupMenu(popupMenuWithIcons) {
 	}
 }
 
-folderContextMenu: PopupMenu(defaultPopupMenu) {
-	menu: Menu(defaultMenu) {
-		itemPadding: margins(18px, 8px, 18px, 8px);
-		widthMin: 180px;
-		widthMax: 340px;
+folderContextMenu: PopupMenu(popupMenuWithIcons) {
+	menu: Menu(menuWithIcons) {
+		itemPadding: margins(46px, 8px, 18px, 8px);
+		widthMin: 220px;
+		widthMax: 400px;
 	}
 }
 

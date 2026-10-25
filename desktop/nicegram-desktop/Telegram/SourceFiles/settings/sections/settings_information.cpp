@@ -3158,13 +3158,14 @@ not_null<Ui::SettingsButton*> AccountsList::addFolderHeader(
 		} else if (which != Qt::RightButton) {
 			return;
 		}
-		_folderContextMenu = base::make_unique_q<Ui::PopupMenu>(container);
+		_folderContextMenu = base::make_unique_q<Ui::PopupMenu>(_outer, st::folderContextMenu);
 		_folderContextMenu->addAction(
 			GlobalFoldersUiState().pinned.contains(folder)
 				? u"Открепить папку"_q
 				: u"Закрепить папку"_q,
-			[=] { toggleFolderPinned(folder); });
-		_folderContextMenu->addAction(u"Перевести папку в онлайн"_q, [=] {
+			[=] { toggleFolderPinned(folder); },
+			&st::menuIconPin);
+		_folderContextMenu->addAction(u"В онлайн"_q, [=] {
 			for (const auto &acc : accounts) {
 				acc->setAlwaysOffline(false);
 				if (const auto session = acc->maybeSession()) {
@@ -3173,8 +3174,8 @@ not_null<Ui::SettingsButton*> AccountsList::addFolderHeader(
 				}
 			}
 			scheduleRebuild();
-		});
-		_folderContextMenu->addAction(u"Перевести папку в офлайн"_q, [=] {
+		}, &st::menuIconShowInChat);
+		_folderContextMenu->addAction(u"В спящий режим"_q, [=] {
 			for (const auto &acc : accounts) {
 				acc->setAlwaysOffline(true);
 				if (const auto session = acc->maybeSession()) {
@@ -3182,27 +3183,27 @@ not_null<Ui::SettingsButton*> AccountsList::addFolderHeader(
 				}
 			}
 			scheduleRebuild();
-		});
-		_folderContextMenu->addAction(u"Переименовать папку"_q, [=] {
+		}, &st::menuIconMute);
+		_folderContextMenu->addAction(u"Переименовать..."_q, [=] {
 			promptRenameFolder(folder);
-		});
-		_folderContextMenu->addAction(u"Удалить папку"_q, [=] {
+		}, &st::menuIconEdit);
+		_folderContextMenu->addAction(u"Убрать папку"_q, [=] {
 			removeFolder(folder);
-		});
-		_folderContextMenu->addAction(u"Экспортировать папку..."_q, [=] {
+		}, &st::menuIconRemove);
+		_folderContextMenu->addAction(u"Экспорт папки..."_q, [=] {
 			exportFolder(folder, accounts);
-		});
-		_folderContextMenu->addAction(u"Удалить папку и аккаунты..."_q, [=] {
+		}, &st::menuIconExport);
+		_folderContextMenu->addAction(u"Заменить прокси..."_q, [=] {
+			replaceFolderProxy(folder, accounts);
+		}, &st::menuIconSettings);
+		_folderContextMenu->addAction(u"Удалить с аккаунтами..."_q, [=] {
 			ConfirmDeleteAccounts(
 				_controller,
 				QString::number(accounts.size())
 					+ u" аккаунт(ов) в папке \""_q + folder + u"\""_q,
 				accounts,
 				folder);
-		});
-		_folderContextMenu->addAction(u"Заменить прокси для папки..."_q, [=] {
-			replaceFolderProxy(folder, accounts);
-		});
+		}, &st::menuIconDeleteAttention);
 		_folderContextMenu->popup(QCursor::pos());
 	}, button->lifetime());
 

@@ -494,7 +494,7 @@ void SessionInfoBox(
 				object_ptr<Ui::SettingsButton>(
 					container,
 					rpl::single(u"Переключить на эту сессию"_q),
-					st::settingsButton));
+					st::settingsButtonNoIcon));
 			btn->setClickedCallback([=] {
 				switchAction();
 				box->closeBox();
@@ -505,7 +505,7 @@ void SessionInfoBox(
 				object_ptr<Ui::SettingsButton>(
 					container,
 					rpl::single(u"Экспортировать сессию..."_q),
-					st::settingsButton));
+					st::settingsButtonNoIcon));
 			btn->setClickedCallback([=] {
 				exportAction();
 			});

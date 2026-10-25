@@ -1072,7 +1072,7 @@ depends:patches/libvpx/*.patch
 win:
     for /r %%i in (..\\patches\\libvpx\\*) do git apply %%i
 
-    SET PATH=%THIRDPARTY_DIR%\\msys64\\ucrt64\\bin;%THIRDPARTY_DIR%\\msys64\\usr\\bin;%PATH%
+    SET PATH=%THIRDPARTY_DIR%\\msys64\\usr\\bin;%PATH%
     SET CHERE_INVOKING=enabled_from_arguments
     SET MSYS2_PATH_TYPE=inherit
 
@@ -1176,7 +1176,7 @@ win:
 depends:patches/ffmpeg.patch
     git apply ../patches/ffmpeg.patch
 
-    SET PATH=%THIRDPARTY_DIR%\\msys64\\ucrt64\\bin;%THIRDPARTY_DIR%\\msys64\\usr\\bin;%PATH%
+    SET PATH=%THIRDPARTY_DIR%\\msys64\\usr\\bin;%PATH%
     SET CHERE_INVOKING=enabled_from_arguments
     SET MSYS2_PATH_TYPE=inherit
 
