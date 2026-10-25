@@ -191,6 +191,10 @@ for key in environment:
     modifiedEnv[key] = environment[key]
 if win and 'NoDefaultCurrentDirectoryInExePath' in modifiedEnv:
     del modifiedEnv['NoDefaultCurrentDirectoryInExePath']
+if 'TARGET' in modifiedEnv:
+    del modifiedEnv['TARGET']
+if 'TARGET' in os.environ:
+    del os.environ['TARGET']
 
 modifiedEnv['PATH'] = environment['PATH_PREFIX'] + modifiedEnv['PATH']
 
@@ -378,7 +382,7 @@ def run(commands):
         if os.path.exists("command.bat"):
             os.remove("command.bat")
         with open("command.bat", 'w') as file:
-            file.write('@echo OFF\r\nset "NoDefaultCurrentDirectoryInExePath="\r\n' + winFailOnEach(commands))
+            file.write('@echo OFF\r\nset "NoDefaultCurrentDirectoryInExePath="\r\nset "TARGET="\r\n' + winFailOnEach(commands))
         batPath = os.path.abspath("command.bat")
         result = subprocess.run(batPath, shell=True, env=modifiedEnv).returncode == 0
         if result and os.path.exists("command.bat"):
@@ -521,6 +525,8 @@ stage('patches', """
     git clone https://github.com/desktop-app/patches.git
     cd patches
     git checkout aec474953ff7ee9b6e4cd9b8658288ea86d124f3
+win:
+    powershell -Command "$f = 'build_libvpx_win.sh'; $c = Get-Content $f -Raw; if (-not $c.StartsWith('unset TARGET')) { Set-Content $f ('unset TARGET`n' + $c) }"
 mac:
     sed -i '' "s/10.13/$MACOSX_DEPLOYMENT_TARGET/g" macos_meson_*.txt
     git clone https://github.com/desktop-app/qt6_highsierra_patches.git qt6_highsierra
@@ -834,13 +840,16 @@ stage('dav1d', """
     git clone -b 1.5.4 https://code.videolan.org/videolan/dav1d.git
     cd dav1d
 win32:
-    SET "TARGET=x86"
+    SET "DAV1D_TARGET=x86"
+    SET "TARGET="
     SET "DAV1D_ASM_DISABLE=-Denable_asm=false"
 win64:
-    SET "TARGET=x86_64"
+    SET "DAV1D_TARGET=x86_64"
+    SET "TARGET="
     SET "DAV1D_ASM_DISABLE="
 winarm:
-    SET "TARGET=aarch64"
+    SET "DAV1D_TARGET=aarch64"
+    SET "TARGET="
     SET "DAV1D_ASM_DISABLE="
     SET "PATH=%LIBS_DIR%\\gas-preprocessor;%PATH%"
     echo armasm64 fails with 'syntax error in expression: tbnz x14, #4, 8f' as if this instruction is unknown/unsupported.
@@ -854,8 +863,8 @@ win:
     echo windres = 'rc' >> %FILE%
     echo [host_machine] >> %FILE%
     echo system = 'windows' >> %FILE%
-    echo cpu_family = '%TARGET%' >> %FILE%
-    echo cpu = '%TARGET%' >> %FILE%
+    echo cpu_family = '%DAV1D_TARGET%' >> %FILE%
+    echo cpu = '%DAV1D_TARGET%' >> %FILE%
     echo endian = 'little' >> %FILE%
 
 depends:python/Scripts/activate.bat
@@ -899,11 +908,14 @@ stage('openh264', """
     git clone -b v2.6.0 https://github.com/cisco/openh264.git
     cd openh264
 win32:
-    SET "TARGET=x86"
+    SET "OPENH264_TARGET=x86"
+    SET "TARGET="
 win64:
-    SET "TARGET=x86_64"
+    SET "OPENH264_TARGET=x86_64"
+    SET "TARGET="
 winarm:
-    SET "TARGET=aarch64"
+    SET "OPENH264_TARGET=aarch64"
+    SET "TARGET="
     SET "PATH=%LIBS_DIR%\\gas-preprocessor;%PATH%"
 win:
     set FILE=cross-file.txt
@@ -914,8 +926,8 @@ win:
     echo windres = 'rc' >> %FILE%
     echo [host_machine] >> %FILE%
     echo system = 'windows' >> %FILE%
-    echo cpu_family = '%TARGET%' >> %FILE%
-    echo cpu = '%TARGET%' >> %FILE%
+    echo cpu_family = '%OPENH264_TARGET%' >> %FILE%
+    echo cpu = '%OPENH264_TARGET%' >> %FILE%
     echo endian = 'little' >> %FILE%
 
 depends:python/Scripts/activate.bat
@@ -1072,6 +1084,7 @@ depends:patches/libvpx/*.patch
 win:
     for /r %%i in (..\\patches\\libvpx\\*) do git apply %%i
 
+    SET "TARGET="
     SET PATH=%THIRDPARTY_DIR%\\msys64\\usr\\bin;%PATH%
     SET CHERE_INVOKING=enabled_from_arguments
     SET MSYS2_PATH_TYPE=inherit
@@ -1084,7 +1097,7 @@ winarm:
     SET "TOOLCHAIN=arm64-win64-vs17-v145"
 win:
 depends:patches/build_libvpx_win.sh
-    bash --login ../patches/build_libvpx_win.sh
+    bash --login -c "unset TARGET; exec ../patches/build_libvpx_win.sh"
 mac:
     find ../patches/libvpx -type f -print0 | sort -z | xargs -0 git apply
 

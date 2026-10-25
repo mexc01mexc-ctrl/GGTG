@@ -116,6 +116,7 @@ jobs:
         working-directory: D:\TBuild\tdesktop\Telegram
         run: |
           set Platform=x64
+          set TARGET=
           call build\prepare\win.bat silent
 
       - name: Save ThirdParty Cache (Immediate)

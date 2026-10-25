@@ -41,6 +41,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "ui/vertical_list.h"
 #include "ui/widgets/fields/input_field.h"
 #include "ui/widgets/labels.h"
+#include "ui/wrap/slide_wrap.h"
 #include "ui/wrap/vertical_layout.h"
 #include "window/window_session_controller.h"
 #include "styles/style_boxes.h"
@@ -394,12 +395,19 @@ void SetSmsSendRecord(
 }
 
 // Only the status "был(а) давно" counts: "недавно", "на этой неделе",
-// "в этом месяце" and an exact time all stay.
+// "в этом месяце" and an exact time all stay unless exact time is > 30 days ago.
 [[nodiscard]] bool IsLongInactive(
 		const Data::LastseenStatus &status,
 		TimeId now) {
-	Q_UNUSED(now);
-	return status.isLongAgo();
+	if (status.isLongAgo()) {
+		return true;
+	}
+	if (const auto till = status.onlineTill()) {
+		if (till > 0 && till < (now - 30 * 86400)) {
+			return true;
+		}
+	}
+	return false;
 }
 
 [[nodiscard]] QString BaseKindToString(BaseKind kind) {
@@ -547,14 +555,10 @@ struct ScrapeOptions {
 	bool skipBots = true;
 	bool skipAdmins = true;
 	bool skipInactive = true; // status "last seen a long time ago"
-	bool premiumOnly = false;
-	// Channels/supergroups only: also walk the member list by search
-	// queries (a-z, 0-9) - Telegram caps a plain listing at a few
-	// thousand, the search sweep reaches much further into big groups.
-	bool searchByLetters = false;
-	// Channels/supergroups only: also take everyone seen in the recent
-	// message history - the only way in when admins hide the member list.
 	bool messageAuthors = false;
+	int messageAuthorsPages = 10;
+	bool joinLeaveEvents = false;
+	int joinLeaveEventsPages = 10;
 };
 
 [[nodiscard]] QString ScrapeOptionsPath() {
@@ -568,17 +572,29 @@ struct ScrapeOptions {
 		return result;
 	}
 	const auto object = document.object();
-	const auto read = [&](const char *key, bool &value) {
+	const auto readBool = [&](const char *key, bool &value) {
 		if (object.contains(QLatin1String(key))) {
 			value = object[QLatin1String(key)].toBool(value);
 		}
 	};
-	read("skipBots", result.skipBots);
-	read("skipAdmins", result.skipAdmins);
-	read("skipInactive", result.skipInactive);
-	read("premiumOnly", result.premiumOnly);
-	read("searchByLetters", result.searchByLetters);
-	read("messageAuthors", result.messageAuthors);
+	const auto readInt = [&](const char *key, int &value) {
+		if (object.contains(QLatin1String(key))) {
+			value = object[QLatin1String(key)].toInt(value);
+		}
+	};
+	readBool("skipBots", result.skipBots);
+	readBool("skipAdmins", result.skipAdmins);
+	readBool("skipInactive", result.skipInactive);
+	readBool("messageAuthors", result.messageAuthors);
+	readInt("messageAuthorsPages", result.messageAuthorsPages);
+	readBool("joinLeaveEvents", result.joinLeaveEvents);
+	readInt("joinLeaveEventsPages", result.joinLeaveEventsPages);
+	if (result.messageAuthorsPages <= 0) {
+		result.messageAuthorsPages = 10;
+	}
+	if (result.joinLeaveEventsPages <= 0) {
+		result.joinLeaveEventsPages = 10;
+	}
 	return result;
 }
 
@@ -587,9 +603,10 @@ void SaveScrapeOptions(const ScrapeOptions &options) {
 		{ "skipBots", options.skipBots },
 		{ "skipAdmins", options.skipAdmins },
 		{ "skipInactive", options.skipInactive },
-		{ "premiumOnly", options.premiumOnly },
-		{ "searchByLetters", options.searchByLetters },
 		{ "messageAuthors", options.messageAuthors },
+		{ "messageAuthorsPages", options.messageAuthorsPages },
+		{ "joinLeaveEvents", options.joinLeaveEvents },
+		{ "joinLeaveEventsPages", options.joinLeaveEventsPages },
 	}));
 }
 
@@ -607,9 +624,6 @@ void SaveScrapeOptions(const ScrapeOptions &options) {
 		return false;
 	}
 	if (options.skipInactive && IsLongInactive(user->lastseen(), now)) {
-		return false;
-	}
-	if (options.premiumOnly && !user->isPremium()) {
 		return false;
 	}
 	return true;
@@ -680,19 +694,12 @@ void ScrapeChannelMembers(
 		const ScrapeOptions &options,
 		Fn<void(QStringList collected, QString reason)> done) {
 	struct Phase {
-		enum class Kind { Recent, Search, Authors };
+		enum class Kind { Recent, History };
 		Kind kind = Kind::Recent;
-		QString query;
 	};
-	auto phases = std::vector<Phase>{ { Phase::Kind::Recent, QString() } };
-	if (options.searchByLetters) {
-		const auto queries = u"abcdefghijklmnopqrstuvwxyz0123456789"_q;
-		for (const auto &ch : queries) {
-			phases.push_back({ Phase::Kind::Search, QString(ch) });
-		}
-	}
-	if (options.messageAuthors) {
-		phases.push_back({ Phase::Kind::Authors, QString() });
+	auto phases = std::vector<Phase>{ { Phase::Kind::Recent } };
+	if (options.messageAuthors || options.joinLeaveEvents) {
+		phases.push_back({ Phase::Kind::History });
 	}
 
 	const auto api = static_cast<MTP::Sender*>(&channel->session().api());
@@ -706,7 +713,6 @@ void ScrapeChannelMembers(
 	// Telegram serves a listing only this deep per query.
 	constexpr auto kPhaseDepth = 10'000;
 	constexpr auto kHistoryPage = 100;
-	constexpr auto kMaxHistoryMessages = 30'000;
 	constexpr auto kMaxFloodWaitSeconds = 300;
 	constexpr auto kMaxFloodRetries = 5;
 
@@ -721,6 +727,7 @@ void ScrapeChannelMembers(
 		int phase = 0;
 		int offset = 0; // participants offset, or history messages fetched
 		int historyOffsetId = 0;
+		int historyPage = 0;
 		int floodRetries = 0;
 		bool finished = false;
 	};
@@ -828,6 +835,7 @@ void ScrapeChannelMembers(
 		++state->phase;
 		state->offset = 0;
 		state->historyOffsetId = 0;
+		state->historyPage = 0;
 	};
 	// After a page: stop at the cap, move on when the source is exhausted,
 	// otherwise keep paging it.
@@ -863,23 +871,22 @@ void ScrapeChannelMembers(
 			pauseThen(crl::time(wait + 1) * 1000);
 			return;
 		}
-		const auto isAuthors = (state->phase < int(phases.size()))
-			&& (phases[state->phase].kind == Phase::Kind::Authors);
-		if (!isAuthors && (type == u"CHAT_ADMIN_REQUIRED"_q)) {
-			// The member list is hidden. Skip every remaining
-			// participants phase; the message-history one (if it was
-			// asked for) can still work.
+		const auto isHistory = (state->phase < int(phases.size()))
+			&& (phases[state->phase].kind == Phase::Kind::History);
+		if (!isHistory && (type == u"CHAT_ADMIN_REQUIRED"_q)) {
+			// The member list is hidden. Skip to the message-history phase
+			// if it was asked for.
 			appendLogLine(
 				u"Список участников скрыт администраторами."_q);
 			while (state->phase < int(phases.size())
-				&& phases[state->phase].kind != Phase::Kind::Authors) {
+				&& phases[state->phase].kind != Phase::Kind::History) {
 				++state->phase;
 			}
 			state->offset = 0;
 			state->historyOffsetId = 0;
+			state->historyPage = 0;
 			if (state->phase >= int(phases.size())) {
-				finish(u"список участников скрыт (включите \"Авторы "
-					"сообщений\" в настройках сбора)"_q);
+				finish(u"список участников скрыт (включите сбор авторов или вступивших в настройках)"_q);
 			} else {
 				pauseThen(pageGap());
 			}
@@ -898,7 +905,14 @@ void ScrapeChannelMembers(
 			return;
 		}
 		const auto &phase = phases[state->phase];
-		if (phase.kind == Phase::Kind::Authors) {
+		if (phase.kind == Phase::Kind::History) {
+			const auto maxHistoryPages = std::max(
+				options.messageAuthors ? options.messageAuthorsPages : 0,
+				options.joinLeaveEvents ? options.joinLeaveEventsPages : 0);
+			if (state->historyPage >= maxHistoryPages) {
+				afterPage(true);
+				return;
+			}
 			api->request(MTPmessages_GetHistory(
 				channel->input(),
 				MTP_int(state->historyOffsetId),
@@ -912,25 +926,86 @@ void ScrapeChannelMembers(
 				if (*state->cancelled) {
 					return;
 				}
-				auto messages = 0;
+				++state->historyPage;
+				auto messagesCount = 0;
 				auto lowestId = 0;
 				auto added = 0;
 				result.match([&](const MTPDmessages_messagesNotModified &) {
 				}, [&](const auto &data) {
 					channel->owner().processUsers(data.vusers());
+
+					// Update lastseen from raw status if available
+					for (const auto &mtpUser : data.vusers().v) {
+						mtpUser.match([&](const MTPDuser &u) {
+							if (const auto status = u.vstatus()) {
+								if (const auto user = channel->owner().userLoaded(UserId(u.vid().v))) {
+									user->updateLastseen(LastseenFromMTP(*status, user->lastseen()));
+								}
+							}
+						}, [](const auto &) {});
+					}
+
+					const auto allowAuthors = options.messageAuthors
+						&& (state->historyPage <= options.messageAuthorsPages);
+					const auto allowEvents = options.joinLeaveEvents
+						&& (state->historyPage <= options.joinLeaveEventsPages);
+
+					auto candidateUids = std::vector<uint64>();
+
 					for (const auto &message : data.vmessages().v) {
 						const auto id = int(IdFromMessage(message).bare);
 						lowestId = lowestId ? std::min(lowestId, id) : id;
-						++messages;
-					}
-					for (const auto &mtpUser : data.vusers().v) {
-						const auto userId = mtpUser.match([](const auto &d) {
-							return UserId(d.vid());
+						++messagesCount;
+
+						message.match([&](const MTPDmessage &msg) {
+							if (allowAuthors) {
+								if (const auto from = msg.vfrom_id()) {
+									const auto peer = peerFromMTP(*from);
+									if (peerIsUser(peer)) {
+										candidateUids.push_back(peerToUser(peer).bare);
+									}
+								}
+							}
+						}, [&](const MTPDmessageService &msg) {
+							if (allowEvents) {
+								msg.vaction().match([&](const MTPDmessageActionChatAddUser &act) {
+									for (const auto &uid : act.vusers().v) {
+										candidateUids.push_back(UserId(uid.v).bare);
+									}
+									if (const auto from = msg.vfrom_id()) {
+										const auto peer = peerFromMTP(*from);
+										if (peerIsUser(peer)) {
+											candidateUids.push_back(peerToUser(peer).bare);
+										}
+									}
+								}, [&](const MTPDmessageActionChatJoinedByLink &act) {
+									if (const auto from = msg.vfrom_id()) {
+										const auto peer = peerFromMTP(*from);
+										if (peerIsUser(peer)) {
+											candidateUids.push_back(peerToUser(peer).bare);
+										}
+									}
+								}, [&](const MTPDmessageActionChatJoinedByRequest &act) {
+									if (const auto from = msg.vfrom_id()) {
+										const auto peer = peerFromMTP(*from);
+										if (peerIsUser(peer)) {
+											candidateUids.push_back(peerToUser(peer).bare);
+										}
+									}
+								}, [&](const MTPDmessageActionChatDeleteUser &act) {
+									candidateUids.push_back(UserId(act.vuser_id().v).bare);
+								}, [](const auto &) {
+								});
+							}
+						}, [](const MTPDmessageEmpty &) {
 						});
-						if (!seen->emplace(userId.bare).second) {
+					}
+
+					for (const auto uid : candidateUids) {
+						if (!seen->emplace(uid).second) {
 							continue;
 						}
-						const auto user = channel->owner().userLoaded(userId);
+						const auto user = channel->owner().userLoaded(UserId(uid));
 						if (user && UserAllowed(user, options, now)) {
 							collected->push_back(user->username());
 							RememberPeerName(user);
@@ -938,24 +1013,27 @@ void ScrapeChannelMembers(
 						}
 					}
 				});
-				state->offset += messages;
+
+				state->offset += messagesCount;
 				state->historyOffsetId = lowestId;
 				appendLogLine(
-					u"Сообщения: +"_q + QString::number(added)
-						+ u" (просмотрено "_q + QString::number(state->offset)
-						+ u", всего "_q + QString::number(collected->size())
+					u"История (стр. "_q + QString::number(state->historyPage)
+						+ u"/" + QString::number(maxHistoryPages)
+						+ u"): +" + QString::number(added)
+						+ u" (сообщений "_q + QString::number(state->offset)
+						+ u", всего участников "_q + QString::number(collected->size())
 						+ ')');
-				afterPage(!messages
+
+				const auto phaseDone = !messagesCount
 					|| !lowestId
-					|| (state->offset >= kMaxHistoryMessages));
+					|| (state->historyPage >= maxHistoryPages);
+				afterPage(phaseDone);
 			}).fail(onError).send();
 			return;
 		}
 		api->request(MTPchannels_GetParticipants(
 			channel->inputChannel(),
-			(phase.kind == Phase::Kind::Recent)
-				? MTP_channelParticipantsRecent()
-				: MTP_channelParticipantsSearch(MTP_string(phase.query)),
+			MTP_channelParticipantsRecent(),
 			MTP_int(state->offset),
 			MTP_int(kPerPage),
 			MTP_long(0)
@@ -985,20 +1063,13 @@ void ScrapeChannelMembers(
 					}
 				}
 				state->offset += int(parsed.list.size());
-				// A plain listing ends on an empty page; a search returns
-				// short of a full page when it has nothing more.
 				phaseDone = parsed.list.empty()
-					|| (state->offset >= kPhaseDepth)
-					|| ((phase.kind == Phase::Kind::Search)
-						&& (int(parsed.list.size()) < kPerPage));
+					|| (state->offset >= kPhaseDepth);
 			}, [&](const MTPDchannels_channelParticipantsNotModified &) {
 				phaseDone = true;
 			});
 			appendLogLine(
-				(phase.kind == Phase::Kind::Recent
-					? u"Участники"_q
-					: (u"Поиск \""_q + phase.query + '"'))
-					+ u": +"_q + QString::number(addedThisPage)
+				u"Участники: +"_q + QString::number(addedThisPage)
 					+ u" (всего "_q + QString::number(collected->size())
 					+ ')');
 			afterPage(phaseDone);
@@ -1801,24 +1872,29 @@ void ShowScrapeOptions(
 		QPointer<Ui::Checkbox> bots;
 		QPointer<Ui::Checkbox> admins;
 		QPointer<Ui::Checkbox> inactive;
-		QPointer<Ui::Checkbox> premium;
-		QPointer<Ui::Checkbox> letters;
 		QPointer<Ui::Checkbox> authors;
+		QPointer<Ui::InputField> authorsPages;
+		QPointer<Ui::Checkbox> joinLeave;
+		QPointer<Ui::InputField> joinLeavePages;
 	};
 	const auto state = std::make_shared<State>();
 	const auto saved = LoadScrapeOptions();
 	controller->show(Box([=](not_null<Ui::GenericBox*> box) {
 		box->setWidth(st::boxWideWidth);
 		box->setTitle(rpl::single(u"Сбор участников: "_q + name));
-		// A short checkbox label with the longer explanation under it in
-		// a quieter color: a long label would be cut with "…".
-		const auto add = [&](
+
+		const auto addCheckboxRow = [&](
 				const QString &text,
 				bool value,
 				const QString &hint = QString()) {
 			const auto checkbox = box->addRow(
-				object_ptr<Ui::Checkbox>(box, text, value));
-			checkbox->setAllowTextLines(0); // wraps, never "..."
+				object_ptr<Ui::Checkbox>(box, text, value),
+				style::margins(
+					st::boxRowPadding.left(),
+					style::ConvertScale(4),
+					st::boxRowPadding.right(),
+					style::ConvertScale(4)));
+			checkbox->setAllowTextLines(0);
 			if (!hint.isEmpty()) {
 				box->addRow(
 					object_ptr<Ui::FlatLabel>(
@@ -1826,52 +1902,104 @@ void ShowScrapeOptions(
 						hint,
 						st::boxDividerLabel),
 					style::margins(
-						st::boxRowPadding.left() + style::ConvertScale(36),
+						st::boxRowPadding.left() + style::ConvertScale(32),
 						0,
 						st::boxRowPadding.right(),
-						st::defaultVerticalListSkip));
+						style::ConvertScale(8)));
+			} else {
+				Ui::AddSkip(box->verticalLayout(), style::ConvertScale(4));
 			}
 			return checkbox;
 		};
-		state->bots = add(u"Пропускать ботов"_q, saved.skipBots);
-		state->admins = add(
+
+		state->bots = addCheckboxRow(u"Пропускать ботов"_q, saved.skipBots);
+		state->admins = addCheckboxRow(
 			u"Пропускать администраторов и создателя"_q,
 			saved.skipAdmins);
-		state->inactive = add(
+		state->inactive = addCheckboxRow(
 			u"Пропускать неактивных"_q,
 			saved.skipInactive,
-			u"Только со статусом «был(а) давно»."_q);
-		state->premium = add(u"Только Premium"_q, saved.premiumOnly);
+			u"Не добавлять пользователей со статусом «был(а) давно»."_q);
+
 		if (channelLike) {
-			Ui::AddSkip(box->verticalLayout());
+			Ui::AddSkip(box->verticalLayout(), style::ConvertScale(6));
 			Ui::AddDividerText(
 				box->verticalLayout(),
 				rpl::single(
-					u"Обычный список у больших групп обрывается на "
-						"нескольких тысячах, а у групп со скрытыми "
-						"участниками недоступен вовсе. Расширенный обход "
-						"медленнее (паузы между запросами), но заходит "
-						"дальше."_q));
-			state->letters = add(
-				u"Поиск по буквам"_q,
-				saved.searchByLetters,
-				u"Перебор a-z и 0-9: медленнее, но находит больше."_q);
-			state->authors = add(
-				u"Авторы последних сообщений"_q,
+					u"Сбор из истории группы (1 страница = 100 сообщений)"_q));
+			Ui::AddSkip(box->verticalLayout(), style::ConvertScale(6));
+
+			state->authors = addCheckboxRow(
+				u"Кто писал в чате (авторы сообщений)"_q,
 				saved.messageAuthors,
-				u"Если список участников скрыт - берутся те, кто писал в чате."_q);
+				u"Сбор авторов последних сообщений из истории группы."_q);
+
+			const auto authorsWrap = box->addRow(
+				object_ptr<Ui::SlideWrap<Ui::VerticalLayout>>(
+					box,
+					object_ptr<Ui::VerticalLayout>(box)),
+				style::margins(
+					st::boxRowPadding.left() + style::ConvertScale(32),
+					0,
+					st::boxRowPadding.right(),
+					style::ConvertScale(10)));
+
+			const auto authorsInner = authorsWrap->entity();
+			state->authorsPages = authorsInner->add(
+				object_ptr<Ui::InputField>(
+					authorsInner,
+					st::defaultInputField,
+					rpl::single(u"Количество страниц истории"_q),
+					QString::number(std::max(1, saved.messageAuthorsPages))));
+
+			authorsWrap->toggleOn(state->authors->checkedChanges());
+			authorsWrap->toggle(saved.messageAuthors, anim::type::instant);
+
+			state->joinLeave = addCheckboxRow(
+				u"Кто вступил и покинул группу"_q,
+				saved.joinLeaveEvents,
+				u"Сбор по сервисным событиям входа и выхода из группы."_q);
+
+			const auto joinLeaveWrap = box->addRow(
+				object_ptr<Ui::SlideWrap<Ui::VerticalLayout>>(
+					box,
+					object_ptr<Ui::VerticalLayout>(box)),
+				style::margins(
+					st::boxRowPadding.left() + style::ConvertScale(32),
+					0,
+					st::boxRowPadding.right(),
+					style::ConvertScale(10)));
+
+			const auto joinLeaveInner = joinLeaveWrap->entity();
+			state->joinLeavePages = joinLeaveInner->add(
+				object_ptr<Ui::InputField>(
+					joinLeaveInner,
+					st::defaultInputField,
+					rpl::single(u"Количество страниц истории"_q),
+					QString::number(std::max(1, saved.joinLeaveEventsPages))));
+
+			joinLeaveWrap->toggleOn(state->joinLeave->checkedChanges());
+			joinLeaveWrap->toggle(saved.joinLeaveEvents, anim::type::instant);
 		}
+
 		box->addButton(rpl::single(u"Собрать"_q), [=] {
 			const auto checked = [](const QPointer<Ui::Checkbox> &box) {
 				return box && box->checked();
+			};
+			const auto parsePages = [](const QPointer<Ui::InputField> &field, int def) {
+				if (!field) return def;
+				bool ok = false;
+				const auto val = field->getLastText().trimmed().toInt(&ok);
+				return (ok && val > 0) ? std::min(val, 1000) : def;
 			};
 			const auto options = ScrapeOptions{
 				.skipBots = checked(state->bots),
 				.skipAdmins = checked(state->admins),
 				.skipInactive = checked(state->inactive),
-				.premiumOnly = checked(state->premium),
-				.searchByLetters = checked(state->letters),
 				.messageAuthors = checked(state->authors),
+				.messageAuthorsPages = parsePages(state->authorsPages, 10),
+				.joinLeaveEvents = checked(state->joinLeave),
+				.joinLeaveEventsPages = parsePages(state->joinLeavePages, 10),
 			};
 			SaveScrapeOptions(options);
 			box->closeBox();

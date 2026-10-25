@@ -16,8 +16,11 @@ object GgtgScraper {
     data class Options(
         val skipBots: Boolean = true,
         val skipAdmins: Boolean = true,
-        val premiumOnly: Boolean = false,
-        val searchByLetters: Boolean = false
+        val skipInactive: Boolean = true,
+        val messageAuthors: Boolean = false,
+        val messageAuthorsPages: Int = 10,
+        val joinLeaveEvents: Boolean = false,
+        val joinLeaveEventsPages: Int = 10
     )
 
     private const val PER_PAGE = 200
@@ -46,11 +49,21 @@ object GgtgScraper {
         return null
     }
 
+    private fun isLongInactive(user: TLRPC.User): Boolean {
+        val status = user.status ?: return false
+        val now = System.currentTimeMillis() / 1000
+        return when (status) {
+            is TLRPC.TL_userStatusEmpty -> true
+            is TLRPC.TL_userStatusOffline -> (status.expires > 0 && status.expires < now - 30 * 86400)
+            else -> false
+        }
+    }
+
     private fun userAllowed(user: TLRPC.User?, options: Options): Boolean {
         if (user == null) return false
         if (user.self || user.username.isNullOrEmpty()) return false
         if (options.skipBots && (user.bot || GgtgDb.isBotUsername(user.username))) return false
-        if (options.premiumOnly && !user.premium) return false
+        if (options.skipInactive && isLongInactive(user)) return false
         return true
     }
 
@@ -112,6 +125,82 @@ object GgtgScraper {
                 process.log("Участники: +$added (всего ${collected.size})")
                 if (resp.participants.isEmpty() || offset >= PHASE_DEPTH) break
                 delay(600 + (0..700).random().toLong())
+            }
+
+            val maxHistoryPages = maxOf(
+                if (options.messageAuthors) options.messageAuthorsPages else 0,
+                if (options.joinLeaveEvents) options.joinLeaveEventsPages else 0
+            )
+            if (maxHistoryPages > 0) {
+                val inputPeer = TLRPC.TL_inputPeerChannel().apply {
+                    channel_id = chat.id
+                    access_hash = chat.access_hash
+                }
+                var historyOffsetId = 0
+                for (hPage in 1..maxHistoryPages) {
+                    if (collected.size >= HARD_CAP) break
+                    val hReq = TLRPC.TL_messages_getHistory().apply {
+                        peer = inputPeer
+                        offset_id = historyOffsetId
+                        offset_date = 0
+                        add_offset = 0
+                        limit = 100
+                        max_id = 0
+                        min_id = 0
+                        hash = 0
+                    }
+                    val hPair = GgtgAccounts.request(UserConfig.selectedAccount, hReq)
+                    if (hPair == null) break
+                    val hResp = hPair.first
+                    if (hResp !is TLRPC.messages_Messages) break
+                    controller().putUsers(hResp.users, false)
+                    val hUsersById = hResp.users.associateBy { it.id }
+                    var hAdded = 0
+                    var lowestId = 0
+                    val allowAuthors = options.messageAuthors && hPage <= options.messageAuthorsPages
+                    val allowEvents = options.joinLeaveEvents && hPage <= options.joinLeaveEventsPages
+                    val candidateUids = mutableListOf<Long>()
+
+                    for (m in hResp.messages) {
+                        lowestId = if (lowestId == 0) m.id else minOf(lowestId, m.id)
+                        when (m) {
+                            is TLRPC.TL_message -> {
+                                if (allowAuthors) {
+                                    val fromUid = (m.from_id as? TLRPC.TL_peerUser)?.user_id ?: 0L
+                                    if (fromUid != 0L) candidateUids.add(fromUid)
+                                }
+                            }
+                            is TLRPC.TL_messageService -> {
+                                if (allowEvents) {
+                                    val act = m.action
+                                    if (act is TLRPC.TL_messageActionChatAddUser) {
+                                        candidateUids.addAll(act.users)
+                                        val fromUid = (m.from_id as? TLRPC.TL_peerUser)?.user_id ?: 0L
+                                        if (fromUid != 0L) candidateUids.add(fromUid)
+                                    } else if (act is TLRPC.TL_messageActionChatJoinedByLink || act is TLRPC.TL_messageActionChatJoinedByRequest) {
+                                        val fromUid = (m.from_id as? TLRPC.TL_peerUser)?.user_id ?: 0L
+                                        if (fromUid != 0L) candidateUids.add(fromUid)
+                                    } else if (act is TLRPC.TL_messageActionChatDeleteUser) {
+                                        if (act.user_id != 0L) candidateUids.add(act.user_id)
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    for (uid in candidateUids) {
+                        if (uid == 0L || !seen.add(uid)) continue
+                        val user = hUsersById[uid]
+                        if (userAllowed(user, options)) {
+                            collected.add(user!!.username)
+                            GgtgDb.rememberUser(user)
+                            hAdded++
+                        }
+                    }
+                    process.log("История (стр. $hPage/$maxHistoryPages): +$hAdded (всего ${collected.size})")
+                    if (hResp.messages.isEmpty() || lowestId == 0) break
+                    historyOffsetId = lowestId
+                    delay(600 + (0..700).random().toLong())
+                }
             }
             if (collected.isEmpty()) {
                 process.fail("Не найдено ни одного участника с юзернеймом")

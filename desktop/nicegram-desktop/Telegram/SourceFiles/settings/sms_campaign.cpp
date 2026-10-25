@@ -7255,12 +7255,14 @@ namespace {
 	} else if (const auto till = status.onlineTill()) {
 		const auto age = now - till;
 		// Only Telegram's own «был(а) давно» counts as long ago: an exact
-		// last-seen time, however old, is not.
+		// last-seen time, however old, is not, unless older than 30 days.
 		return (age < 3 * 86400)
 			? 1
 			: (age < 7 * 86400)
 			? 2
-			: 3;
+			: (age < 30 * 86400)
+			? 3
+			: 4;
 	}
 	return 0;
 }
