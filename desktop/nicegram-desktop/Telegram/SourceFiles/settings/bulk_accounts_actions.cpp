@@ -4721,7 +4721,8 @@ void DeleteAccountForever(not_null<Main::Account*> account) {
 			Sessions::RemoveStored(entry.id);
 		}
 	}
-	account->setTrashed(false);
+	// ggtg: Do NOT call setTrashed(false) here - that wakes the account,
+	// reconnects MTP, and updates badges immediately before wiping it out.
 	account->setTwoFactorPassword(QString());
 	// Local only, like a session swap: wipes the account's local data and
 	// caches and drops it from the app (see Domain::removeRedundantAccounts).

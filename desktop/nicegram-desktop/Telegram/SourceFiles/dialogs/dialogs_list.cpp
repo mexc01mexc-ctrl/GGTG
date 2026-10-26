@@ -82,7 +82,9 @@ void List::adjustByName(not_null<Row*> row) {
 }
 
 void List::adjustByDate(not_null<Row*> row) {
-	Expects(_sortMode == SortMode::Date);
+	if (_sortMode != SortMode::Date) { // ggtg: guard against calls on non-date sorted lists
+		return;
+	}
 	Expects(row->index() >= 0 && row->index() < _rows.size());
 
 	if (_frozen) {
@@ -128,20 +130,29 @@ void List::unfreeze() {
 	auto pending = base::take(_pendingAdjust);
 	if (pending.empty()) {
 		return;
-	} else if (pending.size() == 1) {
-		adjustByDate(*pending.begin());
-		return;
 	}
-	for (const auto &row : pending) {
-		adjustByDate(row);
-	}
-	if (!sortedByDate()) {
-		sortByDate();
+	if (_sortMode == SortMode::Date) { // ggtg: date-specific unfreeze logic
+		if (pending.size() == 1) {
+			adjustByDate(*pending.begin());
+			return;
+		}
+		for (const auto &row : pending) {
+			adjustByDate(row);
+		}
+		if (!sortedByDate()) {
+			sortByDate();
+		}
+	} else if (_sortMode == SortMode::Name) { // ggtg: name-specific unfreeze logic
+		for (const auto &row : pending) {
+			adjustByName(row->key());
+		}
 	}
 }
 
 bool List::sortedByDate() const {
-	Expects(_sortMode == SortMode::Date);
+	if (_sortMode != SortMode::Date) { // ggtg
+		return true;
+	}
 
 	for (auto i = 1, count = int(_rows.size()); i != count; ++i) {
 		if (_rows[i - 1]->sortKey(_filterId) < _rows[i]->sortKey(_filterId)) {
@@ -152,7 +163,9 @@ bool List::sortedByDate() const {
 }
 
 void List::sortByDate() {
-	Expects(_sortMode == SortMode::Date);
+	if (_sortMode != SortMode::Date) { // ggtg
+		return;
+	}
 
 	ranges::stable_sort(_rows, [&](Row *a, Row *b) {
 		return a->sortKey(_filterId) > b->sortKey(_filterId);

@@ -497,6 +497,7 @@ void Session::subscribeForTopicRepliesLists() {
 }
 
 void Session::clear() {
+	_clearing = true; // ggtg: stop reactive updates while destroying data
 	_sessionDataAboutToBeCleared.fire({});
 
 	// Optimization: clear notifications before destroying items.
@@ -5682,6 +5683,9 @@ not_null<Dialogs::IndexedList*> Session::contactsNoChatsList() {
 }
 
 void Session::refreshChatListEntry(Dialogs::Key key) {
+	if (_clearing) { // ggtg: do not update or reorder lists while destroying
+		return;
+	}
 	Expects(key.entry()->folderKnown());
 
 	using namespace Dialogs;
@@ -5749,6 +5753,9 @@ void Session::refreshChatListEntry(Dialogs::Key key) {
 }
 
 void Session::refreshChatListUnreadOnTop() {
+	if (_clearing) { // ggtg: do not update or reorder lists while destroying
+		return;
+	}
 	auto entries = std::vector<not_null<Dialogs::Entry*>>();
 	const auto collect = [&](not_null<Dialogs::MainList*> list) {
 		for (const auto &row : list->indexed()->all()) {
@@ -5765,6 +5772,9 @@ void Session::refreshChatListUnreadOnTop() {
 }
 
 void Session::removeChatListEntry(Dialogs::Key key) {
+	if (_clearing) { // ggtg: do not update or reorder lists while destroying
+		return;
+	}
 	using namespace Dialogs;
 
 	const auto entry = key.entry();

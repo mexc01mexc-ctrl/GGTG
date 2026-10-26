@@ -371,22 +371,24 @@ void DuplicateSession(
 	const auto isIos = Settings::IsIosSession(fields.deviceOverride);
 	const auto isAndroid = asAndroid || Settings::IsAndroidSession(fields.deviceOverride);
 	const auto own = Core::GgtgApiOverride::Load();
+	// ggtg: auth.exportLoginToken with official Android api_id (4 or 6) is rejected
+	// by Telegram with API_ID_PUBLISHED_FLOOD (official Android never logs in by QR).
+	// If the user hasn't set their own api_id, fall back to Desktop ApiId.
+	const auto useDesktopApi = isAndroid && !own.valid();
 	const auto exportApiId = own.valid()
 		? own.apiId
 		: isIos
 		? Ggtg::IosProfiles::kAppId
-		: isAndroid
-		? Ggtg::AndroidProfiles::kAppId
 		: ApiId;
 	const auto exportApiHash = own.valid()
 		? own.apiHash
 		: isIos
 		? QString::fromLatin1(Ggtg::IosProfiles::kAppHash)
-		: isAndroid
-		? QString::fromLatin1(Ggtg::AndroidProfiles::kAppHash)
 		: QString::fromLatin1(ApiHash);
 	const auto exportLangPack = isIos
 		? QString::fromLatin1(Ggtg::IosProfiles::kLangPack)
+		: useDesktopApi
+		? QString::fromLatin1(Ggtg::DesktopProfiles::kLangPack)
 		: isAndroid
 		? QString::fromLatin1(Ggtg::AndroidProfiles::kLangPack)
 		: QString::fromLatin1(Ggtg::DesktopProfiles::kLangPack);
@@ -397,7 +399,7 @@ void DuplicateSession(
 		fields.appVersion = !fields.deviceOverride.appVersion.isEmpty()
 			? fields.deviceOverride.appVersion
 			: Ggtg::IosProfiles::RandomVersion();
-	} else if (isAndroid) {
+	} else if (isAndroid && !useDesktopApi) {
 		fields.deviceModel = fields.deviceOverride.deviceModel;
 		fields.systemVersion = fields.deviceOverride.systemVersion;
 		fields.appVersion = !fields.deviceOverride.appVersion.isEmpty()

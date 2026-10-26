@@ -78,13 +78,17 @@ object GgtgImportSupport {
         }
         val targetDc = if (mainDcId != 0) mainDcId else ConnectionsManager.DEFAULT_DATACENTER_ID
         val result = cm.sendSuspend(TLRPC.TL_users_getUsers().apply { id.add(TLRPC.TL_inputUserSelf()) }, targetDc)
+        val err = result?.second
+        if (err != null) {
+            return Result.failure(Exception("getUsers(self): ${err.text}"))
+        }
         val resp = result?.first
         @Suppress("UNCHECKED_CAST")
-        val fetched = if (result?.second == null && resp is org.telegram.tgnet.Vector<*>) {
+        val fetched = if (resp is org.telegram.tgnet.Vector<*>) {
             resp.objects.firstOrNull { it is TLRPC.User } as? TLRPC.User
         } else null
         val user: TLRPC.User = fetched ?: fallbackUser
-            ?: return Result.failure(Exception("getUsers(self): ${result?.second?.text ?: "нет ответа"}"))
+            ?: return Result.failure(Exception("getUsers(self): нет ответа"))
         user.self = true
         user.flags = user.flags or 1024
         val uc = UserConfig.getInstance(targetSlot)

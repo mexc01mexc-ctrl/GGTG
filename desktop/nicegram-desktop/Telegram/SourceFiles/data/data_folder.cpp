@@ -123,7 +123,7 @@ Folder::Folder(not_null<Session*> owner, FolderId id)
 	session().changes().peerUpdates(
 		PeerUpdate::Flag::Name
 	) | rpl::filter([=](const PeerUpdate &update) {
-		return ranges::contains(_lastHistories, update.peer, &History::peer);
+		return !owner->clearing() && ranges::contains(_lastHistories, update.peer, &History::peer); // ggtg
 	}) | rpl::on_next([=] {
 		++_chatListViewVersion;
 		updateChatListEntryPostponed();
@@ -133,14 +133,16 @@ Folder::Folder(not_null<Session*> owner, FolderId id)
 
 	_chatsList.unreadStateChanges(
 	) | rpl::filter([=] {
-		return inChatList();
+		return !owner->clearing() && inChatList(); // ggtg
 	}) | rpl::on_next([=](const Dialogs::UnreadState &old) {
 		++_chatListViewVersion;
 		notifyUnreadStateChange(old);
 	}, _lifetime);
 
 	_chatsList.fullSize().changes(
-	) | rpl::on_next([=] {
+	) | rpl::filter([=] {
+		return !owner->clearing(); // ggtg
+	}) | rpl::on_next([=] {
 		updateChatListEntryPostponed();
 	}, _lifetime);
 }

@@ -278,7 +278,7 @@ object GgtgSyncTransport {
         scope.launch {
             val all = try { searchAll(slot) } catch (t: Throwable) { null }
             val list = all?.filter { it.kind == "pack" && it.device != mine }
-                ?.groupBy { it.device }?.values?.map { group -> group.maxByOrNull { it.msgId }!! }.orEmpty()
+                ?.sortedByDescending { it.msgId }.orEmpty()
             AndroidUtilities.runOnUIThread { done(list, if (all == null) "Не удалось прочитать «Избранное»" else "") }
         }
     }
@@ -307,6 +307,7 @@ object GgtgSyncTransport {
         scope.launch {
             try {
                 val req = TLRPC.TL_messages_deleteMessages()
+                req.revoke = true
                 req.id.add(remote.msgId)
                 rpc(slot, req)
             } catch (t: Throwable) {

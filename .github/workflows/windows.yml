@@ -83,6 +83,22 @@ jobs:
           nuget sources Disable -Name "Microsoft Visual Studio Offline Packages" 2>nul & exit 0
           nuget sources Add -Source https://api.nuget.org/v3/index.json 2>nul & exit 0
 
+      - name: Disable MSYS2 conflicting link.exe & configure environment
+        shell: pwsh
+        run: |
+          # 1. Eliminate MSYS2 POSIX link.exe which shadows MSVC's linker
+          $links = @("C:\msys64\usr\bin\link.exe")
+          foreach ($link in $links) {
+            if (Test-Path $link) {
+              Write-Host "Disabling conflicting MSYS2 link.exe at $link..."
+              Move-Item -Path $link -Destination "$link.bak" -Force
+            }
+          }
+          # 2. Prevent MSYS2 from mangling compiler flags (/FS, /bigobj, /m:2, etc.)
+          Add-Content -Path $env:GITHUB_ENV -Value "MSYS2_ARG_CONV_EXCL=*"
+          Add-Content -Path $env:GITHUB_ENV -Value "CHERE_INVOKING=enabled_from_arguments"
+          Add-Content -Path $env:GITHUB_ENV -Value "MSYS2_PATH_TYPE=inherit"
+
       - name: Prepare build tree
         shell: pwsh
         run: |
@@ -96,9 +112,10 @@ jobs:
         uses: actions/cache/restore@v4
         with:
           path: D:\TBuild\ThirdParty
-          key: ${{ runner.os }}-x64-thirdparty-v5
+          key: ${{ runner.os }}-x64-thirdparty-v6-${{ hashFiles('desktop/nicegram-desktop/Telegram/build/prepare/prepare.py') }}
           restore-keys: |
-            ${{ runner.os }}-x64-thirdparty-v2
+            ${{ runner.os }}-x64-thirdparty-v6-
+            ${{ runner.os }}-x64-thirdparty-v5
             ${{ runner.os }}-x64-thirdparty-
 
       - name: Restore Libraries Cache
@@ -106,10 +123,34 @@ jobs:
         uses: actions/cache/restore@v4
         with:
           path: D:\TBuild\Libraries\win64
-          key: ${{ runner.os }}-x64-libraries-v5
+          key: ${{ runner.os }}-x64-libraries-v6-${{ github.run_id }}
           restore-keys: |
-            ${{ runner.os }}-x64-libraries-v2
+            ${{ runner.os }}-x64-libraries-v6-
+            ${{ runner.os }}-x64-libraries-v5
             ${{ runner.os }}-x64-libraries-
+
+      - name: Clean incomplete dependency builds
+        shell: pwsh
+        run: |
+          $libsDir = "D:\TBuild\Libraries\win64"
+          $tpDir = "D:\TBuild\ThirdParty"
+          # Disable MSYS2 link.exe if restored from cache
+          if (Test-Path "$tpDir\msys64\usr\bin\link.exe") {
+            Move-Item -Path "$tpDir\msys64\usr\bin\link.exe" -Destination "$tpDir\msys64\usr\bin\link.exe.bak" -Force
+          }
+          # Ensure git clone doesn't fail on half-baked directories
+          $incomplete = @(
+            @{ Dir = "$libsDir\libvpx"; Check = "$libsDir\local\lib\vpx.lib" },
+            @{ Dir = "$libsDir\ffmpeg"; Check = "$libsDir\local\lib\avcodec.lib" },
+            @{ Dir = "$libsDir\openal-soft"; Check = "$libsDir\local\lib\OpenAL32.lib" }
+          )
+          foreach ($item in $incomplete) {
+            if ((Test-Path $item.Dir) -and (-not (Test-Path $item.Check))) {
+              Write-Host "Cleaning incomplete directory $($item.Dir)..."
+              attrib -r -s -h "$($item.Dir)\*" /s /d 2>$null
+              Remove-Item -Path $item.Dir -Recurse -Force -ErrorAction SilentlyContinue
+            }
+          }
 
       - name: Prepare dependencies
         id: prepare-deps
@@ -121,19 +162,19 @@ jobs:
           set MSYS2_ARG_CONV_EXCL=*
           call build\prepare\win.bat silent
 
-      - name: Save ThirdParty Cache (Immediate)
-        if: steps.prepare-deps.outcome == 'success'
+      - name: Save ThirdParty Cache
+        if: always() && steps.restore-thirdparty.outputs.cache-hit != 'true'
         uses: actions/cache/save@v4
         with:
           path: D:\TBuild\ThirdParty
-          key: ${{ runner.os }}-x64-thirdparty-v5
+          key: ${{ runner.os }}-x64-thirdparty-v6-${{ hashFiles('desktop/nicegram-desktop/Telegram/build/prepare/prepare.py') }}
 
-      - name: Save Libraries Cache (Immediate)
-        if: steps.prepare-deps.outcome == 'success'
+      - name: Save Libraries Cache (Incremental)
+        if: always()
         uses: actions/cache/save@v4
         with:
           path: D:\TBuild\Libraries\win64
-          key: ${{ runner.os }}-x64-libraries-v5
+          key: ${{ runner.os }}-x64-libraries-v6-${{ github.run_id }}
 
       - name: Configure CMake
         working-directory: D:\TBuild\tdesktop\Telegram
@@ -158,10 +199,15 @@ jobs:
           }
           if (Test-Path D:\TBuild\Libraries\win64\libvpx\config.log) {
             Write-Host "=== LIBVPX CONFIG.LOG (TAIL) ===" -ForegroundColor Yellow
-            Get-Content D:\TBuild\Libraries\win64\libvpx\config.log -Tail 60
+            Get-Content D:\TBuild\Libraries\win64\libvpx\config.log -Tail 80
+          }
+          if (Test-Path D:\TBuild\Libraries\win64\ffmpeg\ffbuild\config.log) {
+            Write-Host "=== FFMPEG CONFIG.LOG (TAIL) ===" -ForegroundColor Yellow
+            Get-Content D:\TBuild\Libraries\win64\ffmpeg\ffbuild\config.log -Tail 80
           }
           if (Test-Path D:\TBuild\tdesktop\out\build.log) {
-            Get-Content D:\TBuild\tdesktop\out\build.log | Select-String -Pattern "error LNK", "error C", ": error:", "FAILED:" -Context 1,1 | Select-Object -First 40
+            Write-Host "=== CMAKE / MSBUILD ERRORS ===" -ForegroundColor Red
+            Get-Content D:\TBuild\tdesktop\out\build.log | Select-String -Pattern "error LNK", "error C", ": error:", "FAILED:" -Context 1,1 | Select-Object -First 50
           }
 
       - name: Upload build log on failure

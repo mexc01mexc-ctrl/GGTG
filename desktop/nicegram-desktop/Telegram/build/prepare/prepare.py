@@ -549,6 +549,9 @@ win:
     if not exist msys64 .\\msys64.exe -y
     if exist msys64.exe del /f /q msys64.exe
 
+    if exist C:\\msys64\\usr\\bin\\link.exe del /f /q C:\\msys64\\usr\\bin\\link.exe
+    if exist %THIRDPARTY_DIR%\\msys64\\usr\\bin\\link.exe del /f /q %THIRDPARTY_DIR%\\msys64\\usr\\bin\\link.exe
+
     pacman -S --noconfirm --needed ^
         make ^
         mingw-w64-ucrt-x86_64-diffutils ^
@@ -1088,7 +1091,12 @@ depends:patches/libvpx/*.patch
 win:
     for /r %%i in (..\\patches\\libvpx\\*) do git apply %%i
 
+    if exist %THIRDPARTY_DIR%\\msys64\\usr\\bin\\link.exe del /f /q %THIRDPARTY_DIR%\\msys64\\usr\\bin\\link.exe
+    if exist C:\\msys64\\usr\\bin\\link.exe del /f /q C:\\msys64\\usr\\bin\\link.exe
+
     SET "TARGET="
+    SET "_CL_="
+    SET MSYS2_ARG_CONV_EXCL=*
     SET PATH=%THIRDPARTY_DIR%\\msys64\\usr\\bin;%PATH%
     SET CHERE_INVOKING=enabled_from_arguments
     SET MSYS2_PATH_TYPE=inherit
@@ -1101,7 +1109,7 @@ winarm:
     SET "TOOLCHAIN=arm64-win64-vs17-v145"
 win:
 depends:patches/build_libvpx_win.sh
-    bash --login -c "unset TARGET; exec ../patches/build_libvpx_win.sh"
+    bash --login -c "unset TARGET; unset _CL_; export MSYS2_ARG_CONV_EXCL='*'; export TOOLCHAIN=%TOOLCHAIN%; if ! ../patches/build_libvpx_win.sh; then echo '=== LIBVPX BUILD FAILED ==='; [ -f config.log ] && tail -n 120 config.log; exit 1; fi"
 mac:
     find ../patches/libvpx -type f -print0 | sort -z | xargs -0 git apply
 
@@ -1193,6 +1201,12 @@ win:
 depends:patches/ffmpeg.patch
     git apply ../patches/ffmpeg.patch
 
+    if exist %THIRDPARTY_DIR%\\msys64\\usr\\bin\\link.exe del /f /q %THIRDPARTY_DIR%\\msys64\\usr\\bin\\link.exe
+    if exist C:\\msys64\\usr\\bin\\link.exe del /f /q C:\\msys64\\usr\\bin\\link.exe
+
+    SET "TARGET="
+    SET "_CL_="
+    SET MSYS2_ARG_CONV_EXCL=*
     SET PATH=%THIRDPARTY_DIR%\\msys64\\usr\\bin;%PATH%
     SET CHERE_INVOKING=enabled_from_arguments
     SET MSYS2_PATH_TYPE=inherit
@@ -1202,7 +1216,7 @@ winarm:
     SET "ARCH_PARAM=--arch=aarch64"
 win:
 depends:patches/build_ffmpeg_win.sh
-    bash --login ../patches/build_ffmpeg_win.sh
+    bash --login -c "unset TARGET; unset _CL_; export MSYS2_ARG_CONV_EXCL='*'; if ! ../patches/build_ffmpeg_win.sh; then echo '=== FFMPEG BUILD FAILED ==='; [ -f ffbuild/config.log ] && tail -n 120 ffbuild/config.log; exit 1; fi"
 mac:
     export PKG_CONFIG_PATH=$USED_PREFIX/lib/pkgconfig
 

@@ -492,12 +492,16 @@ void ExportNext(std::shared_ptr<ExportRun> run, size_t index) {
 	const auto userId = QString::number(account->session().userId().bare);
 	const auto vault = Sessions::StoredForUser(Sessions::LoadVault(), userId);
 	const auto existingAndroid = [&]() -> const Sessions::StoredSession* {
+		if (run->options.viaSync) {
+			return nullptr; // Always mint a fresh session for sync transfer
+		}
 		for (const auto &item : vault) {
-			if (item.state != u"revoked"_q
+			if (item.state == u"ok"_q
 				&& Sessions::HasKey(item)
-				&& (item.role == u"exported"_q
-					|| item.role == u"android"_q
-					|| item.note.contains(u"Android"_q, Qt::CaseInsensitive))) {
+				&& item.role != u"exported"_q
+				&& (item.role == u"android"_q
+					|| item.role == u"backup"_q
+					|| item.source == u"import_ggtg"_q)) {
 				const auto vaultFolder = Sessions::VaultFolder(item) + u"/tdata"_q;
 				if (QDir(vaultFolder).exists()) {
 					return &item;

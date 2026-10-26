@@ -955,6 +955,9 @@ public:
 	[[nodiscard]] bool dialogsUnreadOnTop() const {
 		return _dialogsUnreadOnTop;
 	}
+	[[nodiscard]] bool clearing() const { // ggtg: suppress reactive refreshes during teardown
+		return _clearing;
+	}
 	[[nodiscard]] auto chatListEntryRefreshes() const
 		-> rpl::producer<ChatListEntryRefresh>;
 
@@ -1457,6 +1460,8 @@ private:
 
 	rpl::event_stream<RecentSelfForwards> _recentSelfForwards;
 	rpl::event_stream<RecentJoinChat> _recentJoinChat;
+
+	bool _clearing = false; // ggtg: true while clear() tears down session
 
 	rpl::lifetime _lifetime;
 

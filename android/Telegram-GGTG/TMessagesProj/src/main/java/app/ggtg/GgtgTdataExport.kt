@@ -486,6 +486,18 @@ object TdataExportHelper {
                         uc.ncgFolder?.let { entry.put("folder", it) }
                         entry.put("pinned", uc.ncgPinned)
                         uc.ncgTwoFactor?.takeIf { it.isNotEmpty() }?.let { entry.put("twoFactor", it) }
+                        val proxyBits = ownProxy(slot)
+                        val proxyJson = proxyBits?.let { p ->
+                            org.json.JSONObject().apply {
+                                put("type", if (p.secret.isNotEmpty()) "mtproto" else "socks5")
+                                put("host", p.address)
+                                put("port", p.port)
+                                put("user", p.username)
+                                put("password", p.password)
+                                if (p.secret.isNotEmpty()) put("secret", p.secret)
+                            }
+                        }
+                        proxyJson?.let { entry.put("proxy", it) }
                         val phone = uc.currentUser?.phone.orEmpty()
                         val phoneGeo = GgtgGeo.matchForPhone(phone)
                         val desktopProfile = GgtgDesktopProfiles.random(phone)

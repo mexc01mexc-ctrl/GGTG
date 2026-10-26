@@ -137,12 +137,56 @@ inline void AcceptAccountsFromAndroid(
 			Ggtg::Notice(show, u"В файле нет аккаунтов"_q);
 			return;
 		}
-		show->show(MakeMultiProxyBox([=](Fn<MTP::ProxyData()> nextProxy) {
+
+		const auto getAccountProxy = [=](const QString &tag) -> MTP::ProxyData {
+			const auto it = labels->find(tag);
+			if (it != labels->end() && it->second.contains("proxy")) {
+				const auto p = it->second["proxy"].toObject();
+				const auto type = p["type"].toString();
+				auto result = MTP::ProxyData();
+				result.host = p["host"].toString();
+				result.port = p["port"].toInt();
+				result.user = p["user"].toString();
+				result.password = p["password"].toString();
+				if (type == u"mtproto"_q) {
+					result.type = MTP::ProxyData::Type::Mtproto;
+					result.password = p["secret"].toString();
+				} else if (type == u"socks5"_q) {
+					result.type = MTP::ProxyData::Type::Socks5;
+				} else if (type == u"http"_q) {
+					result.type = MTP::ProxyData::Type::Http;
+				}
+				if (!result.host.isEmpty() && result.port > 0) {
+					return result;
+				}
+			}
+			return MTP::ProxyData();
+		};
+
+		auto needProxyCount = 0;
+		for (const auto &auth : list) {
+			if (getAccountProxy(auth.folder).type == MTP::ProxyData::Type::None) {
+				++needProxyCount;
+			}
+		}
+
+		const auto executeImport = [=](Fn<MTP::ProxyData()> fallbackProxy) {
 			auto &domain = Core::App().domain();
 			if (domain.accounts().size() >= domain.maxAccounts()) {
 				Ggtg::Notice(show, u"Достигнут лимит аккаунтов"_q);
 				return;
 			}
+			auto nextIdx = std::make_shared<size_t>(0);
+			const auto nextProxy = [=]() -> MTP::ProxyData {
+				const auto idx = (*nextIdx)++;
+				if (idx < list.size()) {
+					const auto own = getAccountProxy(list[idx].folder);
+					if (own.type != MTP::ProxyData::Type::None) {
+						return own;
+					}
+				}
+				return fallbackProxy ? fallbackProxy() : MTP::ProxyData();
+			};
 			const auto imported = domain.addFromAuthorizations(
 				list,
 				MTP::Environment::Production,
@@ -161,6 +205,10 @@ inline void AcceptAccountsFromAndroid(
 					if (!password.isEmpty()) {
 						account->setTwoFactorPassword(password);
 					}
+					if (meta.contains("device")) {
+						account->setDeviceOverride(
+							Settings::DeviceOverrideFromJson(meta["device"].toObject()));
+					}
 				});
 			if (imported.empty()) {
 				Ggtg::Notice(
@@ -172,7 +220,15 @@ inline void AcceptAccountsFromAndroid(
 			Ggtg::Notice(
 				show,
 				u"Добавлено аккаунтов: "_q + QString::number(imported.size()));
-		}));
+		};
+
+		if (needProxyCount == 0) {
+			executeImport(nullptr);
+		} else {
+			show->show(MakeMultiProxyBox([=](Fn<MTP::ProxyData()> poolProxy) {
+				executeImport(poolProxy);
+			}));
+		}
 	});
 }
 

@@ -167,9 +167,11 @@ void PinnedList::applyList(const std::vector<not_null<History*>> &list) {
 void PinnedList::reorder(Key key1, Key key2) {
 	const auto index1 = ranges::find(_data, key1) - begin(_data);
 	const auto index2 = ranges::find(_data, key2) - begin(_data);
-	Assert(index1 >= 0 && index1 < _data.size());
-	Assert(index2 >= 0 && index2 < _data.size());
-	Assert(index1 != index2);
+	if (index1 < 0 || index1 >= _data.size() // ggtg: bounds check before Assert/swap
+		|| index2 < 0 || index2 >= _data.size()
+		|| index1 == index2) {
+		return;
+	}
 	std::swap(_data[index1], _data[index2]);
 	key1.entry()->cachePinnedIndex(_filterId, index2 + 1);
 	key2.entry()->cachePinnedIndex(_filterId, index1 + 1);

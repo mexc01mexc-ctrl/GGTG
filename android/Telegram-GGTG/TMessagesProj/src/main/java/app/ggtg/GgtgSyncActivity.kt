@@ -95,7 +95,7 @@ class GgtgSyncActivity : BaseFragment() {
         refreshStatus()
 
         // ---- pairing ----
-        GgtgUi.addCard(column, GgtgUi.actionCard(context, "📷", "Сканировать QR-код с Mac",
+        GgtgUi.addCard(column, GgtgUi.actionCard(context, "", "Сканировать QR-код с Mac",
             "На Mac: «Синхронизация» → «Подключить телефон по QR-коду». Больше ничего вводить не нужно.") {
             scan()
         })
