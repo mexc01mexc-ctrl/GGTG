@@ -138,18 +138,24 @@ jobs:
             ${{ runner.os }}-x64-thirdparty-v5
             ${{ runner.os }}-x64-thirdparty-
 
-      - name: Restore Libraries Cache
+      - name: Restore Libraries Base Cache (v2)
+        id: restore-libraries-v2
+        uses: actions/cache/restore@v4
+        with:
+          path: D:\TBuild\Libraries\win64
+          key: ${{ runner.os }}-x64-libraries-v2
+
+      - name: Restore Libraries Incremental Cache
         id: restore-libraries
         uses: actions/cache/restore@v4
         with:
           path: D:\TBuild\Libraries\win64
-          key: ${{ runner.os }}-x64-libraries-v6-${{ github.run_id }}
+          key: ${{ runner.os }}-x64-libraries-v7-${{ github.run_id }}
           restore-keys: |
+            ${{ runner.os }}-x64-libraries-v7-
             ${{ runner.os }}-x64-libraries-v6-
-            ${{ runner.os }}-x64-libraries-v5
-            ${{ runner.os }}-x64-libraries-
 
-      - name: Clean incomplete dependency builds
+      - name: Clean incomplete dependency builds & verify Qt
         shell: pwsh
         run: |
           $libsDir = "D:\TBuild\Libraries\win64"
@@ -175,6 +181,26 @@ jobs:
               Set-Content -Path "$tpDir\msys64\usr\bin\msbuild.exe" -Value "#!/bin/sh`nexec `"$bashPath`" `"`$@`"" -NoNewline
             }
           }
+
+          # Inspect and ensure Qt is correctly located
+          Write-Host "=== INSPECTING QT LOCATION ==="
+          $qtExpected = "$libsDir\Qt-5.15.19"
+          $qmake = Get-ChildItem -Path $libsDir -Filter "qmake.exe" -Recurse -Depth 4 -ErrorAction SilentlyContinue | Select-Object -First 1
+          if ($qmake) {
+            Write-Host "Found qmake.exe at: $($qmake.FullName)"
+            $qtInstalledDir = $qmake.Directory.Parent.FullName
+            if ($qtInstalledDir -ne $qtExpected -and -not (Test-Path $qtExpected)) {
+              Write-Host "Creating junction from $qtInstalledDir to $qtExpected..."
+              New-Item -ItemType Junction -Path $qtExpected -Target $qtInstalledDir -Force
+            }
+          } else {
+            Write-Host "Notice: qmake.exe not found yet. Clearing any stale qt_5.15.19 cache key so prepare.py will build Qt."
+            $qtKey = "$libsDir\cache_keys\qt_5.15.19"
+            if (Test-Path $qtKey) {
+              Remove-Item -Path $qtKey -Force
+            }
+          }
+
           # Ensure git clone doesn't fail on half-baked directories
           $incomplete = @(
             @{ Dir = "$libsDir\libvpx"; Check = "$libsDir\local\lib\x64\vpxmt.lib" },
@@ -213,12 +239,12 @@ jobs:
         uses: actions/cache/save@v4
         with:
           path: D:\TBuild\Libraries\win64
-          key: ${{ runner.os }}-x64-libraries-v6-${{ github.run_id }}
+          key: ${{ runner.os }}-x64-libraries-v7-${{ github.run_id }}
 
       - name: Configure CMake
         working-directory: D:\TBuild\tdesktop\Telegram
         run: |
-          call configure.bat x64 -D TDESKTOP_API_ID=2040 -D TDESKTOP_API_HASH=b18441a1ff607e10a989891a5462e627
+          call configure.bat x64 -D TDESKTOP_API_ID=2040 -D TDESKTOP_API_HASH=b18441a1ff607e10a989891a5462e627 -D CMAKE_DISABLE_PRECOMPILE_HEADERS=ON -D CMAKE_AUTOGEN_SKIP_PRECOMPILE_HEADERS=ON
 
       - name: Build GGTG EXE
         working-directory: D:\TBuild\tdesktop\out
@@ -226,6 +252,16 @@ jobs:
           set "PreferredToolArchitecture=x64"
           set "_CL_=/FS /bigobj"
           cmake --build . --config Release --target Telegram -- /m:2 /p:CL_MPcount=2 /p:PreferredToolArchitecture=x64 /p:TrackFileAccess=false /v:m /fl /flp:logfile=build.log;verbosity=normal
+
+      - name: Package GGTG Executable
+        if: always()
+        shell: pwsh
+        run: |
+          $releaseDir = "D:\TBuild\tdesktop\out\Release"
+          if (Test-Path "$releaseDir\Telegram.exe") {
+            Write-Host "Copying Telegram.exe to GGTG.exe..."
+            Copy-Item -Path "$releaseDir\Telegram.exe" -Destination "$releaseDir\GGTG.exe" -Force
+          }
 
       - name: Show compilation errors if failed
         if: failure()
@@ -248,6 +284,14 @@ jobs:
             Write-Host "=== CMAKE / MSBUILD ERRORS ===" -ForegroundColor Red
             Get-Content D:\TBuild\tdesktop\out\build.log | Select-String -Pattern "error LNK", "error C", ": error:", "FAILED:" -Context 1,1 | Select-Object -First 50
           }
+          if (Test-Path D:\TBuild\tdesktop\out\CMakeFiles\CMakeError.log) {
+            Write-Host "=== CMAKE ERROR LOG ===" -ForegroundColor Red
+            Get-Content D:\TBuild\tdesktop\out\CMakeFiles\CMakeError.log -Tail 100
+          }
+          if (Test-Path D:\TBuild\tdesktop\out\CMakeFiles\CMakeOutput.log) {
+            Write-Host "=== CMAKE OUTPUT LOG ===" -ForegroundColor Yellow
+            Get-Content D:\TBuild\tdesktop\out\CMakeFiles\CMakeOutput.log -Tail 50
+          }
 
       - name: Upload build log on failure
         if: failure()
@@ -256,6 +300,8 @@ jobs:
           name: windows-build-failure-log
           path: |
             D:\TBuild\tdesktop\out\build.log
+            D:\TBuild\tdesktop\out\CMakeFiles\CMakeError.log
+            D:\TBuild\tdesktop\out\CMakeFiles\CMakeOutput.log
             D:\TBuild\Libraries\win64\*\config.log
             D:\TBuild\**\command.bat
           retention-days: 7

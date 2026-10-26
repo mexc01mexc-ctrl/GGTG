@@ -16,7 +16,13 @@ if (NOT DESKTOP_APP_USE_PACKAGED)
     endif()
 
     if (WIN32)
-        set(qt_loc ${libs_loc}/Qt-${qt_requested})
+        if (EXISTS "${libs_loc}/Qt-${qt_requested}")
+            set(qt_loc ${libs_loc}/Qt-${qt_requested})
+        elseif (EXISTS "${libs_loc}/local/Qt-${qt_requested}")
+            set(qt_loc ${libs_loc}/local/Qt-${qt_requested})
+        else()
+            set(qt_loc ${libs_loc}/Qt-${qt_requested})
+        endif()
 
         if (qt_requested GREATER 6)
             set(OPENSSL_FOUND 1)
@@ -49,7 +55,16 @@ if (NOT DESKTOP_APP_USE_PACKAGED)
         set(qt_loc /usr/local)
     endif()
 
-    list(APPEND CMAKE_PREFIX_PATH ${qt_loc} ${libs_loc}/local)
+    list(APPEND CMAKE_PREFIX_PATH
+        ${qt_loc}
+        ${libs_loc}/Qt-${qt_requested}
+        ${libs_loc}/local/Qt-${qt_requested}
+        ${libs_loc}/Qt-5.15.19
+        ${libs_loc}/local/Qt-5.15.19
+        ${libs_loc}/Qt-6.11.2
+        ${libs_loc}/local/Qt-6.11.2
+        ${libs_loc}/local
+    )
 endif()
 
 if (DEFINED QT_VERSION_MAJOR)
@@ -60,6 +75,9 @@ else()
         find_package(QT NAMES Qt5 COMPONENTS Core QUIET)
     endif()
     if (NOT QT_FOUND)
+        message(STATUS "CMAKE_PREFIX_PATH: ${CMAKE_PREFIX_PATH}")
+        message(STATUS "qt_loc: ${qt_loc}")
+        message(STATUS "libs_loc: ${libs_loc}")
         message(FATAL_ERROR "Neither Qt6 nor Qt5 is found")
     endif()
 endif()

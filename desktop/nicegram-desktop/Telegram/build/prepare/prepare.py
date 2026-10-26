@@ -268,6 +268,12 @@ def checkCacheKey(stage):
     key = keyPath(stage)
     if not os.path.exists(os.path.join(stage['directory'], stage['name'])):
         return 'NotFound'
+    if stage['name'].startswith('qt_'):
+        qt_ver = stage['name'][3:]
+        qt_prefix = os.path.join(stage['directory'], 'Qt-' + qt_ver)
+        if win and not os.path.exists(os.path.join(qt_prefix, 'bin', 'qmake.exe')):
+            if not os.path.exists(os.path.join(usedPrefix, 'Qt-' + qt_ver, 'bin', 'qmake.exe')):
+                return 'NotFound'
     if not os.path.exists(key):
         return 'Stale'
     with open(key, 'r') as file:
