@@ -502,9 +502,43 @@ def runStages():
             continue
         clearCacheKey(stage)
         print('BUILDING:')
+        if win and stage['name'] == 'libvpx':
+            vpx_script = os.path.join(libsDir, 'patches', 'build_libvpx_win.sh')
+            if os.path.isfile(vpx_script):
+                try:
+                    with open(vpx_script, 'r', encoding='utf-8', errors='ignore') as f:
+                        vpx_c = f.read()
+                    if 'TOOLCHAIN=' not in vpx_c:
+                        with open(vpx_script, 'w', encoding='utf-8') as f:
+                            f.write('unset TARGET\nunset _CL_\nexport MSYS2_ARG_CONV_EXCL="*"\nTOOLCHAIN="${TOOLCHAIN:-x86_64-win64-vs17}"\n' + vpx_c)
+                except Exception as e:
+                    print('[WARN] Could not patch build_libvpx_win.sh:', e)
+        elif win and stage['name'] == 'ffmpeg':
+            ff_script = os.path.join(libsDir, 'patches', 'build_ffmpeg_win.sh')
+            if os.path.isfile(ff_script):
+                try:
+                    with open(ff_script, 'r', encoding='utf-8', errors='ignore') as f:
+                        ff_c = f.read()
+                    if 'MSYS2_ARG_CONV_EXCL' not in ff_c:
+                        with open(ff_script, 'w', encoding='utf-8') as f:
+                            f.write('unset TARGET\nunset _CL_\nexport MSYS2_ARG_CONV_EXCL="*"\n' + ff_c)
+                except Exception as e:
+                    print('[WARN] Could not patch build_ffmpeg_win.sh:', e)
         os.chdir(stage['directory'])
         if not run(commands):
             print(prefix + ': FAILED')
+            if win and stage['name'] == 'libvpx':
+                cfg = os.path.join(stage['directory'], 'libvpx', 'config.log')
+                if os.path.isfile(cfg):
+                    print('=== LIBVPX CONFIG.LOG ===')
+                    with open(cfg, 'r', errors='ignore') as f:
+                        print(''.join(f.readlines()[-120:]))
+            elif win and stage['name'] == 'ffmpeg':
+                cfg = os.path.join(stage['directory'], 'ffmpeg', 'ffbuild', 'config.log')
+                if os.path.isfile(cfg):
+                    print('=== FFMPEG CONFIG.LOG ===')
+                    with open(cfg, 'r', errors='ignore') as f:
+                        print(''.join(f.readlines()[-120:]))
             finish(1)
         writeCacheKey(stage)
 
@@ -1109,7 +1143,7 @@ winarm:
     SET "TOOLCHAIN=arm64-win64-vs17-v145"
 win:
 depends:patches/build_libvpx_win.sh
-    bash --login -c "unset TARGET; unset _CL_; export MSYS2_ARG_CONV_EXCL='*'; export TOOLCHAIN=%TOOLCHAIN%; if ! ../patches/build_libvpx_win.sh; then echo '=== LIBVPX BUILD FAILED ==='; [ -f config.log ] && tail -n 120 config.log; exit 1; fi"
+    bash --login -c "unset TARGET; unset _CL_; exec ../patches/build_libvpx_win.sh"
 mac:
     find ../patches/libvpx -type f -print0 | sort -z | xargs -0 git apply
 
@@ -1216,7 +1250,7 @@ winarm:
     SET "ARCH_PARAM=--arch=aarch64"
 win:
 depends:patches/build_ffmpeg_win.sh
-    bash --login -c "unset TARGET; unset _CL_; export MSYS2_ARG_CONV_EXCL='*'; if ! ../patches/build_ffmpeg_win.sh; then echo '=== FFMPEG BUILD FAILED ==='; [ -f ffbuild/config.log ] && tail -n 120 ffbuild/config.log; exit 1; fi"
+    bash --login -c "unset TARGET; unset _CL_; exec ../patches/build_ffmpeg_win.sh"
 mac:
     export PKG_CONFIG_PATH=$USED_PREFIX/lib/pkgconfig
 
