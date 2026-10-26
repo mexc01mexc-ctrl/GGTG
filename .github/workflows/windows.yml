@@ -94,7 +94,27 @@ jobs:
               Move-Item -Path $link -Destination "$link.bak" -Force
             }
           }
-          # 2. Prevent MSYS2 from mangling compiler flags (/FS, /bigobj, /m:2, etc.)
+          # 2. Ensure yasm is in MSYS2 path
+          $yasm = (Get-Command yasm.exe -ErrorAction SilentlyContinue).Source
+          if (-not $yasm -and (Test-Path "C:\ProgramData\chocolatey\bin\yasm.exe")) {
+            $yasm = "C:\ProgramData\chocolatey\bin\yasm.exe"
+          }
+          if ($yasm -and (Test-Path "C:\msys64\usr\bin")) {
+            Write-Host "Copying yasm to C:\msys64\usr\bin\yasm.exe..."
+            Copy-Item -Path $yasm -Destination "C:\msys64\usr\bin\yasm.exe" -Force
+          }
+          # 3. Ensure MSBuild wrapper is in MSYS2 path
+          $vswhere = Join-Path ${env:ProgramFiles(x86)} 'Microsoft Visual Studio\Installer\vswhere.exe'
+          if (Test-Path $vswhere) {
+            $msbuild = & $vswhere -latest -requires Microsoft.Component.MSBuild -find MSBuild\**\Bin\MSBuild.exe | Select-Object -First 1
+            if ($msbuild -and (Test-Path "C:\msys64\usr\bin")) {
+              $bashPath = $msbuild.Replace('\', '/').Replace('C:', '/c')
+              Write-Host "Setting up MSYS2 msbuild wrapper pointing to $bashPath..."
+              Set-Content -Path "C:\msys64\usr\bin\msbuild" -Value "#!/bin/sh`nexec `"$bashPath`" `"`$@`"" -NoNewline
+              Set-Content -Path "C:\msys64\usr\bin\msbuild.exe" -Value "#!/bin/sh`nexec `"$bashPath`" `"`$@`"" -NoNewline
+            }
+          }
+          # 4. Prevent MSYS2 from mangling compiler flags (/FS, /bigobj, /m:2, etc.)
           Add-Content -Path $env:GITHUB_ENV -Value "MSYS2_ARG_CONV_EXCL=*"
           Add-Content -Path $env:GITHUB_ENV -Value "CHERE_INVOKING=enabled_from_arguments"
           Add-Content -Path $env:GITHUB_ENV -Value "MSYS2_PATH_TYPE=inherit"
@@ -138,11 +158,28 @@ jobs:
           if (Test-Path "$tpDir\msys64\usr\bin\link.exe") {
             Move-Item -Path "$tpDir\msys64\usr\bin\link.exe" -Destination "$tpDir\msys64\usr\bin\link.exe.bak" -Force
           }
+          # Ensure yasm and msbuild exist in cached MSYS2 as well
+          $yasm = (Get-Command yasm.exe -ErrorAction SilentlyContinue).Source
+          if (-not $yasm -and (Test-Path "C:\ProgramData\chocolatey\bin\yasm.exe")) {
+            $yasm = "C:\ProgramData\chocolatey\bin\yasm.exe"
+          }
+          if ($yasm -and (Test-Path "$tpDir\msys64\usr\bin")) {
+            Copy-Item -Path $yasm -Destination "$tpDir\msys64\usr\bin\yasm.exe" -Force
+          }
+          $vswhere = Join-Path ${env:ProgramFiles(x86)} 'Microsoft Visual Studio\Installer\vswhere.exe'
+          if (Test-Path $vswhere) {
+            $msbuild = & $vswhere -latest -requires Microsoft.Component.MSBuild -find MSBuild\**\Bin\MSBuild.exe | Select-Object -First 1
+            if ($msbuild -and (Test-Path "$tpDir\msys64\usr\bin")) {
+              $bashPath = $msbuild.Replace('\', '/').Replace('C:', '/c')
+              Set-Content -Path "$tpDir\msys64\usr\bin\msbuild" -Value "#!/bin/sh`nexec `"$bashPath`" `"`$@`"" -NoNewline
+              Set-Content -Path "$tpDir\msys64\usr\bin\msbuild.exe" -Value "#!/bin/sh`nexec `"$bashPath`" `"`$@`"" -NoNewline
+            }
+          }
           # Ensure git clone doesn't fail on half-baked directories
           $incomplete = @(
-            @{ Dir = "$libsDir\libvpx"; Check = "$libsDir\local\lib\vpx.lib" },
-            @{ Dir = "$libsDir\ffmpeg"; Check = "$libsDir\local\lib\avcodec.lib" },
-            @{ Dir = "$libsDir\openal-soft"; Check = "$libsDir\local\lib\OpenAL32.lib" }
+            @{ Dir = "$libsDir\libvpx"; Check = "$libsDir\local\lib\x64\vpxmt.lib" },
+            @{ Dir = "$libsDir\ffmpeg"; Check = "$libsDir\ffmpeg\libavcodec\avcodec.lib" },
+            @{ Dir = "$libsDir\openal-soft"; Check = "$libsDir\openal-soft\build\RelWithDebInfo\OpenAL32.lib" }
           )
           foreach ($item in $incomplete) {
             if ((Test-Path $item.Dir) -and (-not (Test-Path $item.Check))) {

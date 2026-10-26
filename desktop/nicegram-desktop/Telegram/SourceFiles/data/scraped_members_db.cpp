@@ -31,6 +31,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "history/history.h"
 #include "history/history_item.h"
 #include "main/main_account.h"
+#include "main/main_domain.h"
 #include "main/main_session.h"
 #include "mtproto/sender.h"
 #include "settings.h"
@@ -43,6 +44,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "ui/widgets/labels.h"
 #include "ui/wrap/slide_wrap.h"
 #include "ui/wrap/vertical_layout.h"
+#include "window/window_controller.h"
 #include "window/window_session_controller.h"
 #include "styles/style_boxes.h"
 #include "styles/style_layers.h"
@@ -60,6 +62,37 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 
 namespace Data {
 namespace {
+
+// Resolves a guaranteed-alive SessionController: if `preferred` is valid and
+// still in the active session's window list, uses it; otherwise falls back to
+// the active session/window, or nullptr if no account is logged in.
+[[nodiscard]] Window::SessionController *SafeSessionController(
+		Window::SessionController *preferred) {
+	if (Core::App().domain().started()
+			&& Core::App().domain().active().sessionExists()) {
+		auto &session = Core::App().domain().active().session();
+		const auto &windows = session.windows();
+		if (preferred) {
+			for (const auto &controller : windows) {
+				if (controller.get() == preferred) {
+					return preferred;
+				}
+			}
+		}
+		if (const auto resolved = session.tryResolveWindow()) {
+			return resolved;
+		}
+		if (!windows.empty()) {
+			return (*windows.begin()).get();
+		}
+	}
+	if (const auto primary = Core::App().activePrimaryWindow()) {
+		if (const auto controller = primary->sessionController()) {
+			return controller;
+		}
+	}
+	return nullptr;
+}
 
 // A base with tens of thousands of usernames would still make one JSON
 // file of a few hundred KB - fine on its own, but nowhere near the
@@ -493,25 +526,32 @@ void AppendToIndex(
 }
 
 void FinishScrape(
-		not_null<Window::SessionController*> controller,
+		Window::SessionController *controller,
 		uint64 id,
 		const QString &title,
-		QStringList usernames) {
+		QStringList usernames,
+		std::shared_ptr<Ui::Show> show = nullptr) {
+	const auto safe = SafeSessionController(controller);
+	const auto ui = show ? show : (safe ? safe->uiShow() : nullptr);
 	if (usernames.isEmpty()) {
 		// Hidden member lists, or a small group whose participants haven't
 		// loaded, come back empty - saving that would just leave a
 		// useless empty base (and, on a re-scrape, wipe a good one).
-		controller->uiShow()->showToast(
-			u"Не найдено ни одного участника с юзернеймом - база не "
-				"создана и не изменена"_q);
+		if (ui) {
+			ui->showToast(
+				u"Не найдено ни одного участника с юзернеймом - база не "
+					"создана и не изменена"_q);
+		}
 		return;
 	}
 	const auto save = [=](const QStringList &list) {
 		SaveScrapedGroupUsernames(id, title, list);
-		controller->uiShow()->showToast(
-			u"База: сохранено пользователей с юзернеймом в \""_q + title
-				+ u"\": "_q
-				+ QString::number(LoadScrapedGroupUsernames(id).size()));
+		if (ui) {
+			ui->showToast(
+				u"База: сохранено пользователей с юзернеймом в \""_q + title
+					+ u"\": "_q
+					+ QString::number(LoadScrapedGroupUsernames(id).size()));
+		}
 	};
 	const auto index = LoadScrapedGroupsIndex();
 	const auto existing = ranges::find(index, id, &ScrapedGroupMeta::id);
@@ -528,7 +568,7 @@ void FinishScrape(
 			"целиком?"_q;
 	// "Отменить" on the left leaves the existing base exactly as it is and
 	// drops what was just found; Esc does the same.
-	controller->show(Box([=](not_null<Ui::GenericBox*> box) {
+	const auto makeBox = [=](not_null<Ui::GenericBox*> box) {
 		box->addRow(object_ptr<Ui::FlatLabel>(box, text, st::boxLabel));
 		box->addButton(rpl::single(u"Объединить"_q), [=] {
 			box->closeBox();
@@ -543,7 +583,12 @@ void FinishScrape(
 		box->addLeftButton(rpl::single(u"Отменить"_q), [=] {
 			box->closeBox();
 		});
-	}));
+	};
+	if (show) {
+		show->showBox(Box(makeBox));
+	} else if (safe) {
+		safe->show(Box(makeBox));
+	}
 }
 
 // The `reason` a scrape reports when its "Остановить и сохранить" was used.
@@ -692,7 +737,8 @@ void ScrapeChannelMembers(
 		not_null<Window::SessionController*> controller,
 		not_null<ChannelData*> channel,
 		const ScrapeOptions &options,
-		Fn<void(QStringList collected, QString reason)> done) {
+		Fn<void(QStringList collected, QString reason)> done,
+		std::shared_ptr<Ui::Show> show = nullptr) {
 	struct Phase {
 		enum class Kind { Recent, History };
 		Kind kind = Kind::Recent;
@@ -788,32 +834,34 @@ void ScrapeChannelMembers(
 		if (state->box.get()) {
 			return; // already open
 		}
-		const auto shownBox = controller->show(
-			Box([=](not_null<Ui::GenericBox*> box) {
-				box->setWidth(st::boxWideWidth);
-				box->setTitle(
-					rpl::single(u"Сбор участников: "_q + channel->name()));
-				state->summary = box->addRow(object_ptr<Ui::FlatLabel>(
-					box, QString(), st::boxLabel));
-				refreshSummary();
-				Ui::AddSkip(box->verticalLayout());
-				const auto log = box->addRow(
-					object_ptr<Ui::VerticalLayout>(box));
-				state->log = log;
-				for (const auto &line : state->logLines) {
-					log->add(object_ptr<Ui::FlatLabel>(
-						log, line, st::boxLabel));
-				}
-				if (!state->finished) {
-					box->addButton(
-						rpl::single(u"Остановить и сохранить"_q),
-						[=] { finish(kScrapeStoppedManually); });
-				}
-				// "Скрыть"/the cross/Esc just hide it; the scrape keeps
-				// running.
-				Ggtg::AddHideButton(box);
-				Ggtg::AddCloseCross(box);
-			}));
+		const auto makeBox = [=](not_null<Ui::GenericBox*> box) {
+			box->setWidth(st::boxWideWidth);
+			box->setTitle(
+				rpl::single(u"Сбор участников: "_q + channel->name()));
+			state->summary = box->addRow(object_ptr<Ui::FlatLabel>(
+				box, QString(), st::boxLabel));
+			refreshSummary();
+			Ui::AddSkip(box->verticalLayout());
+			const auto log = box->addRow(
+				object_ptr<Ui::VerticalLayout>(box));
+			state->log = log;
+			for (const auto &line : state->logLines) {
+				log->add(object_ptr<Ui::FlatLabel>(
+					log, line, st::boxLabel));
+			}
+			if (!state->finished) {
+				box->addButton(
+					rpl::single(u"Остановить и сохранить"_q),
+					[=] { finish(kScrapeStoppedManually); });
+			}
+			// "Скрыть"/the cross/Esc just hide it; the scrape keeps
+			// running.
+			Ggtg::AddHideButton(box);
+			Ggtg::AddCloseCross(box);
+		};
+		const auto shownBox = show
+			? base::weak_qptr<Ui::BoxContent>(show->show(Box(makeBox)))
+			: controller->show(Box(makeBox));
 		state->box = shownBox;
 	};
 	*reopenHolder = showScrapeBox;
@@ -1864,10 +1912,16 @@ int PruneDeliveredFromBases() {
 // `channelLike` adds the two extra ways through (search sweep, message
 // authors) that only make sense for supergroups and channels.
 void ShowScrapeOptions(
-		not_null<Window::SessionController*> controller,
+		Window::SessionController *controller,
 		const QString &name,
 		bool channelLike,
-		Fn<void(ScrapeOptions)> start) {
+		Fn<void(ScrapeOptions)> start,
+		std::shared_ptr<Ui::Show> show = nullptr) {
+	const auto safe = SafeSessionController(controller);
+	const auto ui = show ? show : (safe ? safe->uiShow() : nullptr);
+	if (!ui) {
+		return;
+	}
 	struct State {
 		QPointer<Ui::Checkbox> bots;
 		QPointer<Ui::Checkbox> admins;
@@ -1879,7 +1933,7 @@ void ShowScrapeOptions(
 	};
 	const auto state = std::make_shared<State>();
 	const auto saved = LoadScrapeOptions();
-	controller->show(Box([=](not_null<Ui::GenericBox*> box) {
+	const auto makeBox = [=](not_null<Ui::GenericBox*> box) {
 		box->setWidth(st::boxWideWidth);
 		box->setTitle(rpl::single(u"Сбор участников: "_q + name));
 
@@ -2006,64 +2060,90 @@ void ShowScrapeOptions(
 			start(options);
 		});
 		box->addButton(rpl::single(u"Отмена"_q), [=] { box->closeBox(); });
-	}));
+	};
+	if (show) {
+		show->showBox(Box(makeBox));
+	} else if (safe) {
+		safe->show(Box(makeBox));
+	}
 }
 
 void ScrapeGroupMembers(
-		not_null<Window::SessionController*> controller,
-		not_null<PeerData*> peer) {
+		Window::SessionController *controller,
+		not_null<PeerData*> peer,
+		std::shared_ptr<Ui::Show> show) {
+	const auto safe = SafeSessionController(controller);
+	const auto ui = show ? show : (safe ? safe->uiShow() : nullptr);
+	if (!safe) {
+		if (ui) {
+			ui->showToast(u"Нет активного аккаунта для сбора"_q);
+		}
+		return;
+	}
 	// Only one scrape at a time: a second attempt reopens the one already
 	// running (its live box, from "Процессы") instead of starting another.
 	if (const auto running = Core::App().processes().running(
 			Core::ProcessKind::Scrape)) {
 		if (running->reopen) {
 			running->reopen();
-		} else {
-			controller->uiShow()->showToast(
+		} else if (ui) {
+			ui->showToast(
 				u"Сбор уже идёт - он в «Процессах»."_q);
 		}
 		return;
 	}
 	if (const auto chat = peer->asChat()) {
-		ShowScrapeOptions(controller, chat->name(), false, [=](
+		ShowScrapeOptions(safe, chat->name(), false, [=](
 				ScrapeOptions options) {
-			ScrapeChatMembers(controller, chat, options);
-		});
+			ScrapeChatMembers(safe, chat, options);
+		}, ui);
 	} else if (const auto channel = peer->asChannel()) {
-		ShowScrapeOptions(controller, channel->name(), true, [=](
+		ShowScrapeOptions(safe, channel->name(), true, [=](
 				ScrapeOptions options) {
-			ScrapeChannelMembers(controller, channel, options, [=](
+			ScrapeChannelMembers(safe, channel, options, [=](
 					QStringList collected,
 					QString reason) {
-				if (!reason.isEmpty()) {
-					controller->uiShow()->showToast(
+				if (!reason.isEmpty() && ui) {
+					ui->showToast(
 						u"Сбор остановлен: "_q + reason);
 				}
 				FinishScrape(
-					controller,
+					safe,
 					channel->id.value,
 					GroupBaseTitle(channel->name(), channel->username()),
-					std::move(collected));
-			});
-		});
-	} else {
-		controller->uiShow()->showToast(u"Не поддерживается для этого чата"_q);
+					std::move(collected),
+					ui);
+			}, ui);
+		}, ui);
+	} else if (ui) {
+		ui->showToast(u"Не поддерживается для этого чата"_q);
 	}
 }
 
 void ScrapeGroupByUsername(
-		not_null<Window::SessionController*> controller,
-		const QString &username) {
-	const auto session = &controller->session();
+		Window::SessionController *controller,
+		const QString &username,
+		std::shared_ptr<Ui::Show> show) {
+	const auto safe = SafeSessionController(controller);
+	const auto ui = show ? show : (safe ? safe->uiShow() : nullptr);
+	if (!safe) {
+		if (ui) {
+			ui->showToast(u"Нет активного аккаунта для сбора"_q);
+		}
+		return;
+	}
+	const auto session = &safe->session();
 	const auto bare = username.trimmed().remove('@');
 	if (bare.isEmpty()) {
 		return;
 	}
 	if (const auto peer = session->data().peerByUsername(bare)) {
-		ScrapeGroupMembers(controller, peer);
+		ScrapeGroupMembers(safe, peer, ui);
 		return;
 	}
-	controller->uiShow()->showToast(u"Ищем @"_q + bare + u"..."_q);
+	if (ui) {
+		ui->showToast(u"Ищем @"_q + bare + u"..."_q);
+	}
 	session->api().request(MTPcontacts_ResolveUsername(
 		MTP_flags(MTPcontacts_ResolveUsername::Flags(0)),
 		MTP_string(bare),
@@ -2077,15 +2157,17 @@ void ScrapeGroupByUsername(
 				? session->data().peer(peerId).get()
 				: nullptr;
 			if (peer) {
-				ScrapeGroupMembers(controller, peer);
-			} else {
-				controller->uiShow()->showToast(
+				ScrapeGroupMembers(safe, peer, ui);
+			} else if (ui) {
+				ui->showToast(
 					u"@"_q + bare + u" не найден"_q);
 			}
 		});
 	}).fail([=](const MTP::Error &error) {
-		controller->uiShow()->showToast(
-			u"Не удалось найти @"_q + bare + u": "_q + error.type());
+		if (ui) {
+			ui->showToast(
+				u"Не удалось найти @"_q + bare + u": "_q + error.type());
+		}
 	}).send();
 }
 
@@ -2782,21 +2864,31 @@ void RunGroupSearch(
 
 }
 
-void SearchGroups(not_null<Window::SessionController*> controller) {
+void SearchGroups(
+		Window::SessionController *controller,
+		std::shared_ptr<Ui::Show> show) {
+	const auto safe = SafeSessionController(controller);
+	const auto ui = show ? show : (safe ? safe->uiShow() : nullptr);
+	if (!safe) {
+		if (ui) {
+			ui->showToast(u"Нет активного аккаунта"_q);
+		}
+		return;
+	}
 	struct State {
 		QPointer<Ui::InputField> keyword;
 		QPointer<Ui::InputField> minMembers;
 		QPointer<Ui::Checkbox> snowball;
 	};
 	const auto state = std::make_shared<State>();
-	controller->show(Box([=](not_null<Ui::GenericBox*> box) {
+	const auto makeBox = [=](not_null<Ui::GenericBox*> box) {
 		box->setWidth(st::boxWideWidth);
 		box->setTitle(rpl::single(u"Поиск групп"_q));
 		Ui::AddDividerText(
 			box->verticalLayout(),
 			rpl::single(
 				u"Поиск идёт с текущего аккаунта ("_q
-					+ controller->session().user()->name()
+					+ safe->session().user()->name()
 					+ u") по всему Telegram. Находит публичные "
 						"группы (супергруппы) с юзернеймом и сохраняет их "
 						"как новую базу групп, самые большие сверху."_q));
@@ -2833,10 +2925,15 @@ void SearchGroups(not_null<Window::SessionController*> controller) {
 				state->minMembers->getLastText().trimmed().toInt(&ok));
 			const auto snowball = state->snowball->checked();
 			box->closeBox();
-			RunGroupSearch(controller, keyword, snowball, ok ? minMembers : 0);
+			RunGroupSearch(safe, keyword, snowball, ok ? minMembers : 0);
 		});
 		box->addButton(rpl::single(u"Отмена"_q), [=] { box->closeBox(); });
-	}));
+	};
+	if (show) {
+		show->showBox(Box(makeBox));
+	} else {
+		safe->show(Box(makeBox));
+	}
 }
 
 // ---- collecting members from every group of a groups base ----

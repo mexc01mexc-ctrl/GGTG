@@ -370,7 +370,9 @@ int PruneDeliveredFromBases();
 // current account (contacts.search, optionally widened through similar-group
 // recommendations and the found groups' own names) and saves the megagroups
 // it finds as a new BaseKind::Groups base, biggest first.
-void SearchGroups(not_null<Window::SessionController*> controller);
+void SearchGroups(
+	Window::SessionController *controller,
+	std::shared_ptr<Ui::Show> show = nullptr);
 
 // Collects the members of every group in a groups base into ONE new users
 // base ("Участники: <base title>"), group after group with pauses between
@@ -380,14 +382,16 @@ void CollectFromGroupsBase(
 	uint64 baseId);
 
 void ScrapeGroupMembers(
-	not_null<Window::SessionController*> controller,
-	not_null<PeerData*> peer);
+	Window::SessionController *controller,
+	not_null<PeerData*> peer,
+	std::shared_ptr<Ui::Show> show = nullptr);
 
 // The same, for a group known only by its public @username (a row of a
 // groups base): looks it up first, then goes through ScrapeGroupMembers.
 void ScrapeGroupByUsername(
-	not_null<Window::SessionController*> controller,
-	const QString &username);
+	Window::SessionController *controller,
+	const QString &username,
+	std::shared_ptr<Ui::Show> show = nullptr);
 
 // Display names of people and groups by @username, kept apart from the
 // bases (which store usernames only) in names.json: remembered whenever a

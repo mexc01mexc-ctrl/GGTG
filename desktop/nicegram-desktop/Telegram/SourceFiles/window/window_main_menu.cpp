@@ -2651,23 +2651,46 @@ void FillGgtgShell(
 	// SessionController (see MakeScrapedGroupsDbBox's comment), so its own
 	// nested navigation (editing a base, its clickable-usernames view,
 	// etc.) stays fully inside this window.
+	// Since bases boxes can stay open across account switches, resolve the
+	// live session controller dynamically instead of capturing a stale one.
+	const auto liveController = [window = &controller->window()]() -> Window::SessionController* {
+		if (const auto current = window->sessionController()) {
+			return current;
+		}
+		if (const auto primary = Core::App().activePrimaryWindow()) {
+			if (const auto current = primary->sessionController()) {
+				return current;
+			}
+		}
+		return nullptr;
+	};
 	const auto makeBaseBox = [=](std::shared_ptr<Ui::Show> show) {
 		auto actions = Settings::BasesActions();
 		// No separate "Анализ базы": recipients are checked while the
 		// campaign sends (not found / long ago / bots are skipped there).
 		actions.sendToBase = [=](uint64 baseId) {
+			const auto current = liveController();
+			if (!current) {
+				show->showToast(u"Нет активного аккаунта"_q);
+				return;
+			}
 			// On top of the base, with "Назад" back to it.
-			Settings::OpenSmsCampaign(controller, baseId, show);
+			Settings::OpenSmsCampaign(current, baseId, show);
 		};
 		actions.scrapeGroup = [=](const QString &username) {
-			Data::ScrapeGroupByUsername(controller, username);
+			Data::ScrapeGroupByUsername(liveController(), username, show);
 		};
 		actions.removeChannels = [=](
 				std::shared_ptr<Ui::Show> where,
 				uint64 baseId,
 				Fn<void()> changed) {
+			const auto current = liveController();
+			if (!current) {
+				where->showToast(u"Нет активного аккаунта"_q);
+				return;
+			}
 			Data::RemoveChannelsFromGroupsBase(
-				controller,
+				current,
 				where,
 				baseId,
 				std::move(changed));
@@ -2675,12 +2698,22 @@ void FillGgtgShell(
 		actions.scrapeGroupViaSquidward = [=](
 				std::shared_ptr<Ui::Show> where,
 				const QString &username) {
+			const auto current = liveController();
+			if (!current) {
+				where->showToast(u"Нет активного аккаунта"_q);
+				return;
+			}
 			where->showBox(
-				MakeSquidwardBox(controller, username),
+				MakeSquidwardBox(current, username),
 				Ui::LayerOption::KeepOther);
 		};
 		actions.searchGroups = [=] {
-			Data::SearchGroups(controller);
+			const auto current = liveController();
+			if (!current) {
+				show->showToast(u"Нет активного аккаунта"_q);
+				return;
+			}
+			Data::SearchGroups(current, show);
 		};
 		return Settings::MakeScrapedGroupsDbBox(show, std::move(actions));
 	};
