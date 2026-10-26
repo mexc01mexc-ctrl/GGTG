@@ -14,6 +14,8 @@ jobs:
   build:
     name: Build Windows (x64)
     runs-on: windows-latest
+    permissions:
+      contents: write
 
     env:
       Platform: x64
@@ -283,25 +285,23 @@ jobs:
             Write-Host "=== FAILED COMMAND.BAT ($($_.FullName)) ===" -ForegroundColor Magenta
             Get-Content $_.FullName -Tail 50
           }
-          if (Test-Path D:\TBuild\Libraries\win64\libvpx\config.log) {
-            Write-Host "=== LIBVPX CONFIG.LOG (TAIL) ===" -ForegroundColor Yellow
-            Get-Content D:\TBuild\Libraries\win64\libvpx\config.log -Tail 80
+          Get-ChildItem -Path D:\TBuild -Filter "*.log" -Recurse -ErrorAction SilentlyContinue | ForEach-Object {
+            Write-Host "=== LOG: $($_.FullName) ===" -ForegroundColor Cyan
+            Get-Content $_.FullName -Tail 100
           }
-          if (Test-Path D:\TBuild\Libraries\win64\ffmpeg\ffbuild\config.log) {
-            Write-Host "=== FFMPEG CONFIG.LOG (TAIL) ===" -ForegroundColor Yellow
-            Get-Content D:\TBuild\Libraries\win64\ffmpeg\ffbuild\config.log -Tail 80
-          }
-          if (Test-Path D:\TBuild\tdesktop\out\build.log) {
-            Write-Host "=== CMAKE / MSBUILD ERRORS ===" -ForegroundColor Red
-            Get-Content D:\TBuild\tdesktop\out\build.log | Select-String -Pattern "error LNK", "error C", ": error:", "FAILED:" -Context 1,1 | Select-Object -First 50
-          }
-          if (Test-Path D:\TBuild\tdesktop\out\CMakeFiles\CMakeError.log) {
-            Write-Host "=== CMAKE ERROR LOG ===" -ForegroundColor Red
-            Get-Content D:\TBuild\tdesktop\out\CMakeFiles\CMakeError.log -Tail 100
-          }
-          if (Test-Path D:\TBuild\tdesktop\out\CMakeFiles\CMakeOutput.log) {
-            Write-Host "=== CMAKE OUTPUT LOG ===" -ForegroundColor Yellow
-            Get-Content D:\TBuild\tdesktop\out\CMakeFiles\CMakeOutput.log -Tail 50
+          try {
+            git config --global user.name "github-actions[bot]"
+            git config --global user.email "github-actions[bot]@users.noreply.github.com"
+            git checkout -B ci-logs
+            git rm -rf . -ErrorAction SilentlyContinue
+            New-Item -ItemType Directory -Force -Path logs | Out-Null
+            Get-ChildItem -Path D:\TBuild -Filter "*.log" -Recurse -ErrorAction SilentlyContinue | Copy-Item -Destination logs -Force
+            Get-ChildItem -Path D:\TBuild -Filter "command.bat" -Recurse -ErrorAction SilentlyContinue | Copy-Item -Destination logs -Force
+            git add logs
+            git commit -m "ci: failure logs run ${{ github.run_id }}"
+            git push origin ci-logs --force
+          } catch {
+            Write-Host "Could not push to ci-logs: $_"
           }
 
       - name: Upload build log on failure
@@ -310,11 +310,9 @@ jobs:
         with:
           name: windows-build-failure-log
           path: |
-            D:\TBuild\tdesktop\out\build.log
-            D:\TBuild\tdesktop\out\CMakeFiles\CMakeError.log
-            D:\TBuild\tdesktop\out\CMakeFiles\CMakeOutput.log
-            D:\TBuild\Libraries\win64\*\config.log
-            D:\TBuild\**\command.bat
+            D:/TBuild/**/*.log
+            D:/TBuild/**/command.bat
+            D:/TBuild/Libraries/win64/command.bat
           if-no-files-found: warn
           retention-days: 7
 

@@ -97,6 +97,7 @@ environment = {
     'PATH_PREFIX': pathPrefix,
     'CMAKE_GENERATOR': 'Ninja Multi-Config',
     'QT': qt,
+    'PREPARE_DIR': scriptPath,
 }
 if (win32):
     environment.update({
@@ -1764,7 +1765,7 @@ release:
 depends:patches/qtbase_""" + qt + """/*.patch
 win:
     cd qtbase
-    for /r ..\\..\\patches\\qtbase_""" + qt + """ %%i in (*.patch) do call git apply "%%i" -v || exit /b 1
+    python "%PREPARE_DIR%\\apply_qt_patches.py" """ + qt + """
     cd ..
 
     SET CONFIGURATIONS=-debug
