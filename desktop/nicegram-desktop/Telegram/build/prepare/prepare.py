@@ -1765,22 +1765,22 @@ release:
 depends:patches/qtbase_""" + qt + """/*.patch
 win:
     cd qtbase
-    python "%PREPARE_DIR%\\apply_qt_patches.py" """ + qt + """
+    python "%PREPARE_DIR%/apply_qt_patches.py" """ + qt + """
     cd ..
 
     SET CONFIGURATIONS=-debug
 release:
     SET CONFIGURATIONS=-debug-and-release
 win:
-    """ + removeDir('"%LIBS_DIR%\\Qt-' + qt + '"') + """
-    SET ANGLE_DIR=%LIBS_DIR%\\tg_angle
-    SET ANGLE_LIBS_DIR=%ANGLE_DIR%\\out
-    SET MOZJPEG_DIR=%LIBS_DIR%\\mozjpeg
-    SET OPENSSL_DIR=%LIBS_DIR%\\openssl3
-    SET OPENSSL_LIBS_DIR=%OPENSSL_DIR%\\out
-    SET ZLIB_LIBS_DIR=%LIBS_DIR%\\zlib
-    SET WEBP_DIR=%LIBS_DIR%\\libwebp
-    configure -prefix "%LIBS_DIR%\\Qt-""" + qt + """" ^
+    """ + removeDir('"%LIBS_DIR%/Qt-' + qt + '"') + """
+    SET ANGLE_DIR=%LIBS_DIR%/tg_angle
+    SET ANGLE_LIBS_DIR=%ANGLE_DIR%/out
+    SET MOZJPEG_DIR=%LIBS_DIR%/mozjpeg
+    SET OPENSSL_DIR=%LIBS_DIR%/openssl3
+    SET OPENSSL_LIBS_DIR=%OPENSSL_DIR%/out
+    SET ZLIB_LIBS_DIR=%LIBS_DIR%/zlib
+    SET WEBP_DIR=%LIBS_DIR%/libwebp
+    configure -prefix "%LIBS_DIR%/Qt-""" + qt + """" ^
         %CONFIGURATIONS% ^
         -force-debug-info ^
         -opensource ^
@@ -1788,24 +1788,24 @@ win:
         -static ^
         -static-runtime ^
         -opengl es2 -no-angle ^
-        -I "%ANGLE_DIR%\\include" ^
+        -I "%ANGLE_DIR%/include" ^
         -D "KHRONOS_STATIC=" ^
         -D "DESKTOP_APP_QT_STATIC_ANGLE=" ^
-        QMAKE_LIBS_OPENGL_ES2_DEBUG="%ANGLE_LIBS_DIR%\\Debug\\tg_angle.lib %ZLIB_LIBS_DIR%\\Debug\\libzsd.lib d3d9.lib dxgi.lib dxguid.lib" ^
-        QMAKE_LIBS_OPENGL_ES2_RELEASE="%ANGLE_LIBS_DIR%\\Release\\tg_angle.lib %ZLIB_LIBS_DIR%\\Release\\libzs.lib d3d9.lib dxgi.lib dxguid.lib" ^
+        QMAKE_LIBS_OPENGL_ES2_DEBUG="%ANGLE_LIBS_DIR%/Debug/tg_angle.lib %ZLIB_LIBS_DIR%/Debug/libzsd.lib d3d9.lib dxgi.lib dxguid.lib" ^
+        QMAKE_LIBS_OPENGL_ES2_RELEASE="%ANGLE_LIBS_DIR%/Release/tg_angle.lib %ZLIB_LIBS_DIR%/Release/libzs.lib d3d9.lib dxgi.lib dxguid.lib" ^
         -egl ^
-        QMAKE_LIBS_EGL_DEBUG="%ANGLE_LIBS_DIR%\\Debug\\tg_angle.lib %ZLIB_LIBS_DIR%\\Debug\\libzsd.lib d3d9.lib dxgi.lib dxguid.lib Gdi32.lib User32.lib" ^
-        QMAKE_LIBS_EGL_RELEASE="%ANGLE_LIBS_DIR%\\Release\\tg_angle.lib %ZLIB_LIBS_DIR%\\Release\\libzs.lib d3d9.lib dxgi.lib dxguid.lib Gdi32.lib User32.lib" ^
+        QMAKE_LIBS_EGL_DEBUG="%ANGLE_LIBS_DIR%/Debug/tg_angle.lib %ZLIB_LIBS_DIR%/Debug/libzsd.lib d3d9.lib dxgi.lib dxguid.lib Gdi32.lib User32.lib" ^
+        QMAKE_LIBS_EGL_RELEASE="%ANGLE_LIBS_DIR%/Release/tg_angle.lib %ZLIB_LIBS_DIR%/Release/libzs.lib d3d9.lib dxgi.lib dxguid.lib Gdi32.lib User32.lib" ^
         -openssl-linked ^
-        -I "%OPENSSL_DIR%\\include" ^
-        OPENSSL_LIBS_DEBUG="%OPENSSL_LIBS_DIR%.dbg\\libssl.lib %OPENSSL_LIBS_DIR%.dbg\\libcrypto.lib Ws2_32.lib Gdi32.lib Advapi32.lib Crypt32.lib User32.lib" ^
-        OPENSSL_LIBS_RELEASE="%OPENSSL_LIBS_DIR%\\libssl.lib %OPENSSL_LIBS_DIR%\\libcrypto.lib Ws2_32.lib Gdi32.lib Advapi32.lib Crypt32.lib User32.lib" ^
+        -I "%OPENSSL_DIR%/include" ^
+        OPENSSL_LIBS_DEBUG="%OPENSSL_LIBS_DIR%.dbg/libssl.lib %OPENSSL_LIBS_DIR%.dbg/libcrypto.lib Ws2_32.lib Gdi32.lib Advapi32.lib Crypt32.lib User32.lib" ^
+        OPENSSL_LIBS_RELEASE="%OPENSSL_LIBS_DIR%/libssl.lib %OPENSSL_LIBS_DIR%/libcrypto.lib Ws2_32.lib Gdi32.lib Advapi32.lib Crypt32.lib User32.lib" ^
         -I "%MOZJPEG_DIR%" ^
-        LIBJPEG_LIBS_DEBUG="%MOZJPEG_DIR%\\Debug\\jpeg-static.lib" ^
-        LIBJPEG_LIBS_RELEASE="%MOZJPEG_DIR%\\Release\\jpeg-static.lib" ^
+        LIBJPEG_LIBS_DEBUG="%MOZJPEG_DIR%/Debug/jpeg-static.lib" ^
+        LIBJPEG_LIBS_RELEASE="%MOZJPEG_DIR%/Release/jpeg-static.lib" ^
         -system-webp ^
-        -I "%WEBP_DIR%\\src" ^
-        -L "%WEBP_DIR%\\out\\release-static\\$X8664\\lib" ^
+        -I "%WEBP_DIR%/src" ^
+        -L "%WEBP_DIR%/out/release-static/$X8664/lib" ^
         -mp ^
         -no-feature-netlistmgr ^
         -nomake examples ^
