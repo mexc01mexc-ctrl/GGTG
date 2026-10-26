@@ -179,27 +179,30 @@ jobs:
             }
           }
 
-          # Inspect and ensure Qt is correctly located
-          Write-Host "=== INSPECTING QT LOCATION ==="
-          $qtExpected = "$libsDir\Qt-5.15.19"
-          $qmake = Get-ChildItem -Path $libsDir -Filter "qmake.exe" -Recurse -Depth 4 -ErrorAction SilentlyContinue | Select-Object -First 1
-          if ($qmake) {
-            Write-Host "Found qmake.exe at: $($qmake.FullName)"
-            $qtInstalledDir = $qmake.Directory.Parent.FullName
-            if ($qtInstalledDir -ne $qtExpected -and -not (Test-Path $qtExpected)) {
-              Write-Host "Creating junction from $qtInstalledDir to $qtExpected..."
-              New-Item -ItemType Junction -Path $qtExpected -Target $qtInstalledDir -Force
-            }
+          # Verify Qt installation
+          Write-Host "=== VERIFYING QT INSTALLATION ==="
+          $qtPrefix = "$libsDir\Qt-5.15.19"
+          $qtCmake = "$qtPrefix\lib\cmake\Qt5\Qt5Config.cmake"
+          if (Test-Path $qtCmake) {
+            Write-Host "Valid Qt 5.15.19 installation confirmed at $qtPrefix."
           } else {
-            Write-Host "Notice: qmake.exe not found yet. Resetting qt_5.15.19 source and cache key for a fresh build."
-            $qtKey = "$libsDir\cache_keys\qt_5.15.19"
-            if (Test-Path $qtKey) {
-              Remove-Item -Path $qtKey -Force
+            Write-Host "Qt 5.15.19 is not fully installed ($qtCmake missing)."
+            Write-Host "Purging any stale Qt cache key, directory, and junctions..."
+            if (Test-Path "$libsDir\cache_keys\qt_5.15.19") {
+              Remove-Item -Path "$libsDir\cache_keys\qt_5.15.19" -Force -ErrorAction SilentlyContinue
             }
-            $qtSource = "$libsDir\qt_5.15.19"
-            if (Test-Path $qtSource) {
-              Get-ChildItem -Path $qtSource -Recurse -Force -ErrorAction SilentlyContinue | ForEach-Object { $_.Attributes = 'Normal' }
-              Remove-Item -Path $qtSource -Recurse -Force -ErrorAction SilentlyContinue
+            if (Test-Path "$libsDir\qt_5.15.19") {
+              Get-ChildItem -Path "$libsDir\qt_5.15.19" -Recurse -Force -ErrorAction SilentlyContinue | ForEach-Object { $_.Attributes = 'Normal' }
+              Remove-Item -Path "$libsDir\qt_5.15.19" -Recurse -Force -ErrorAction SilentlyContinue
+            }
+            if (Test-Path $qtPrefix) {
+              $item = Get-Item $qtPrefix -Force -ErrorAction SilentlyContinue
+              if ($item.Attributes -match "ReparsePoint") {
+                [System.IO.Directory]::Delete($qtPrefix)
+              } else {
+                Get-ChildItem -Path $qtPrefix -Recurse -Force -ErrorAction SilentlyContinue | ForEach-Object { $_.Attributes = 'Normal' }
+                Remove-Item -Path $qtPrefix -Recurse -Force -ErrorAction SilentlyContinue
+              }
             }
           }
 
@@ -222,8 +225,11 @@ jobs:
       - name: Prepare dependencies
         id: prepare-deps
         working-directory: D:\TBuild\tdesktop\Telegram
+        env:
+          QT: "5.15.19"
         run: |
           set Platform=x64
+          set QT=5.15.19
           set TARGET=
           set _CL_=
           set MSYS2_ARG_CONV_EXCL=*
@@ -245,7 +251,10 @@ jobs:
 
       - name: Configure CMake
         working-directory: D:\TBuild\tdesktop\Telegram
+        env:
+          QT: "5.15.19"
         run: |
+          set QT=5.15.19
           call configure.bat x64 -D TDESKTOP_API_ID=2040 -D TDESKTOP_API_HASH=b18441a1ff607e10a989891a5462e627 -D CMAKE_DISABLE_PRECOMPILE_HEADERS=ON -D CMAKE_AUTOGEN_SKIP_PRECOMPILE_HEADERS=ON
 
       - name: Build GGTG EXE
@@ -306,6 +315,7 @@ jobs:
             D:\TBuild\tdesktop\out\CMakeFiles\CMakeOutput.log
             D:\TBuild\Libraries\win64\*\config.log
             D:\TBuild\**\command.bat
+          if-no-files-found: warn
           retention-days: 7
 
       - name: Locate and Upload Artifact
@@ -316,4 +326,5 @@ jobs:
             D:\TBuild\tdesktop\out\Release\*.exe
             D:\TBuild\tdesktop\out\Release\GGTG.exe
             D:\TBuild\tdesktop\out\Release\Telegram.exe
+          if-no-files-found: warn
           retention-days: 14

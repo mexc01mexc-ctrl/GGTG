@@ -96,6 +96,7 @@ environment = {
     'THIRDPARTY_DIR': thirdPartyDir,
     'PATH_PREFIX': pathPrefix,
     'CMAKE_GENERATOR': 'Ninja Multi-Config',
+    'QT': qt,
 }
 if (win32):
     environment.update({
@@ -271,8 +272,9 @@ def checkCacheKey(stage):
     if stage['name'].startswith('qt_'):
         qt_ver = stage['name'][3:]
         qt_prefix = os.path.join(stage['directory'], 'Qt-' + qt_ver)
-        if win and not os.path.exists(os.path.join(qt_prefix, 'bin', 'qmake.exe')):
-            if not os.path.exists(os.path.join(usedPrefix, 'Qt-' + qt_ver, 'bin', 'qmake.exe')):
+        if win:
+            qt_cmake = os.path.join(qt_prefix, 'lib', 'cmake', 'Qt5', 'Qt5Config.cmake')
+            if not os.path.exists(qt_cmake):
                 return 'NotFound'
     if not os.path.exists(key):
         return 'Stale'
@@ -1756,13 +1758,13 @@ release:
 """)
 
     stage('qt_' + qt, """
-    git clone -b v$QT-lts-lgpl https://github.com/qt/qt5.git qt_$QT
-    cd qt_$QT
+    git clone -b v""" + qt + """-lts-lgpl https://github.com/qt/qt5.git qt_""" + qt + """
+    cd qt_""" + qt + """
     git submodule update --init --recursive --progress qtbase qtimageformats qtsvg
 depends:patches/qtbase_""" + qt + """/*.patch
 win:
     cd qtbase
-    for /r ..\..\patches\qtbase_%QT% %%i in (*.patch) do call git apply "%%i" -v || exit /b 1
+    for /r ..\\..\\patches\\qtbase_""" + qt + """ %%i in (*.patch) do call git apply "%%i" -v || exit /b 1
     cd ..
 
     SET CONFIGURATIONS=-debug
@@ -1777,7 +1779,7 @@ win:
     SET OPENSSL_LIBS_DIR=%OPENSSL_DIR%\\out
     SET ZLIB_LIBS_DIR=%LIBS_DIR%\\zlib
     SET WEBP_DIR=%LIBS_DIR%\\libwebp
-    configure -prefix "%LIBS_DIR%\\Qt-%QT%" ^
+    configure -prefix "%LIBS_DIR%\\Qt-""" + qt + """" ^
         %CONFIGURATIONS% ^
         -force-debug-info ^
         -opensource ^
