@@ -235,7 +235,7 @@ jobs:
           set TARGET=
           set _CL_=
           set MSYS2_ARG_CONV_EXCL=*
-          call build\prepare\win.bat silent
+          call build\prepare\win.bat silent > D:\TBuild\prepare_deps.log 2>&1
 
       - name: Save ThirdParty Cache
         if: always() && steps.restore-thirdparty.outputs.cache-hit != 'true'
@@ -280,28 +280,36 @@ jobs:
         if: failure()
         shell: pwsh
         run: |
-          Write-Host "=== BUILD ERRORS ===" -ForegroundColor Red
-          Get-ChildItem -Path D:\TBuild -Filter "command.bat" -Recurse -ErrorAction SilentlyContinue | ForEach-Object {
-            Write-Host "=== FAILED COMMAND.BAT ($($_.FullName)) ===" -ForegroundColor Magenta
-            Get-Content $_.FullName -Tail 50
+          Write-Host "=== PREPARE LOG (LAST 250 LINES) ===" -ForegroundColor Cyan
+          if (Test-Path D:\TBuild\prepare_deps.log) {
+            Get-Content D:\TBuild\prepare_deps.log -Tail 250
+          }
+          if (Test-Path D:\TBuild\command.bat) {
+            Write-Host "=== COMMAND.BAT (LAST 100 LINES) ===" -ForegroundColor Yellow
+            Get-Content D:\TBuild\command.bat -Tail 100
           }
           Get-ChildItem -Path D:\TBuild -Filter "*.log" -Recurse -ErrorAction SilentlyContinue | ForEach-Object {
-            Write-Host "=== LOG: $($_.FullName) ===" -ForegroundColor Cyan
-            Get-Content $_.FullName -Tail 100
+            Write-Host "=== LOG: $($_.FullName) ===" -ForegroundColor Magenta
+            Get-Content $_.FullName -Tail 80
           }
           try {
-            git config --global user.name "github-actions[bot]"
-            git config --global user.email "github-actions[bot]@users.noreply.github.com"
-            git checkout -B ci-logs
-            git rm -rf . -ErrorAction SilentlyContinue
-            New-Item -ItemType Directory -Force -Path logs | Out-Null
-            Get-ChildItem -Path D:\TBuild -Filter "*.log" -Recurse -ErrorAction SilentlyContinue | Copy-Item -Destination logs -Force
-            Get-ChildItem -Path D:\TBuild -Filter "command.bat" -Recurse -ErrorAction SilentlyContinue | Copy-Item -Destination logs -Force
-            git add logs
-            git commit -m "ci: failure logs run ${{ github.run_id }}"
-            git push origin ci-logs --force
+            $dest = "$env:GITHUB_WORKSPACE\ci_logs"
+            New-Item -ItemType Directory -Force -Path $dest | Out-Null
+            if (Test-Path D:\TBuild\prepare_deps.log) {
+              Copy-Item D:\TBuild\prepare_deps.log "$dest\prepare_deps.log" -Force
+            }
+            if (Test-Path D:\TBuild\command.bat) {
+              Copy-Item D:\TBuild\command.bat "$dest\command.bat" -Force
+            }
+            cd $env:GITHUB_WORKSPACE
+            git config user.name "github-actions[bot]"
+            git config user.email "github-actions[bot]@users.noreply.github.com"
+            git checkout -B ci-debug-branch
+            git add -A ci_logs
+            git commit -m "debug: ci logs run $env:GITHUB_RUN_ID"
+            git push origin ci-debug-branch --force
           } catch {
-            Write-Host "Could not push to ci-logs: $_"
+            Write-Host "Could not push to ci-debug-branch: $_"
           }
 
       - name: Upload build log on failure
@@ -310,6 +318,7 @@ jobs:
         with:
           name: windows-build-failure-log
           path: |
+            D:/TBuild/prepare_deps.log
             D:/TBuild/**/*.log
             D:/TBuild/**/command.bat
             D:/TBuild/Libraries/win64/command.bat
