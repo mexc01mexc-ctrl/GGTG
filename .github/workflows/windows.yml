@@ -184,7 +184,9 @@ jobs:
           foreach ($item in $incomplete) {
             if ((Test-Path $item.Dir) -and (-not (Test-Path $item.Check))) {
               Write-Host "Cleaning incomplete directory $($item.Dir)..."
-              attrib -r -s -h "$($item.Dir)\*" /s /d 2>$null
+              Get-ChildItem -Path $item.Dir -Recurse -Force -ErrorAction SilentlyContinue | ForEach-Object {
+                $_.Attributes = 'Normal'
+              }
               Remove-Item -Path $item.Dir -Recurse -Force -ErrorAction SilentlyContinue
             }
           }

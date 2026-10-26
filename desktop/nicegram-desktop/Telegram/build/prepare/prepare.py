@@ -287,9 +287,24 @@ def writeCacheKey(stage):
 
 stages = []
 
+def safeRemoveTree(path):
+    if not os.path.exists(path):
+        return
+    import stat
+    def remove_readonly(func, p, excinfo):
+        try:
+            os.chmod(p, stat.S_IWRITE)
+            func(p)
+        except Exception:
+            pass
+    try:
+        shutil.rmtree(path, onerror=remove_readonly)
+    except Exception as e:
+        print('[WARN] Could not remove directory:', path, e)
+
 def removeDir(folder):
     if win:
-        return 'if exist ' + folder + ' (attrib -r -s -h ' + folder + '\\* /s /d 2>nul & rmdir /Q /S ' + folder + ' 2>nul & if exist ' + folder + ' powershell -Command "Remove-Item -LiteralPath ' + folder + ' -Force -Recurse -ErrorAction SilentlyContinue")\nif exist ' + folder + ' exit /b 1'
+        return 'if exist ' + folder + ' (attrib -r -s -h ' + folder + ' /s /d 2>nul & rmdir /Q /S ' + folder + ' 2>nul)'
     return 'rm -rf ' + folder
 
 def setVar(key, multilineValue):
@@ -502,6 +517,9 @@ def runStages():
             continue
         clearCacheKey(stage)
         print('BUILDING:')
+        if win:
+            target_dir = os.path.join(stage['directory'], stage['name'])
+            safeRemoveTree(target_dir)
         if win and stage['name'] == 'libvpx':
             vpx_script = os.path.join(libsDir, 'patches', 'build_libvpx_win.sh')
             if os.path.isfile(vpx_script):
