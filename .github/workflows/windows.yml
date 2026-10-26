@@ -210,12 +210,16 @@ jobs:
 
           # Ensure git clone doesn't fail on half-baked directories
           $incomplete = @(
-            @{ Dir = "$libsDir\libvpx"; Check = "$libsDir\local\lib\x64\vpxmt.lib" },
-            @{ Dir = "$libsDir\ffmpeg"; Check = "$libsDir\ffmpeg\libavcodec\avcodec.lib" },
-            @{ Dir = "$libsDir\openal-soft"; Check = "$libsDir\openal-soft\build\RelWithDebInfo\OpenAL32.lib" }
+            @{ Dir = "$libsDir\libvpx"; Check = @("$libsDir\local\lib\x64\vpxmt.lib", "$libsDir\local\lib\vpx.lib", "$libsDir\local\include\vpx\vpx_codec.h") },
+            @{ Dir = "$libsDir\ffmpeg"; Check = @("$libsDir\ffmpeg\libavcodec\avcodec.lib", "$libsDir\local\include\libavcodec\avcodec.h") },
+            @{ Dir = "$libsDir\openal-soft"; Check = @("$libsDir\openal-soft\build\RelWithDebInfo\OpenAL32.lib", "$libsDir\local\include\AL\al.h") }
           )
           foreach ($item in $incomplete) {
-            if ((Test-Path $item.Dir) -and (-not (Test-Path $item.Check))) {
+            $isComplete = $false
+            foreach ($chk in $item.Check) {
+              if (Test-Path $chk) { $isComplete = $true; break }
+            }
+            if ((Test-Path $item.Dir) -and (-not $isComplete)) {
               Write-Host "Cleaning incomplete directory $($item.Dir)..."
               Get-ChildItem -Path $item.Dir -Recurse -Force -ErrorAction SilentlyContinue | ForEach-Object {
                 $_.Attributes = 'Normal'
@@ -235,7 +239,7 @@ jobs:
           set TARGET=
           set _CL_=
           set MSYS2_ARG_CONV_EXCL=*
-          call build\prepare\win.bat silent > D:\TBuild\prepare_deps.log 2>&1
+          call build\prepare\win.bat silent
 
       - name: Save ThirdParty Cache
         if: always() && steps.restore-thirdparty.outputs.cache-hit != 'true'

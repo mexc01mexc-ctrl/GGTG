@@ -396,12 +396,14 @@ def winFailOnEach(command):
         stripped = line.strip()
         if not stripped:
             continue
+        if stripped.startswith('rem ') or stripped.startswith('::'):
+            result = result + line + '\r\n'
+            continue
 
-        noCallKeywords = ('if ', 'for ', 'rem ', 'call ', 'echo ')
+        noCallKeywords = ('if ', 'for ', 'rem ', 'call ', 'echo ', 'setlocal', 'endlocal', 'exit')
         isControlOrBlock = any(stripped.startswith(kw) for kw in noCallKeywords) or stripped in ('(', ')')
         appendCall = startingCommand and not isControlOrBlock
         called = ('call ' + line) if appendCall else line
-
         result = result + called + '\r\n'
 
         if line.endswith('^'):
@@ -410,11 +412,11 @@ def winFailOnEach(command):
             startingCommand = True
             if stripped.endswith('('):
                 inBlock += 1
-            if stripped == ')':
+            elif stripped == ')':
                 inBlock = max(0, inBlock - 1)
-            if inBlock == 0 and not stripped.endswith('(') and stripped != ')' and not stripped.startswith('rem '):
-                clean_cmd = line.replace('"', '').replace('&', 'and').replace('^', '').strip()
-                result = result + 'if %errorlevel% neq 0 (\r\necho [COMMAND FAILED WITH CODE %errorlevel%]: ' + clean_cmd + '\r\nexit /b %errorlevel%\r\n)\r\n'
+
+            if inBlock == 0 and not stripped.endswith('('):
+                result = result + 'if %errorlevel% neq 0 exit /b %errorlevel%\r\n'
     return result
 
 def printCommands(commands):
