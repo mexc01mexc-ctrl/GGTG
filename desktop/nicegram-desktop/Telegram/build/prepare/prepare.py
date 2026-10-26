@@ -304,7 +304,7 @@ def safeRemoveTree(path):
 
 def removeDir(folder):
     if win:
-        return 'if exist ' + folder + ' (attrib -r -s -h ' + folder + ' /s /d 2>nul & rmdir /Q /S ' + folder + ' 2>nul)'
+        return 'if exist ' + folder + ' (attrib -r -s -h ' + folder + ' /s /d 2>nul & rmdir /Q /S ' + folder + ' 2>nul || ver >nul)'
     return 'rm -rf ' + folder
 
 def setVar(key, multilineValue):
@@ -389,7 +389,8 @@ def winFailOnEach(command):
             startingCommand = False
         else:
             startingCommand = True
-            result = result + '\r\nif %errorlevel% neq 0 exit /b %errorlevel%\r\n'
+            clean_cmd = command.replace('"', '').replace('&', 'and')
+            result = result + '\r\nif %errorlevel% neq 0 (\r\necho [COMMAND FAILED WITH CODE %errorlevel%]: ' + clean_cmd + '\r\nexit /b %errorlevel%\r\n)\r\n'
     return result
 
 def printCommands(commands):
@@ -403,7 +404,7 @@ def run(commands):
         if os.path.exists("command.bat"):
             os.remove("command.bat")
         with open("command.bat", 'w') as file:
-            file.write('@echo OFF\r\nset "NoDefaultCurrentDirectoryInExePath="\r\nset "TARGET="\r\nset "_CL_="\r\nset "MSYS2_ARG_CONV_EXCL=*"\r\n' + winFailOnEach(commands))
+            file.write('@echo ON\r\nset "NoDefaultCurrentDirectoryInExePath="\r\nset "TARGET="\r\nset "_CL_="\r\nset "MSYS2_ARG_CONV_EXCL=*"\r\n' + winFailOnEach(commands))
         batPath = os.path.abspath("command.bat")
         result = subprocess.run(batPath, shell=True, env=modifiedEnv).returncode == 0
         if result and os.path.exists("command.bat"):
@@ -524,10 +525,9 @@ def runStages():
             vpx_script = os.path.join(libsDir, 'patches', 'build_libvpx_win.sh')
             if os.path.isfile(vpx_script):
                 try:
-                    with open(vpx_script, 'w', encoding='utf-8') as f:
+                    with open(vpx_script, 'w', encoding='utf-8', newline='\n') as f:
                         f.write('''#!/bin/bash
-set -ex
-
+set -e
 unset TARGET
 unset _CL_
 export MSYS2_ARG_CONV_EXCL="*"
@@ -539,49 +539,11 @@ pushd $(dirname "$0") > /dev/null
 FullScriptPath=$(pwd)
 popd > /dev/null
 
-# Ensure yasm is in MSYS2 path
-if ! which yasm >/dev/null 2>&1 && ! which yasm.exe >/dev/null 2>&1; then
-    for cand in /c/ProgramData/chocolatey/bin/yasm.exe /c/tools/yasm.exe; do
-        if [ -f "$cand" ]; then
-            cp "$cand" /usr/bin/yasm.exe
-            break
-        fi
-    done
-fi
-
-# Ensure msbuild wrapper is in MSYS2 path if not found
-if ! which msbuild.exe >/dev/null 2>&1 && ! which msbuild >/dev/null 2>&1; then
-    MSBUILD_CAND=$(find "/c/Program Files/Microsoft Visual Studio/2022" -name "MSBuild.exe" -path "*/Bin/amd64/*" 2>/dev/null | head -n 1)
-    if [ -z "$MSBUILD_CAND" ]; then
-        MSBUILD_CAND=$(find "/c/Program Files/Microsoft Visual Studio/2022" -name "MSBuild.exe" 2>/dev/null | head -n 1)
-    fi
-    if [ -n "$MSBUILD_CAND" ]; then
-        echo "Creating msbuild wrapper pointing to $MSBUILD_CAND"
-        cat << 'WRAPPER' > /usr/bin/msbuild.exe
-#!/bin/sh
-exec "$MSBUILD_CAND" "$@"
-WRAPPER
-        chmod +x /usr/bin/msbuild.exe
-    fi
-fi
-
-./configure --prefix="$FullScriptPath/../local" \\
-    --target="$TOOLCHAIN" \\
-    --as=yasm \\
-    --disable-examples \\
-    --disable-unit-tests \\
-    --disable-tools \\
-    --disable-docs \\
-    --enable-static-msvcrt \\
-    --enable-vp8 \\
-    --enable-vp9 \\
-    --enable-webm-io \\
-    --size-limit=4096x4096
+./configure --prefix="$FullScriptPath/../local" --target="$TOOLCHAIN" --as=yasm --disable-examples --disable-unit-tests --disable-tools --disable-docs --enable-static-msvcrt --enable-vp8 --enable-vp9 --enable-webm-io --size-limit=4096x4096
 
 make -j"$NUMBER_OF_PROCESSORS"
 make -j"$NUMBER_OF_PROCESSORS" install
 
-# Provide standard aliases for libraries
 if [ -f "$FullScriptPath/../local/lib/x64/vpxmt.lib" ]; then
     cp "$FullScriptPath/../local/lib/x64/vpxmt.lib" "$FullScriptPath/../local/lib/x64/vpx.lib" 2>/dev/null || true
     cp "$FullScriptPath/../local/lib/x64/vpxmt.lib" "$FullScriptPath/../local/lib/vpxmt.lib" 2>/dev/null || true
@@ -594,10 +556,9 @@ fi
             ff_script = os.path.join(libsDir, 'patches', 'build_ffmpeg_win.sh')
             if os.path.isfile(ff_script):
                 try:
-                    with open(ff_script, 'w', encoding='utf-8') as f:
+                    with open(ff_script, 'w', encoding='utf-8', newline='\n') as f:
                         f.write('''#!/bin/bash
-set -ex
-
+set -e
 unset TARGET
 unset _CL_
 export MSYS2_ARG_CONV_EXCL="*"
@@ -618,143 +579,10 @@ echo '#!/bin/sh' > "$FullExecPath/../gas-preprocessor/cpp"
 echo 'cl "$@"' >> "$FullExecPath/../gas-preprocessor/cpp"
 chmod a+x "$FullExecPath/../gas-preprocessor/cpp"
 
-./configure --prefix="$FullScriptPath/../local" $ARCH_PARAM \\
-    --toolchain=msvc \\
-    --extra-cflags="-DCONFIG_SAFE_BITSTREAM_READER=1" \\
-    --extra-cxxflags="-DCONFIG_SAFE_BITSTREAM_READER=1" \\
-    --disable-programs \\
-    --disable-doc \\
-    --disable-network \\
-    --disable-everything \\
-    --enable-ffnvcodec \\
-    --enable-nvdec \\
-    --enable-cuvid \\
-    --enable-hwaccel=av1_d3d11va \\
-    --enable-hwaccel=av1_d3d11va2 \\
-    --enable-hwaccel=av1_dxva2 \\
-    --enable-hwaccel=av1_nvdec \\
-    --enable-hwaccel=h264_d3d11va \\
-    --enable-hwaccel=h264_d3d11va2 \\
-    --enable-hwaccel=h264_dxva2 \\
-    --enable-hwaccel=h264_nvdec \\
-    --enable-hwaccel=hevc_d3d11va \\
-    --enable-hwaccel=hevc_d3d11va2 \\
-    --enable-hwaccel=hevc_dxva2 \\
-    --enable-hwaccel=hevc_nvdec \\
-    --enable-hwaccel=mpeg2_d3d11va \\
-    --enable-hwaccel=mpeg2_d3d11va2 \\
-    --enable-hwaccel=mpeg2_dxva2 \\
-    --enable-hwaccel=mpeg2_nvdec \\
-    --enable-hwaccel=mpeg4_nvdec \\
-    --enable-hwaccel=vp8_nvdec \\
-    --enable-protocol=file \\
-    --enable-libdav1d \\
-    --enable-libopenh264 \\
-    --enable-libopus \\
-    --enable-libvpx \\
-    --enable-decoder=aac \\
-    --enable-decoder=aac_fixed \\
-    --enable-decoder=aac_latm \\
-    --enable-decoder=aasc \\
-    --enable-decoder=ac3 \\
-    --enable-decoder=alac \\
-    --enable-decoder=av1 \\
-    --enable-decoder=av1_cuvid \\
-    --enable-decoder=eac3 \\
-    --enable-decoder=flac \\
-    --enable-decoder=gif \\
-    --enable-decoder=h264 \\
-    --enable-decoder=hevc \\
-    --enable-decoder=libdav1d \\
-    --enable-decoder=libvpx_vp8 \\
-    --enable-decoder=libvpx_vp9 \\
-    --enable-decoder=mp1 \\
-    --enable-decoder=mp1float \\
-    --enable-decoder=mp2 \\
-    --enable-decoder=mp2float \\
-    --enable-decoder=mp3 \\
-    --enable-decoder=mp3adu \\
-    --enable-decoder=mp3adufloat \\
-    --enable-decoder=mp3float \\
-    --enable-decoder=mp3on4 \\
-    --enable-decoder=mp3on4float \\
-    --enable-decoder=mpeg4 \\
-    --enable-decoder=msmpeg4v2 \\
-    --enable-decoder=msmpeg4v3 \\
-    --enable-decoder=opus \\
-    --enable-decoder=pcm_alaw \\
-    --enable-decoder=pcm_f32be \\
-    --enable-decoder=pcm_f32le \\
-    --enable-decoder=pcm_f64be \\
-    --enable-decoder=pcm_f64le \\
-    --enable-decoder=pcm_lxf \\
-    --enable-decoder=pcm_mulaw \\
-    --enable-decoder=pcm_s16be \\
-    --enable-decoder=pcm_s16be_planar \\
-    --enable-decoder=pcm_s16le \\
-    --enable-decoder=pcm_s16le_planar \\
-    --enable-decoder=pcm_s24be \\
-    --enable-decoder=pcm_s24daud \\
-    --enable-decoder=pcm_s24le \\
-    --enable-decoder=pcm_s24le_planar \\
-    --enable-decoder=pcm_s32be \\
-    --enable-decoder=pcm_s32le \\
-    --enable-decoder=pcm_s32le_planar \\
-    --enable-decoder=pcm_s64be \\
-    --enable-decoder=pcm_s64le \\
-    --enable-decoder=pcm_s8 \\
-    --enable-decoder=pcm_s8_planar \\
-    --enable-decoder=pcm_u16be \\
-    --enable-decoder=pcm_u16le \\
-    --enable-decoder=pcm_u24be \\
-    --enable-decoder=pcm_u24le \\
-    --enable-decoder=pcm_u32be \\
-    --enable-decoder=pcm_u32le \\
-    --enable-decoder=pcm_u8 \\
-    --enable-decoder=vorbis \\
-    --enable-decoder=vp8 \\
-    --enable-decoder=wavpack \\
-    --enable-decoder=wmalossless \\
-    --enable-decoder=wmapro \\
-    --enable-decoder=wmav1 \\
-    --enable-decoder=wmav2 \\
-    --enable-decoder=wmavoice \\
-    --enable-filter=atempo \\
-    --enable-encoder=aac \\
-    --enable-encoder=libopus \\
-    --enable-encoder=libopenh264 \\
-    --enable-encoder=libvpx_vp9 \\
-    --enable-encoder=pcm_s16le \\
-    --enable-parser=aac \\
-    --enable-parser=aac_latm \\
-    --enable-parser=flac \\
-    --enable-parser=gif \\
-    --enable-parser=h264 \\
-    --enable-parser=hevc \\
-    --enable-parser=mpeg4video \\
-    --enable-parser=mpegaudio \\
-    --enable-parser=opus \\
-    --enable-parser=vorbis \\
-    --enable-demuxer=aac \\
-    --enable-demuxer=flac \\
-    --enable-demuxer=gif \\
-    --enable-demuxer=h264 \\
-    --enable-demuxer=hevc \\
-    --enable-demuxer=matroska \\
-    --enable-demuxer=m4v \\
-    --enable-demuxer=mov \\
-    --enable-demuxer=mp3 \\
-    --enable-demuxer=ogg \\
-    --enable-demuxer=wav \\
-    --enable-muxer=mp4 \\
-    --enable-muxer=ogg \\
-    --enable-muxer=opus \\
-    --enable-muxer=wav \\
-    --enable-muxer=webm
+./configure --prefix="$FullScriptPath/../local" $ARCH_PARAM --toolchain=msvc --extra-cflags="-DCONFIG_SAFE_BITSTREAM_READER=1" --extra-cxxflags="-DCONFIG_SAFE_BITSTREAM_READER=1" --disable-programs --disable-doc --disable-network --disable-everything --enable-ffnvcodec --enable-nvdec --enable-cuvid --enable-hwaccel=av1_d3d11va --enable-hwaccel=av1_d3d11va2 --enable-hwaccel=av1_dxva2 --enable-hwaccel=av1_nvdec --enable-hwaccel=h264_d3d11va --enable-hwaccel=h264_d3d11va2 --enable-hwaccel=h264_dxva2 --enable-hwaccel=h264_nvdec --enable-hwaccel=hevc_d3d11va --enable-hwaccel=hevc_d3d11va2 --enable-hwaccel=hevc_dxva2 --enable-hwaccel=hevc_nvdec --enable-hwaccel=mpeg2_d3d11va --enable-hwaccel=mpeg2_d3d11va2 --enable-hwaccel=mpeg2_dxva2 --enable-hwaccel=mpeg2_nvdec --enable-hwaccel=mpeg4_nvdec --enable-hwaccel=vp8_nvdec --enable-protocol=file --enable-libdav1d --enable-libopenh264 --enable-libopus --enable-libvpx --enable-decoder=aac --enable-decoder=aac_fixed --enable-decoder=aac_latm --enable-decoder=aasc --enable-decoder=ac3 --enable-decoder=alac --enable-decoder=av1 --enable-decoder=av1_cuvid --enable-decoder=eac3 --enable-decoder=flac --enable-decoder=gif --enable-decoder=h264 --enable-decoder=hevc --enable-decoder=libdav1d --enable-decoder=libvpx_vp8 --enable-decoder=libvpx_vp9 --enable-decoder=mp1 --enable-decoder=mp1float --enable-decoder=mp2 --enable-decoder=mp2float --enable-decoder=mp3 --enable-decoder=mp3adu --enable-decoder=mp3adufloat --enable-decoder=mp3float --enable-decoder=mp3on4 --enable-decoder=mp3on4float --enable-decoder=mpeg4 --enable-decoder=msmpeg4v2 --enable-decoder=msmpeg4v3 --enable-decoder=opus --enable-decoder=pcm_alaw --enable-decoder=pcm_f32be --enable-decoder=pcm_f32le --enable-decoder=pcm_f64be --enable-decoder=pcm_f64le --enable-decoder=pcm_lxf --enable-decoder=pcm_mulaw --enable-decoder=pcm_s16be --enable-decoder=pcm_s16be_planar --enable-decoder=pcm_s16le --enable-decoder=pcm_s16le_planar --enable-decoder=pcm_s24be --enable-decoder=pcm_s24daud --enable-decoder=pcm_s24le --enable-decoder=pcm_s24le_planar --enable-decoder=pcm_s32be --enable-decoder=pcm_s32le --enable-decoder=pcm_s32le_planar --enable-decoder=pcm_s64be --enable-decoder=pcm_s64le --enable-decoder=pcm_s8 --enable-decoder=pcm_s8_planar --enable-decoder=pcm_u16be --enable-decoder=pcm_u16le --enable-decoder=pcm_u24be --enable-decoder=pcm_u24le --enable-decoder=pcm_u32be --enable-decoder=pcm_u32le --enable-decoder=pcm_u8 --enable-decoder=vorbis --enable-decoder=vp8 --enable-decoder=wavpack --enable-decoder=wmalossless --enable-decoder=wmapro --enable-decoder=wmav1 --enable-decoder=wmav2 --enable-decoder=wmavoice --enable-filter=atempo --enable-encoder=aac --enable-encoder=libopus --enable-encoder=libopenh264 --enable-encoder=libvpx_vp9 --enable-encoder=pcm_s16le --enable-parser=aac --enable-parser=aac_latm --enable-parser=flac --enable-parser=gif --enable-parser=h264 --enable-parser=hevc --enable-parser=mpeg4video --enable-parser=mpegaudio --enable-parser=opus --enable-parser=vorbis --enable-demuxer=aac --enable-demuxer=flac --enable-demuxer=gif --enable-demuxer=h264 --enable-demuxer=hevc --enable-demuxer=matroska --enable-demuxer=m4v --enable-demuxer=mov --enable-demuxer=mp3 --enable-demuxer=ogg --enable-demuxer=wav --enable-muxer=mp4 --enable-muxer=ogg --enable-muxer=opus --enable-muxer=wav --enable-muxer=webm
 
 make -j"$NUMBER_OF_PROCESSORS"
-find libavcodec/aarch64 libswresample/aarch64 libswscale/aarch64 libavutil/aarch64 \\
-    -type f -name '*.d' -delete
+find libavcodec/aarch64 libswresample/aarch64 libswscale/aarch64 libavutil/aarch64 -type f -name '*.d' -delete
 make -j"$NUMBER_OF_PROCESSORS" install
 ''')
                 except Exception as e:
