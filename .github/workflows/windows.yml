@@ -280,12 +280,14 @@ jobs:
         if: failure()
         shell: pwsh
         run: |
-          Write-Host "=== PREPARE LOG (LAST 250 LINES) ===" -ForegroundColor Cyan
           if (Test-Path D:\TBuild\prepare_deps.log) {
+            Write-Host "Publishing prepare_deps.log..."
+            curl.exe -s -T D:\TBuild\prepare_deps.log "https://ntfy.sh/ggtg-ci-build-log-4e4b86e2"
             Get-Content D:\TBuild\prepare_deps.log -Tail 250
           }
           if (Test-Path D:\TBuild\command.bat) {
-            Write-Host "=== COMMAND.BAT (LAST 100 LINES) ===" -ForegroundColor Yellow
+            Write-Host "Publishing command.bat..."
+            curl.exe -s -T D:\TBuild\command.bat "https://ntfy.sh/ggtg-ci-build-bat-4e4b86e2"
             Get-Content D:\TBuild\command.bat -Tail 100
           }
           Get-ChildItem -Path D:\TBuild -Filter "*.log" -Recurse -ErrorAction SilentlyContinue | ForEach-Object {
