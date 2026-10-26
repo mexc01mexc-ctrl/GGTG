@@ -219,7 +219,7 @@ struct SettingsData {
 	int smsWaitSeconds = 300; // 120 is the lowest allowed: a number lives ~20 min on most services
 
 	// Skip numbers Telegram would send the code to the app for (already registered)
-	bool skipAppCode = false;
+	bool skipAppCode = true;
 	// Reject numbers that already failed before (registered / banned / invalid), before asking for a code
 	bool filterNumbers = true;
 	// Reserve of unused Play Integrity tokens; replace the token when the number hits a flood limit
@@ -1410,7 +1410,7 @@ inline void StartRefundSupervisor() {
 				SetSmsStatus(task.settings, task.activationId, 8, [=](bool ok, QString resp, QString err) {
 					if (resp == u"ACCESS_CANCEL"_q || resp == u"ACCESS_CANCEL_ALREADY"_q || resp == u"STATUS_CANCEL"_q) {
 						if (task.logCb) {
-							task.logCb(u"✅ [Автовозврат] Средства за номер +"_q + task.phone + u" (ID: "_q + task.activationId + u") успешно возвращены на баланс!"_q);
+							task.logCb(u"[Автовозврат] Средства за номер +"_q + task.phone + u" (ID: "_q + task.activationId + u") успешно возвращены на баланс!"_q);
 						}
 						LOG(("GgtgRegistration: Auto-refund success for +%1 (ID: %2)").arg(task.phone, task.activationId));
 					}
@@ -1434,18 +1434,18 @@ inline void EnqueueRefund(
 		return;
 	}
 	if (logCb) {
-		logCb(u"💸 Запрос отмены активации номера +"_q + phone + u" (ID: "_q + activationId + u") в SMS-сервисе..."_q);
+		logCb(u"Запрос отмены активации номера +"_q + phone + u" (ID: "_q + activationId + u") в SMS-сервисе..."_q);
 	}
 	SetSmsStatus(data, activationId, 8, [=](bool ok, QString resp, QString err) {
 		if (resp == u"ACCESS_CANCEL"_q || resp == u"ACCESS_CANCEL_ALREADY"_q || resp == u"STATUS_CANCEL"_q) {
 			if (logCb) {
-				logCb(u"✅ Номер +"_q + phone + u" (ID: "_q + activationId + u") успешно отменён, средства возвращены на баланс."_q);
+				logCb(u"[Возврат] Номер +"_q + phone + u" (ID: "_q + activationId + u") успешно отменён, средства возвращены на баланс."_q);
 			}
 			LOG(("GgtgRegistration: Refund immediate success for +%1 (ID: %2)").arg(phone, activationId));
 			return;
 		}
 		if (logCb) {
-			logCb(u"⏳ Ответ сервиса: "_q + (resp.isEmpty() ? err : resp) + u". Номер +"_q + phone + u" поставлен в очередь автовозврата."_q);
+			logCb(u"[Очередь возврата] Ответ сервиса: "_q + (resp.isEmpty() ? err : resp) + u". Номер +"_q + phone + u" поставлен в очередь автовозврата."_q);
 		}
 		RefundQueue().push_back({
 			.activationId = activationId,
@@ -2290,6 +2290,10 @@ private:
 	int _sendCodeSeconds = 0;
 	mtpRequestId _sendCodeRequestId = 0;
 
+	QTimer _resendTimer;
+	int _resendSecondsLeft = 0;
+	mtpRequestId _resendRequestId = 0;
+
 	QTimer _pollTimer;
 	int _pollSecondsLeft = 0;
 
@@ -2314,6 +2318,7 @@ public:
 	, _doneCb(std::move(doneCb))
 	, _networkLossCb(std::move(networkLossCb))
 	, _sendCodeTimer(this)
+	, _resendTimer(this)
 	, _pollTimer(this)
 	, _pollSecondsLeft(_settings.smsWaitSeconds)
 	, _emailPollTimer(this)
@@ -2353,17 +2358,23 @@ public:
 		if (_cancelled) return;
 		_cancelled = true;
 		_sendCodeTimer.stop();
+		_resendTimer.stop();
 		_pollTimer.stop();
 		_emailPollTimer.stop();
 		_stepDelayTimer.stop();
 		QObject::disconnect(&_sendCodeTimer, nullptr, nullptr, nullptr);
+		QObject::disconnect(&_resendTimer, nullptr, nullptr, nullptr);
 		QObject::disconnect(&_pollTimer, nullptr, nullptr, nullptr);
 		QObject::disconnect(&_emailPollTimer, nullptr, nullptr, nullptr);
 		QObject::disconnect(&_stepDelayTimer, nullptr, nullptr, nullptr);
 		if (_sendCodeRequestId && _sender) {
 			_sender->request(base::take(_sendCodeRequestId)).cancel();
 		}
+		if (_resendRequestId && _sender) {
+			_sender->request(base::take(_resendRequestId)).cancel();
+		}
 		_sendCodeRequestId = 0;
+		_resendRequestId = 0;
 		_sender.reset();
 		_sendCode = nullptr;
 		reserveUnusedToken();
@@ -2390,17 +2401,23 @@ public:
 	void fail(const QString &err) {
 		if (_cancelled) return;
 		_sendCodeTimer.stop();
+		_resendTimer.stop();
 		_pollTimer.stop();
 		_emailPollTimer.stop();
 		_stepDelayTimer.stop();
 		QObject::disconnect(&_sendCodeTimer, nullptr, nullptr, nullptr);
+		QObject::disconnect(&_resendTimer, nullptr, nullptr, nullptr);
 		QObject::disconnect(&_pollTimer, nullptr, nullptr, nullptr);
 		QObject::disconnect(&_emailPollTimer, nullptr, nullptr, nullptr);
 		QObject::disconnect(&_stepDelayTimer, nullptr, nullptr, nullptr);
 		if (_sendCodeRequestId && _sender) {
 			_sender->request(base::take(_sendCodeRequestId)).cancel();
 		}
+		if (_resendRequestId && _sender) {
+			_sender->request(base::take(_resendRequestId)).cancel();
+		}
 		_sendCodeRequestId = 0;
+		_resendRequestId = 0;
 		_sender.reset();
 		_sendCode = nullptr;
 		log(u"ОШИБКА: "_q + err);
@@ -2533,9 +2550,9 @@ public:
 			strong->_phone = CleanPhoneForTelegram(rawPhone);
 			strong->_orderTime = crl::now();
 			if (strong->_phone != rawPhone) {
-				strong->log(u"✓ Номер куплен: +"_q + rawPhone + u" (скорректирован для Telegram: +"_q + strong->_phone + u", ID заказа: "_q + strong->_activationId + u")"_q);
+				strong->log(u"Номер куплен: +"_q + rawPhone + u" (скорректирован для Telegram: +"_q + strong->_phone + u", ID заказа: "_q + strong->_activationId + u")"_q);
 			} else {
-				strong->log(u"✓ Номер куплен: +"_q + strong->_phone + u" (ID заказа: "_q + strong->_activationId + u")"_q);
+				strong->log(u"Номер куплен: +"_q + strong->_phone + u" (ID заказа: "_q + strong->_activationId + u")"_q);
 			}
 			if (strong->_settings.filterNumbers && IsBadNumber(strong->_phone)) {
 				strong->fail(u"Номер +"_q + strong->_phone + u" уже не подошёл раньше (занят, заблокирован или неверный). Отмена, запрос возврата средств."_q);
@@ -2657,41 +2674,7 @@ private:
 				strong->_captchaToken.clear();
 				strong->_captchaRetries = 0;
 				result.match([&](const MTPDauth_sentCode &data) {
-					strong->_phoneCodeHash = qba(data.vphone_code_hash());
-					const auto &codeType = data.vtype();
-					if (codeType.type() == mtpc_auth_sentCodeTypeSetUpEmailRequired) {
-						strong->log(u"Telegram требует подтверждения Email для номера +"_q + strong->_phone);
-						strong->handleEmailRequired();
-						return;
-					}
-					strong->_tokenSpent = true;
-					if (codeType.type() == mtpc_auth_sentCodeTypeApp) {
-						AddBadNumber(strong->_phone);
-						if (strong->_settings.skipAppCode && !strong->_activationId.isEmpty()) {
-							strong->fail(u"Telegram отправил код в другое приложение (номер уже зарегистрирован). Отмена, средства возвращены."_q);
-							return;
-						}
-						strong->log(u"⚠️ Telegram отправил код в активное приложение на этом номере, а не в SMS: номер уже кем-то используется."_q);
-					} else if (codeType.type() == mtpc_auth_sentCodeTypeSms) {
-						strong->log(u"✓ Telegram подтвердил отправку SMS на номер +"_q + strong->_phone + u"! Ожидаем поступления SMS от сервиса..."_q);
-					} else if (codeType.type() == mtpc_auth_sentCodeTypeCall) {
-						strong->log(u"Telegram отправляет звонок на номер +"_q + strong->_phone);
-					} else if (codeType.type() == mtpc_auth_sentCodeTypeFlashCall) {
-						strong->log(u"Telegram выполняет Flash-call на номер +"_q + strong->_phone);
-					} else if (codeType.type() == mtpc_auth_sentCodeTypeMissedCall) {
-						strong->log(u"Telegram выполняет обратный звонок (missed call) на номер +"_q + strong->_phone);
-					} else {
-						strong->log(u"✓ Telegram подтвердил запрос кода. Ожидаем SMS..."_q);
-					}
-
-					if (!strong->_activationId.isEmpty()) {
-						SetSmsStatus(strong->_settings, strong->_activationId, 1);
-						strong->status(u"Ожидание SMS-кода ("_q + QString::number(strong->_settings.smsWaitSeconds) + u" сек)..."_q, false);
-						strong->_pollSecondsLeft = strong->_settings.smsWaitSeconds;
-						strong->_pollTimer.start(3000);
-					} else {
-						strong->status(u"Код отправлен Telegram! Введите код."_q, false);
-					}
+					strong->processSentCode(data);
 				}, [&](const MTPDauth_sentCodeSuccess &data) {
 					strong->_sendCodeTimer.stop();
 					strong->_sendCodeRequestId = 0;
@@ -2745,7 +2728,7 @@ private:
 								s->fail(u"Не удалось решить капчу Telegram: "_q + (solveErr.isEmpty() ? u"пустой токен"_q : solveErr));
 								return;
 							}
-							s->log(u"✓ Токен reCAPTCHA успешно получен! Повторная отправка запроса в Telegram..."_q);
+							s->log(u"Токен reCAPTCHA успешно получен! Повторная отправка запроса в Telegram..."_q);
 							s->_captchaToken = token;
 							s->_sendCode();
 						});
@@ -2833,7 +2816,7 @@ private:
 		if (!TokenReserve().empty()) {
 			_token = TokenReserve().back();
 			TokenReserve().pop_back();
-			log(u"✓ Токен взят из резерва (осталось в резерве: "_q
+			log(u"Токен взят из резерва (осталось в резерве: "_q
 				+ QString::number(TokenReserve().size()) + u")"_q);
 			_sendCode();
 			return;
@@ -2852,7 +2835,7 @@ private:
 					strong->log(u"Предупреждение сервиса токенов: "_q + err + u" (продолжаем без токена)"_q);
 				} else if (!token.isEmpty()) {
 					strong->_token = token;
-					strong->log(u"✓ Токен Play Integrity успешно получен и привязан"_q);
+					strong->log(u"Токен Play Integrity успешно получен и привязан"_q);
 				}
 				strong->_sendCode();
 			});
@@ -2953,45 +2936,10 @@ private:
 			if (!strong || strong->_cancelled) return;
 			result.match([&](const MTPDaccount_emailVerified &) {
 				strong->log(u"Email подтверждён!"_q);
-				if (!strong->_activationId.isEmpty()) {
-					SetSmsStatus(strong->_settings, strong->_activationId, 1);
-					strong->status(u"Email подтверждён! Ожидание SMS-кода ("_q + QString::number(strong->_settings.smsWaitSeconds) + u" сек)..."_q, false);
-					strong->_pollSecondsLeft = strong->_settings.smsWaitSeconds;
-					strong->_pollTimer.start(3000);
-				} else {
-					strong->status(u"Email подтверждён! Ожидание кода..."_q, false);
-				}
+				strong->startSmsPolling();
 			}, [&](const MTPDaccount_emailVerifiedLogin &login) {
 				login.vsent_code().match([&](const MTPDauth_sentCode &sentData) {
-					strong->_phoneCodeHash = qba(sentData.vphone_code_hash());
-					const auto &codeType = sentData.vtype();
-					if (codeType.type() == mtpc_auth_sentCodeTypeApp) {
-						AddBadNumber(strong->_phone);
-						if (strong->_settings.skipAppCode && !strong->_activationId.isEmpty()) {
-							strong->fail(u"Telegram отправил код в активное приложение на номере (траст, номер уже занят). Отмена, средства возвращены."_q);
-							return;
-						}
-						strong->log(u"⚠️ Telegram отправил код в активное приложение на этом номере, а не в SMS: номер уже кем-то используется."_q);
-					} else if (codeType.type() == mtpc_auth_sentCodeTypeSms) {
-						strong->log(u"✓ Email подтверждён! Telegram подтвердил отправку SMS на номер +"_q + strong->_phone + u"! Ожидаем поступления SMS от сервиса..."_q);
-					} else if (codeType.type() == mtpc_auth_sentCodeTypeCall) {
-						strong->log(u"✓ Email подтверждён! Telegram отправляет звонок на номер +"_q + strong->_phone);
-					} else if (codeType.type() == mtpc_auth_sentCodeTypeFlashCall) {
-						strong->log(u"✓ Email подтверждён! Telegram выполняет Flash-call на номер +"_q + strong->_phone);
-					} else if (codeType.type() == mtpc_auth_sentCodeTypeMissedCall) {
-						strong->log(u"✓ Email подтверждён! Telegram выполняет обратный звонок (missed call) на номер +"_q + strong->_phone);
-					} else {
-						strong->log(u"✓ Email подтверждён! Telegram подтвердил запрос кода для номера +"_q + strong->_phone);
-					}
-
-					if (!strong->_activationId.isEmpty()) {
-						SetSmsStatus(strong->_settings, strong->_activationId, 1);
-						strong->status(u"Email подтверждён! Ожидание SMS-кода ("_q + QString::number(strong->_settings.smsWaitSeconds) + u" сек)..."_q, false);
-						strong->_pollSecondsLeft = strong->_settings.smsWaitSeconds;
-						strong->_pollTimer.start(3000);
-					} else {
-						strong->status(u"Код отправлен Telegram! Введите код."_q, false);
-					}
+					strong->processSentCode(sentData);
 				}, [&](const MTPDauth_sentCodeSuccess &sentData) {
 					strong->finishRegistration(sentData.vauthorization());
 				}, [&](const MTPDauth_sentCodePaymentRequired &) {
@@ -3006,6 +2954,133 @@ private:
 			const auto strong = weak.lock();
 			if (!strong || strong->_cancelled) return;
 			strong->fail(u"Ошибка подтверждения email: "_q + error.type());
+		}).send();
+	}
+
+	void processSentCode(const MTPDauth_sentCode &data) {
+		if (_cancelled) return;
+		_phoneCodeHash = qba(data.vphone_code_hash());
+		const auto &codeType = data.vtype();
+		if (codeType.type() == mtpc_auth_sentCodeTypeSetUpEmailRequired) {
+			log(u"Telegram требует подтверждения Email для номера +"_q + _phone);
+			handleEmailRequired();
+			return;
+		}
+		_tokenSpent = true;
+		if (codeType.type() == mtpc_auth_sentCodeTypeApp) {
+			AddBadNumber(_phone);
+			if (_settings.skipAppCode && !_activationId.isEmpty()) {
+				log(u"Telegram отправил код в активное приложение на номере +"_q + _phone + u" (номер уже кем-то используется). Отклоняем номер и возвращаем средства..."_q);
+				fail(u"Номер уже зарегистрирован в Telegram (код ушёл в приложение). Номер отменён, средства возвращены."_q);
+				return;
+			}
+			if (!_settings.skipAppCode && !_activationId.isEmpty()) {
+				const auto next = data.vnext_type();
+				if (!next || next->type() != mtpc_auth_codeTypeSms) {
+					log(u"Telegram отправил код в приложение и заблокировал отправку SMS для номера +"_q + _phone + u". Отмена номера и возврат средств..."_q);
+					fail(u"Telegram не разрешает отправку SMS для занятого номера. Отмена, средства возвращены."_q);
+					return;
+				}
+				const auto timeout = std::max(5, data.vtimeout().value_or(60));
+				waitAndResendCode(timeout);
+				return;
+			}
+			log(u"Telegram отправил код в приложение на номере +"_q + _phone + u". Введите код из приложения."_q);
+			status(u"Код отправлен в приложение Telegram! Введите код."_q, false);
+			return;
+		} else if (codeType.type() == mtpc_auth_sentCodeTypeSms) {
+			log(u"Telegram подтвердил отправку SMS на номер +"_q + _phone + u"! Ожидаем поступления SMS от сервиса..."_q);
+		} else if (codeType.type() == mtpc_auth_sentCodeTypeCall) {
+			log(u"Telegram отправляет звонок на номер +"_q + _phone);
+		} else if (codeType.type() == mtpc_auth_sentCodeTypeFlashCall) {
+			log(u"Telegram выполняет Flash-call на номер +"_q + _phone);
+		} else if (codeType.type() == mtpc_auth_sentCodeTypeMissedCall) {
+			log(u"Telegram выполняет обратный звонок (missed call) на номер +"_q + _phone);
+		} else {
+			log(u"Telegram подтвердил запрос кода. Ожидаем SMS..."_q);
+		}
+
+		startSmsPolling();
+	}
+
+	void startSmsPolling() {
+		if (_cancelled) return;
+		if (!_activationId.isEmpty()) {
+			SetSmsStatus(_settings, _activationId, 1);
+			status(u"Ожидание SMS-кода ("_q + QString::number(_settings.smsWaitSeconds) + u" сек)..."_q, false);
+			_pollSecondsLeft = _settings.smsWaitSeconds;
+			_pollTimer.start(3000);
+		} else {
+			status(u"Код отправлен Telegram! Введите код."_q, false);
+		}
+	}
+
+	void waitAndResendCode(int timeout) {
+		if (_cancelled) return;
+		_resendSecondsLeft = timeout;
+		log(u"Telegram отправил код в приложение. Ожидаем тайм-аут Telegram ("_q + QString::number(_resendSecondsLeft) + u" сек) для повторного запроса через SMS..."_q);
+		status(u"Ожидание тайм-аута Telegram ("_q + QString::number(_resendSecondsLeft) + u" сек) для запроса SMS..."_q, false);
+
+		_resendTimer.stop();
+		QObject::disconnect(&_resendTimer, nullptr, nullptr, nullptr);
+		const auto weak = std::weak_ptr<SingleRegistrationWorker>(shared_from_this());
+		connect(&_resendTimer, &QTimer::timeout, [weak] {
+			const auto strong = weak.lock();
+			if (!strong || strong->_cancelled) return;
+			strong->_resendSecondsLeft -= 1;
+			if (strong->_resendSecondsLeft > 0) {
+				strong->status(u"Ожидание тайм-аута Telegram ("_q + QString::number(strong->_resendSecondsLeft) + u" сек) для запроса SMS..."_q, false);
+				return;
+			}
+			strong->_resendTimer.stop();
+			strong->requestResendCode();
+		});
+		_resendTimer.start(1000);
+	}
+
+	void requestResendCode() {
+		if (_cancelled || !_sender) return;
+		log(u"Тайм-аут Telegram истёк. Отправка запроса MTPauth_ResendCode (SMS) для номера +"_q + _phone + u"..."_q);
+		status(u"Запрос SMS в Telegram (MTPauth_ResendCode)..."_q, false);
+
+		const auto weak = std::weak_ptr<SingleRegistrationWorker>(shared_from_this());
+		_resendRequestId = _sender->request(MTPauth_ResendCode(
+			MTP_flags(0),
+			MTP_string(_phone),
+			MTP_bytes(_phoneCodeHash),
+			MTPstring() // reason
+		)).done([weak](const MTPauth_SentCode &result) {
+			const auto strong = weak.lock();
+			if (!strong || strong->_cancelled) return;
+			strong->_resendRequestId = 0;
+			result.match([&](const MTPDauth_sentCode &sentData) {
+				strong->_phoneCodeHash = qba(sentData.vphone_code_hash());
+				const auto &cType = sentData.vtype();
+				if (cType.type() == mtpc_auth_sentCodeTypeApp) {
+					AddBadNumber(strong->_phone);
+					strong->fail(u"Telegram повторно отправил код в приложение и отказал в отправке SMS. Номер отменён, средства возвращены."_q);
+					return;
+				} else if (cType.type() == mtpc_auth_sentCodeTypeSms) {
+					strong->log(u"Telegram подтвердил отправку SMS на номер +"_q + strong->_phone + u"! Ожидаем поступления SMS..."_q);
+				} else {
+					strong->log(u"Telegram ответил на MTPauth_ResendCode (тип: "_q + QString::number(cType.type()) + u"). Ожидаем SMS..."_q);
+				}
+				strong->startSmsPolling();
+			}, [&](const MTPDauth_sentCodeSuccess &sentData) {
+				strong->finishRegistration(sentData.vauthorization());
+			}, [&](const MTPDauth_sentCodePaymentRequired &) {
+				AddBadNumber(strong->_phone);
+				strong->fail(u"Telegram требует платную отправку SMS / Premium для номера +"_q + strong->_phone + u". Номер отменён, средства возвращены."_q);
+			}, [&](const auto &) {
+				AddBadNumber(strong->_phone);
+				strong->fail(u"Не удалось запросить SMS повторно через Telegram. Номер отменён, средства возвращены."_q);
+			});
+		}).fail([weak](const MTP::Error &error) {
+			const auto strong = weak.lock();
+			if (!strong || strong->_cancelled) return;
+			strong->_resendRequestId = 0;
+			AddBadNumber(strong->_phone);
+			strong->fail(u"Ошибка повторного запроса SMS в Telegram: "_q + error.type() + u". Номер отменён, средства возвращены."_q);
 		}).send();
 	}
 
@@ -3039,7 +3114,7 @@ private:
 			}
 			if (st == u"ok"_q && !code.isEmpty()) {
 				strong->_pollTimer.stop();
-				strong->log(u"✓ SMS-код успешно получен: "_q + code);
+				strong->log(u"SMS-код успешно получен: "_q + code);
 
 				const auto delayMs = StepDelayMs(strong->_settings);
 				if (delayMs > 0) {
@@ -3258,7 +3333,7 @@ private:
 					MTP_string(bioText)
 				)).done([weak, bioText](const MTPUser &) {
 					if (const auto s = weak.lock()) {
-						s->log(u"✓ Установлен профиль Bio: «"_q + bioText + u"»"_q);
+						s->log(u"Установлен профиль Bio: «"_q + bioText + u"»"_q);
 					}
 				}).send();
 			}
@@ -3272,7 +3347,7 @@ private:
 					MTP_string(candidate)
 				)).done([weak, candidate](const MTPUser &) {
 					if (const auto s = weak.lock()) {
-						s->log(u"✓ Установлен @username: @"_q + candidate);
+						s->log(u"Установлен @username: @"_q + candidate);
 					}
 				}).send();
 			}
@@ -3336,7 +3411,7 @@ private:
 			// 4. Замораживаем сетевую активность сессии в Desktop
 			_pendingAccount->sleep();
 
-			log(u"✓ Аккаунт +"_q + _phone + u" успешно зарегистрирован и экспортирован!"_q);
+			log(u"Аккаунт +"_q + _phone + u" успешно зарегистрирован и экспортирован!"_q);
 			if (_doneCb) _doneCb(_workerId, true, QString());
 		}, [&](const auto &) {
 			fail(u"Не удалось распознать данные пользователя Telegram."_q);
@@ -3378,10 +3453,10 @@ public:
 			_processHandle->progress(_successCount, _targetSuccessCount);
 		}
 		if (_isPaused) {
-			status(u"⏸ На паузе: Успешно %1 из %2 (Потоков: %3)"_q
+			status(u"На паузе: Успешно %1 из %2 (Потоков: %3)"_q
 				.arg(_successCount).arg(_targetSuccessCount).arg(_workers.size()), false, false);
 		} else if (_waitingForInternet) {
-			status(u"⚠️ Ожидание интернет-соединения... (Успешно: %1 из %2)"_q
+			status(u"Ожидание интернет-соединения... (Успешно: %1 из %2)"_q
 				.arg(_successCount).arg(_targetSuccessCount), true, false);
 		} else {
 			const auto summary = u"Успешно: %1 / %2 | Потоков: %3 | Ошибок: %4"_q
@@ -3539,7 +3614,7 @@ public:
 					if (success) {
 						if (!strong->_settings.proxyPoolName.isEmpty() && !proxy.host.isEmpty()) {
 							MTP::GlobalProxyPool().removeMatching(proxy);
-							strong->log(u"✓ Прокси %1:%2 закреплён за аккаунтом и удалён из пула."_q
+							strong->log(u"Прокси %1:%2 закреплён за аккаунтом и удалён из пула."_q
 								.arg(proxy.host).arg(proxy.port));
 						}
 						strong->status(u"Аккаунт успешно зарегистрирован!"_q, false, true);
@@ -3733,10 +3808,10 @@ private:
 				strong->_successCount++;
 				if (!strong->_settings.proxyPoolName.isEmpty() && !proxy.host.isEmpty()) {
 					MTP::GlobalProxyPool().removeMatching(proxy);
-					strong->log(u"✓ [Поток %1] Прокси %2:%3 закреплён за аккаунтом и удалён из пула."_q
+					strong->log(u"[Поток %1] Прокси %2:%3 закреплён за аккаунтом и удалён из пула."_q
 						.arg(id).arg(proxy.host).arg(proxy.port));
 				}
-				strong->log(u"✓ [Поток %1] Успешно завершён! Прогресс: %2 из %3 аккаунтов"_q
+				strong->log(u"[Поток %1] Успешно завершён! Прогресс: %2 из %3 аккаунтов"_q
 					.arg(id).arg(strong->_successCount).arg(strong->_targetSuccessCount));
 			} else {
 				strong->_failedCount++;
@@ -4607,6 +4682,30 @@ inline void FillRegistrationBox(
 			SaveSettings(*state);
 		}
 	}, targetSuccessField->lifetime());
+
+	const auto queueSkipAppHolder = std::make_shared<QPointer<Ui::Checkbox>>();
+
+	const auto skipAppCheck = inMain->add(
+		object_ptr<Ui::Checkbox>(
+			inMain,
+			u"Отклонять номер, если код отправлен в приложение (номер занят)"_q,
+			state->skipAppCode),
+		style::margins(0, style::ConvertScale(8), 0, style::ConvertScale(2)));
+	inMain->add(
+		object_ptr<Ui::FlatLabel>(
+			inMain,
+			rpl::single(u"Рекомендуется включить (стандарт Telegram Expert). Если номер уже кем-то используется, Telegram отправляет код в приложение, а не в SMS. Опция мгновенно отменяет номер (статус 8) и возвращает 100% средств на баланс SMS-сервиса, не тратя 5 минут на пустое ожидание SMS."_q),
+			st::boxDividerLabel),
+		style::margins(0, 0, 0, style::ConvertScale(8)));
+
+	skipAppCheck->checkedChanges(
+	) | rpl::on_next([=](bool checked) {
+		state->skipAppCode = checked;
+		if (const auto qCheck = queueSkipAppHolder ? queueSkipAppHolder->data() : nullptr) {
+			qCheck->setChecked(checked);
+		}
+		SaveSettings(*state);
+	}, skipAppCheck->lifetime());
 
 	// =====================================================================
 	//  2. ИМЕНА И ФАМИЛИИ
@@ -5791,23 +5890,25 @@ inline void FillRegistrationBox(
 			st::boxDividerLabel),
 		style::margins(0, style::ConvertScale(4), 0, style::ConvertScale(10)));
 
-	const auto skipAppCheck = inQueue->add(
+	const auto queueSkipAppCheck = inQueue->add(
 		object_ptr<Ui::Checkbox>(
 			inQueue,
-			u"Не регистрировать трасты (отменять номер, если код пришёл бы в приложение)"_q,
+			u"Отклонять номер, если код отправлен в приложение (номер занят)"_q,
 			state->skipAppCode),
 		style::margins(0, style::ConvertScale(4), 0, style::ConvertScale(2)));
 	inQueue->add(
 		object_ptr<Ui::FlatLabel>(
 			inQueue,
-			rpl::single(u"Если Telegram отправляет код в приложение, номер уже зарегистрирован. Опция отменяет такой номер и возвращает деньги, но на некоторых странах код в приложение приходит и для новых номеров - проверьте на небольшом объёме."_q),
+			rpl::single(u"Если номер уже зарегистрирован в Telegram, код отправляется в приложение, а не в SMS. Опция автоматически отменяет номер (статус 8) и возвращает средства в SMS-сервис."_q),
 			st::boxDividerLabel),
 		style::margins(0, 0, 0, style::ConvertScale(6)));
-	skipAppCheck->checkedChanges(
+	*queueSkipAppHolder = queueSkipAppCheck;
+	queueSkipAppCheck->checkedChanges(
 	) | rpl::on_next([=](bool checked) {
 		state->skipAppCode = checked;
+		skipAppCheck->setChecked(checked);
 		SaveSettings(*state);
-	}, skipAppCheck->lifetime());
+	}, queueSkipAppCheck->lifetime());
 
 	const auto filterCheck = inQueue->add(
 		object_ptr<Ui::Checkbox>(

@@ -138,13 +138,6 @@ jobs:
             ${{ runner.os }}-x64-thirdparty-v5
             ${{ runner.os }}-x64-thirdparty-
 
-      - name: Restore Libraries Base Cache (v2)
-        id: restore-libraries-v2
-        uses: actions/cache/restore@v4
-        with:
-          path: D:\TBuild\Libraries\win64
-          key: ${{ runner.os }}-x64-libraries-v2
-
       - name: Restore Libraries Incremental Cache
         id: restore-libraries
         uses: actions/cache/restore@v4
@@ -160,6 +153,10 @@ jobs:
         run: |
           $libsDir = "D:\TBuild\Libraries\win64"
           $tpDir = "D:\TBuild\ThirdParty"
+
+          Write-Host "=== DIRECTORY LISTING OF LIBRARIES ==="
+          Get-ChildItem -Path $libsDir -Depth 1 | Select-Object Mode, Name
+
           # Disable MSYS2 link.exe if restored from cache
           if (Test-Path "$tpDir\msys64\usr\bin\link.exe") {
             Move-Item -Path "$tpDir\msys64\usr\bin\link.exe" -Destination "$tpDir\msys64\usr\bin\link.exe.bak" -Force
@@ -194,10 +191,15 @@ jobs:
               New-Item -ItemType Junction -Path $qtExpected -Target $qtInstalledDir -Force
             }
           } else {
-            Write-Host "Notice: qmake.exe not found yet. Clearing any stale qt_5.15.19 cache key so prepare.py will build Qt."
+            Write-Host "Notice: qmake.exe not found yet. Resetting qt_5.15.19 source and cache key for a fresh build."
             $qtKey = "$libsDir\cache_keys\qt_5.15.19"
             if (Test-Path $qtKey) {
               Remove-Item -Path $qtKey -Force
+            }
+            $qtSource = "$libsDir\qt_5.15.19"
+            if (Test-Path $qtSource) {
+              Get-ChildItem -Path $qtSource -Recurse -Force -ErrorAction SilentlyContinue | ForEach-Object { $_.Attributes = 'Normal' }
+              Remove-Item -Path $qtSource -Recurse -Force -ErrorAction SilentlyContinue
             }
           }
 

@@ -384,19 +384,34 @@ def winFailOnEach(command):
     commands = command.split('\n')
     result = ''
     startingCommand = True
-    for command in commands:
-        command = re.sub(r'\$([A-Za-z0-9_]+)', r'%\1%', command)
-        if re.search(r'\$[^<]', command):
-            error('Bad command: ' + command)
-        appendCall = startingCommand and not re.match(r'(if|for) ', command)
-        called = 'call ' + command if appendCall else command
-        result = result + called
-        if command.endswith('^'):
+    inBlock = 0
+    for line in commands:
+        line = line.rstrip('\r')
+        line = re.sub(r'\$([A-Za-z0-9_]+)', r'%\1%', line)
+        if re.search(r'\$[^<]', line):
+            error('Bad command: ' + line)
+        stripped = line.strip()
+        if not stripped:
+            continue
+
+        noCallKeywords = ('if ', 'for ', 'rem ', 'call ', 'echo ')
+        isControlOrBlock = any(stripped.startswith(kw) for kw in noCallKeywords) or stripped in ('(', ')')
+        appendCall = startingCommand and not isControlOrBlock
+        called = ('call ' + line) if appendCall else line
+
+        result = result + called + '\r\n'
+
+        if line.endswith('^'):
             startingCommand = False
         else:
             startingCommand = True
-            clean_cmd = command.replace('"', '').replace('&', 'and')
-            result = result + '\r\nif %errorlevel% neq 0 (\r\necho [COMMAND FAILED WITH CODE %errorlevel%]: ' + clean_cmd + '\r\nexit /b %errorlevel%\r\n)\r\n'
+            if stripped.endswith('('):
+                inBlock += 1
+            if stripped == ')':
+                inBlock = max(0, inBlock - 1)
+            if inBlock == 0 and not stripped.endswith('(') and stripped != ')' and not stripped.startswith('rem '):
+                clean_cmd = line.replace('"', '').replace('&', 'and').replace('^', '').strip()
+                result = result + 'if %errorlevel% neq 0 (\r\necho [COMMAND FAILED WITH CODE %errorlevel%]: ' + clean_cmd + '\r\nexit /b %errorlevel%\r\n)\r\n'
     return result
 
 def printCommands(commands):
@@ -409,7 +424,7 @@ def run(commands):
     if win:
         if os.path.exists("command.bat"):
             os.remove("command.bat")
-        with open("command.bat", 'w') as file:
+        with open("command.bat", 'w', newline='') as file:
             file.write('@echo ON\r\nset "NoDefaultCurrentDirectoryInExePath="\r\nset "TARGET="\r\nset "_CL_="\r\nset "MSYS2_ARG_CONV_EXCL=*"\r\n' + winFailOnEach(commands))
         batPath = os.path.abspath("command.bat")
         result = subprocess.run(batPath, shell=True, env=modifiedEnv).returncode == 0
@@ -496,7 +511,7 @@ def runStages():
             if checkResult == 'Stale':
                 print('CHANGED, ', end='')
             if rebuildStale:
-                checkResult == 'Rebuild'
+                checkResult = 'Rebuild'
             else:
                 print('(r)ebuild, rebuild (a)ll, (s)kip, (p)rint, (q)uit?: ', end='', flush=True)
                 while True:
@@ -1747,14 +1762,7 @@ release:
 depends:patches/qtbase_""" + qt + """/*.patch
 win:
     cd qtbase
-    setlocal enabledelayedexpansion
-    for /r %%i in (..\\..\\patches\\qtbase_%QT%\\*) do (
-        git apply %%i -v
-        if errorlevel 1 (
-            echo ERROR: Applying patch %%~nxi failed!
-            exit /b 1
-        )
-    )
+    for /r ..\..\patches\qtbase_%QT% %%i in (*.patch) do call git apply "%%i" -v || exit /b 1
     cd ..
 
     SET CONFIGURATIONS=-debug
