@@ -600,11 +600,11 @@ fi
 
 echo "Using MSBuild at: $MSBUILD_BIN"
 if [ -n "$MSBUILD_BIN" ]; then
-    "$MSBUILD_BIN" vpx.sln -m -t:Build -p:Configuration=Release -p:Platform=x64 || \
-    "$MSBUILD_BIN" vpx.sln -m -t:Build -p:Configuration=Release -p:Platform=x64 -p:PlatformToolset=v144 || \
-    cmd.exe /c "msbuild.exe vpx.sln /m /t:Build /p:Configuration=Release /p:Platform=x64"
+    "$MSBUILD_BIN" vpx.vcxproj -m -p:Configuration=Release -p:Platform=x64 -p:PreferredToolArchitecture=x64 || \
+    "$MSBUILD_BIN" vpx.sln -m -t:Build -p:Configuration=Release -p:Platform=x64 -p:PreferredToolArchitecture=x64 || \
+    cmd.exe //c "msbuild.exe vpx.vcxproj /m /p:Configuration=Release /p:Platform=x64 /p:PreferredToolArchitecture=x64"
 else
-    cmd.exe /c "msbuild.exe vpx.sln /m /t:Build /p:Configuration=Release /p:Platform=x64"
+    cmd.exe //c "msbuild.exe vpx.vcxproj /m /p:Configuration=Release /p:Platform=x64 /p:PreferredToolArchitecture=x64"
 fi
 
 echo "=== INSTALLING LIBVPX ==="

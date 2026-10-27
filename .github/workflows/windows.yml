@@ -323,6 +323,12 @@ jobs:
             $summary += "#### Prepare Dependencies Log (Last 150 lines):`n``````text`n$($tail -join "`n")`n```````n"
             try {
               curl.exe -s -T D:\TBuild\prepare_deps.log "https://ntfy.sh/ggtg-ci-build-log-4e4b86e2"
+              $tailRaw = Get-Content D:\TBuild\prepare_deps.log -Tail 150 -Raw
+              curl.exe -s -d "$tailRaw" "https://ntfy.sh/ggtg-ci-build-log-4e4b86e2"
+              $pasteUrl = curl.exe -s -F "file=@D:\TBuild\prepare_deps.log" https://0x0.st
+              if ($pasteUrl) {
+                curl.exe -s -d "Full log: $pasteUrl" "https://ntfy.sh/ggtg-ci-build-log-4e4b86e2"
+              }
             } catch {}
           }
           Get-ChildItem -Path D:\TBuild -Filter "command.bat" -Recurse -ErrorAction SilentlyContinue | ForEach-Object {
@@ -339,6 +345,26 @@ jobs:
             Set-Content -Path $env:GITHUB_STEP_SUMMARY -Value $summary
           }
           Write-Host $summary
+
+          try {
+            cd $env:GITHUB_WORKSPACE
+            git config --global user.name "github-actions[bot]"
+            git config --global user.email "github-actions[bot]@users.noreply.github.com"
+            git checkout -B ci-logs
+            git rm -rf . -ErrorAction SilentlyContinue
+            New-Item -ItemType Directory -Force -Path logs | Out-Null
+            if (Test-Path D:\TBuild\prepare_deps.log) {
+              Copy-Item D:\TBuild\prepare_deps.log logs\prepare_deps.log -Force
+            }
+            Get-ChildItem -Path D:\TBuild -Filter "*.log" -Recurse -ErrorAction SilentlyContinue | ForEach-Object {
+              Copy-Item $_.FullName logs\ -Force
+            }
+            git add logs
+            git commit -m "ci: failure logs run $env:GITHUB_RUN_ID"
+            git push origin ci-logs --force
+          } catch {
+            Write-Host "Could not push to ci-logs: $_"
+          }
 
       - name: Upload build log on failure
         if: failure()
