@@ -163,7 +163,11 @@ jobs:
           if (Test-Path "$tpDir\msys64\usr\bin\link.exe") {
             Move-Item -Path "$tpDir\msys64\usr\bin\link.exe" -Destination "$tpDir\msys64\usr\bin\link.exe.bak" -Force
           }
-          # Ensure yasm and msbuild exist in cached MSYS2 as well
+          # Ensure corrupt fake msbuild.exe text wrapper is deleted
+          if (Test-Path "$tpDir\msys64\usr\bin\msbuild.exe") {
+            Remove-Item -Path "$tpDir\msys64\usr\bin\msbuild.exe" -Force
+          }
+          # Ensure yasm exists in MSYS2 and toolchain paths
           $yasm = (Get-Command yasm.exe -ErrorAction SilentlyContinue).Source
           if (-not $yasm -and (Test-Path "C:\ProgramData\chocolatey\bin\yasm.exe")) {
             $yasm = "C:\ProgramData\chocolatey\bin\yasm.exe"
@@ -174,10 +178,15 @@ jobs:
           $vswhere = Join-Path ${env:ProgramFiles(x86)} 'Microsoft Visual Studio\Installer\vswhere.exe'
           if (Test-Path $vswhere) {
             $msbuild = & $vswhere -latest -requires Microsoft.Component.MSBuild -find MSBuild\**\Bin\MSBuild.exe | Select-Object -First 1
-            if ($msbuild -and (Test-Path "$tpDir\msys64\usr\bin")) {
-              $bashPath = $msbuild.Replace('\', '/').Replace('C:', '/c')
-              Set-Content -Path "$tpDir\msys64\usr\bin\msbuild" -Value "#!/bin/sh`nexec `"$bashPath`" `"`$@`"" -NoNewline
-              Set-Content -Path "$tpDir\msys64\usr\bin\msbuild.exe" -Value "#!/bin/sh`nexec `"$bashPath`" `"`$@`"" -NoNewline
+            if ($msbuild) {
+              $msbuildDir = Split-Path $msbuild
+              if ($yasm) {
+                Copy-Item -Path $yasm -Destination "$msbuildDir\yasm.exe" -Force -ErrorAction SilentlyContinue
+              }
+              if (Test-Path "$tpDir\msys64\usr\bin") {
+                $bashPath = $msbuild.Replace('\', '/').Replace('C:', '/c')
+                Set-Content -Path "$tpDir\msys64\usr\bin\msbuild" -Value "#!/bin/sh`nexec `"$bashPath`" `"`$@`"" -NoNewline
+              }
             }
           }
 

@@ -567,7 +567,10 @@ popd > /dev/null
 
 ./configure --prefix="$FullScriptPath/../local" --target="$TOOLCHAIN" --as=yasm --disable-examples --disable-unit-tests --disable-tools --disable-docs --enable-static-msvcrt --enable-vp8 --enable-vp9 --enable-webm-io --size-limit=4096x4096
 
-make -j"$NUMBER_OF_PROCESSORS"
+if ! make -j"$NUMBER_OF_PROCESSORS"; then
+    echo "=== LIBVPX MAKE RETRY WITH VERBOSE OUTPUT ==="
+    make V=1 || exit 1
+fi
 make -j"$NUMBER_OF_PROCESSORS" install
 
 if [ -f "$FullScriptPath/../local/lib/x64/vpxmt.lib" ]; then
