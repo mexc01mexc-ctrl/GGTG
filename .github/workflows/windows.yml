@@ -127,6 +127,9 @@ jobs:
           Add-Content -Path $env:GITHUB_ENV -Value "CHERE_INVOKING=enabled_from_arguments"
           Add-Content -Path $env:GITHUB_ENV -Value "MSYS2_PATH_TYPE=inherit"
 
+          # 5. Disable git autocrlf so cloned bash scripts and makefiles keep LF endings
+          git config --global core.autocrlf false
+
       - name: Prepare build tree
         shell: pwsh
         run: |

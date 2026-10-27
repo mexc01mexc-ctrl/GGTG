@@ -549,11 +549,12 @@ def runStages():
             safeRemoveTree(target_dir)
         if win and stage['name'] == 'libvpx':
             vpx_script = os.path.join(libsDir, 'patches', 'build_libvpx_win.sh')
-            if os.path.isfile(vpx_script):
-                try:
-                    with open(vpx_script, 'w', encoding='utf-8', newline='\n') as f:
-                        f.write('''#!/bin/bash
+            try:
+                os.makedirs(os.path.dirname(vpx_script), exist_ok=True)
+                with open(vpx_script, 'w', encoding='utf-8', newline='\n') as f:
+                    f.write('''#!/bin/bash
 set -e
+set -x
 unset TARGET
 unset _CL_
 export MSYS2_ARG_CONV_EXCL="*"
@@ -565,22 +566,31 @@ pushd $(dirname "$0") > /dev/null
 FullScriptPath=$(pwd)
 popd > /dev/null
 
+echo "=== FIXING PERMISSIONS AND CRLF LINE ENDINGS ==="
+find . -type f \\( -name "*.sh" -o -name "*.pl" -o -name "configure" \\) -exec sed -i 's/\\r$//' {} + 2>/dev/null || true
+find . -type f \\( -name "*.sh" -o -name "*.pl" -o -name "configure" \\) -exec chmod +x {} + 2>/dev/null || true
+
 echo "=== CONFIGURING LIBVPX ==="
-./configure --prefix="$FullScriptPath/../local" \
-    --target="$TOOLCHAIN" \
-    --as=yasm \
-    --disable-examples \
-    --disable-unit-tests \
-    --disable-tools \
-    --disable-docs \
-    --enable-static-msvcrt \
-    --enable-vp8 \
-    --enable-vp9 \
-    --enable-webm-io \
+./configure --prefix="$FullScriptPath/../local" \\
+    --target="$TOOLCHAIN" \\
+    --as=yasm \\
+    --disable-examples \\
+    --disable-unit-tests \\
+    --disable-tools \\
+    --disable-docs \\
+    --enable-static-msvcrt \\
+    --enable-vp8 \\
+    --enable-vp9 \\
+    --enable-webm-io \\
     --size-limit=4096x4096
 
+echo "=== POST-CONFIG CLEANUP ==="
+find . -type f \\( -name "*.sh" -o -name "*.pl" -o -name "*.mk" -o -name "Makefile" \\) -exec sed -i 's/\\r$//' {} + 2>/dev/null || true
+find . -type f \\( -name "*.sh" -o -name "*.pl" \\) -exec chmod +x {} + 2>/dev/null || true
+
 echo "=== GENERATING LIBVPX MAKEFILES AND PROJECTS ==="
-make NO_LAUNCH_DEVENV=1 -j"$NUMBER_OF_PROCESSORS"
+make NO_LAUNCH_DEVENV=1 V=1 -j1 target=libs || make V=1 target=libs || true
+make NO_LAUNCH_DEVENV=1 V=1 -j1 target=solution || make V=1 target=solution || true
 
 echo "=== LOCATING MSBUILD ==="
 MSBUILD_BIN=""
@@ -589,7 +599,7 @@ if command -v msbuild.exe >/dev/null 2>&1; then
 elif command -v MSBuild.exe >/dev/null 2>&1; then
     MSBUILD_BIN="MSBuild.exe"
 else
-    for p in "/c/Program Files/Microsoft Visual Studio"/*/*/MSBuild/Current/Bin/MSBuild.exe \
+    for p in "/c/Program Files/Microsoft Visual Studio"/*/*/MSBuild/Current/Bin/MSBuild.exe \\
              "/c/Program Files (x86)/Microsoft Visual Studio"/*/*/MSBuild/Current/Bin/MSBuild.exe; do
         if [ -f "$p" ]; then
             MSBUILD_BIN="$p"
@@ -599,41 +609,81 @@ else
 fi
 
 echo "Using MSBuild at: $MSBUILD_BIN"
-if [ -n "$MSBUILD_BIN" ]; then
-    "$MSBUILD_BIN" vpx.vcxproj -m -p:Configuration=Release -p:Platform=x64 -p:PreferredToolArchitecture=x64 || \
-    "$MSBUILD_BIN" vpx.sln -m -t:Build -p:Configuration=Release -p:Platform=x64 -p:PreferredToolArchitecture=x64 || \
-    cmd.exe //c "msbuild.exe vpx.vcxproj /m /p:Configuration=Release /p:Platform=x64 /p:PreferredToolArchitecture=x64"
+if [ -f vpx.vcxproj ]; then
+    echo "=== COMPILING vpx.vcxproj ==="
+    if [ -n "$MSBUILD_BIN" ]; then
+        "$MSBUILD_BIN" vpx.vcxproj -m -p:Configuration=Release -p:Platform=x64 -p:PreferredToolArchitecture=x64 || \\
+        cmd.exe //c "msbuild.exe vpx.vcxproj /m /p:Configuration=Release /p:Platform=x64 /p:PreferredToolArchitecture=x64"
+    else
+        cmd.exe //c "msbuild.exe vpx.vcxproj /m /p:Configuration=Release /p:Platform=x64 /p:PreferredToolArchitecture=x64"
+    fi
+elif [ -f vpx.sln ]; then
+    echo "=== COMPILING vpx.sln ==="
+    if [ -n "$MSBUILD_BIN" ]; then
+        "$MSBUILD_BIN" vpx.sln -m -t:Build -p:Configuration=Release -p:Platform=x64 -p:PreferredToolArchitecture=x64 || \\
+        cmd.exe //c "msbuild.exe vpx.sln /m /p:Configuration=Release /p:Platform=x64 /p:PreferredToolArchitecture=x64"
+    else
+        cmd.exe //c "msbuild.exe vpx.sln /m /p:Configuration=Release /p:Platform=x64 /p:PreferredToolArchitecture=x64"
+    fi
 else
-    cmd.exe //c "msbuild.exe vpx.vcxproj /m /p:Configuration=Release /p:Platform=x64 /p:PreferredToolArchitecture=x64"
+    echo "=== FALLBACK: NO VCXPROJ FOUND, RUNNING MAKE DEFAULT ==="
+    make V=1 || true
 fi
 
 echo "=== INSTALLING LIBVPX ==="
-make NO_LAUNCH_DEVENV=1 -j"$NUMBER_OF_PROCESSORS" install
+make NO_LAUNCH_DEVENV=1 install || make install || true
 
 mkdir -p "$FullScriptPath/../local/lib/x64" "$FullScriptPath/../local/lib"
-if [ -f "x64/Release/vpxmt.lib" ]; then
-    cp -f "x64/Release/vpxmt.lib" "$FullScriptPath/../local/lib/x64/vpxmt.lib" 2>/dev/null || true
-    cp -f "x64/Release/vpxmt.lib" "$FullScriptPath/../local/lib/x64/vpx.lib" 2>/dev/null || true
-    cp -f "x64/Release/vpxmt.lib" "$FullScriptPath/../local/lib/vpxmt.lib" 2>/dev/null || true
-    cp -f "x64/Release/vpxmt.lib" "$FullScriptPath/../local/lib/vpx.lib" 2>/dev/null || true
-fi
+mkdir -p "$FullScriptPath/../local/include/vpx"
+
+# Copy headers
+cp -f vpx/*.h "$FullScriptPath/../local/include/vpx/" 2>/dev/null || true
+cp -f vpx_version.h "$FullScriptPath/../local/include/vpx/" 2>/dev/null || true
+
+# Find compiled .lib files and copy to expected destinations
+for libpath in x64/Release/*.lib Release/*.lib ./*.lib; do
+    if [ -f "$libpath" ]; then
+        echo "Found compiled library at $libpath"
+        cp -f "$libpath" "$FullScriptPath/../local/lib/x64/" 2>/dev/null || true
+        cp -f "$libpath" "$FullScriptPath/../local/lib/" 2>/dev/null || true
+    fi
+done
+
+# Ensure standard aliases exist
 if [ -f "$FullScriptPath/../local/lib/x64/vpxmt.lib" ]; then
     cp -f "$FullScriptPath/../local/lib/x64/vpxmt.lib" "$FullScriptPath/../local/lib/x64/vpx.lib" 2>/dev/null || true
     cp -f "$FullScriptPath/../local/lib/x64/vpxmt.lib" "$FullScriptPath/../local/lib/vpxmt.lib" 2>/dev/null || true
     cp -f "$FullScriptPath/../local/lib/x64/vpxmt.lib" "$FullScriptPath/../local/lib/vpx.lib" 2>/dev/null || true
+elif [ -f "$FullScriptPath/../local/lib/x64/vpx.lib" ]; then
+    cp -f "$FullScriptPath/../local/lib/x64/vpx.lib" "$FullScriptPath/../local/lib/x64/vpxmt.lib" 2>/dev/null || true
+    cp -f "$FullScriptPath/../local/lib/x64/vpx.lib" "$FullScriptPath/../local/lib/vpx.lib" 2>/dev/null || true
+    cp -f "$FullScriptPath/../local/lib/x64/vpx.lib" "$FullScriptPath/../local/lib/vpxmt.lib" 2>/dev/null || true
 fi
 
-echo "=== LIBVPX BUILD COMPLETE ==="
+# Ensure pkgconfig exists
+mkdir -p "$FullScriptPath/../local/lib/pkgconfig"
+if [ -f vpx.pc ]; then
+    cp -f vpx.pc "$FullScriptPath/../local/lib/pkgconfig/vpx.pc" 2>/dev/null || true
+fi
+
+# Verify the library is built
+if [ ! -f "$FullScriptPath/../local/lib/x64/vpxmt.lib" ] && [ ! -f "$FullScriptPath/../local/lib/x64/vpx.lib" ]; then
+    echo "ERROR: Neither vpxmt.lib nor vpx.lib was produced!"
+    exit 1
+fi
+
+echo "=== LIBVPX BUILD SUCCESSFUL ==="
 ''')
-                except Exception as e:
-                    print('[WARN] Could not patch build_libvpx_win.sh:', e)
+            except Exception as e:
+                print('[WARN] Could not patch build_libvpx_win.sh:', e)
         elif win and stage['name'] == 'ffmpeg':
             ff_script = os.path.join(libsDir, 'patches', 'build_ffmpeg_win.sh')
-            if os.path.isfile(ff_script):
-                try:
-                    with open(ff_script, 'w', encoding='utf-8', newline='\n') as f:
-                        f.write('''#!/bin/bash
+            try:
+                os.makedirs(os.path.dirname(ff_script), exist_ok=True)
+                with open(ff_script, 'w', encoding='utf-8', newline='\n') as f:
+                    f.write('''#!/bin/bash
 set -e
+set -x
 unset TARGET
 unset _CL_
 export MSYS2_ARG_CONV_EXCL="*"
@@ -644,6 +694,10 @@ pushd $(dirname "$0") > /dev/null
 FullScriptPath=$(pwd)
 popd > /dev/null
 
+echo "=== FIXING PERMISSIONS AND CRLF FOR FFMPEG AND NV-CODEC ==="
+find "$FullScriptPath/.." -maxdepth 3 -type f \\( -name "*.sh" -o -name "configure" \\) -exec sed -i 's/\\r$//' {} + 2>/dev/null || true
+find "$FullScriptPath/.." -maxdepth 3 -type f \\( -name "*.sh" -o -name "configure" \\) -exec chmod +x {} + 2>/dev/null || true
+
 cd "$FullScriptPath/../nv-codec-headers"
 make PREFIX="$FullScriptPath/../local" install
 cd "$FullScriptPath/../ffmpeg"
@@ -653,15 +707,17 @@ export PATH="$FullExecPath/../gas-preprocessor:$PATH"
 echo '#!/bin/sh' > "$FullExecPath/../gas-preprocessor/cpp"
 echo 'cl "$@"' >> "$FullExecPath/../gas-preprocessor/cpp"
 chmod a+x "$FullExecPath/../gas-preprocessor/cpp"
+sed -i 's/\\r$//' "$FullExecPath/../gas-preprocessor/cpp" 2>/dev/null || true
 
 ./configure --prefix="$FullScriptPath/../local" $ARCH_PARAM --toolchain=msvc --extra-cflags="-DCONFIG_SAFE_BITSTREAM_READER=1" --extra-cxxflags="-DCONFIG_SAFE_BITSTREAM_READER=1" --disable-programs --disable-doc --disable-network --disable-everything --enable-ffnvcodec --enable-nvdec --enable-cuvid --enable-hwaccel=av1_d3d11va --enable-hwaccel=av1_d3d11va2 --enable-hwaccel=av1_dxva2 --enable-hwaccel=av1_nvdec --enable-hwaccel=h264_d3d11va --enable-hwaccel=h264_d3d11va2 --enable-hwaccel=h264_dxva2 --enable-hwaccel=h264_nvdec --enable-hwaccel=hevc_d3d11va --enable-hwaccel=hevc_d3d11va2 --enable-hwaccel=hevc_dxva2 --enable-hwaccel=hevc_nvdec --enable-hwaccel=mpeg2_d3d11va --enable-hwaccel=mpeg2_d3d11va2 --enable-hwaccel=mpeg2_dxva2 --enable-hwaccel=mpeg2_nvdec --enable-hwaccel=mpeg4_nvdec --enable-hwaccel=vp8_nvdec --enable-protocol=file --enable-libdav1d --enable-libopenh264 --enable-libopus --enable-libvpx --enable-decoder=aac --enable-decoder=aac_fixed --enable-decoder=aac_latm --enable-decoder=aasc --enable-decoder=ac3 --enable-decoder=alac --enable-decoder=av1 --enable-decoder=av1_cuvid --enable-decoder=eac3 --enable-decoder=flac --enable-decoder=gif --enable-decoder=h264 --enable-decoder=hevc --enable-decoder=libdav1d --enable-decoder=libvpx_vp8 --enable-decoder=libvpx_vp9 --enable-decoder=mp1 --enable-decoder=mp1float --enable-decoder=mp2 --enable-decoder=mp2float --enable-decoder=mp3 --enable-decoder=mp3adu --enable-decoder=mp3adufloat --enable-decoder=mp3float --enable-decoder=mp3on4 --enable-decoder=mp3on4float --enable-decoder=mpeg4 --enable-decoder=msmpeg4v2 --enable-decoder=msmpeg4v3 --enable-decoder=opus --enable-decoder=pcm_alaw --enable-decoder=pcm_f32be --enable-decoder=pcm_f32le --enable-decoder=pcm_f64be --enable-decoder=pcm_f64le --enable-decoder=pcm_lxf --enable-decoder=pcm_mulaw --enable-decoder=pcm_s16be --enable-decoder=pcm_s16be_planar --enable-decoder=pcm_s16le --enable-decoder=pcm_s16le_planar --enable-decoder=pcm_s24be --enable-decoder=pcm_s24daud --enable-decoder=pcm_s24le --enable-decoder=pcm_s24le_planar --enable-decoder=pcm_s32be --enable-decoder=pcm_s32le --enable-decoder=pcm_s32le_planar --enable-decoder=pcm_s64be --enable-decoder=pcm_s64le --enable-decoder=pcm_s8 --enable-decoder=pcm_s8_planar --enable-decoder=pcm_u16be --enable-decoder=pcm_u16le --enable-decoder=pcm_u24be --enable-decoder=pcm_u24le --enable-decoder=pcm_u32be --enable-decoder=pcm_u32le --enable-decoder=pcm_u8 --enable-decoder=vorbis --enable-decoder=vp8 --enable-decoder=wavpack --enable-decoder=wmalossless --enable-decoder=wmapro --enable-decoder=wmav1 --enable-decoder=wmav2 --enable-decoder=wmavoice --enable-filter=atempo --enable-encoder=aac --enable-encoder=libopus --enable-encoder=libopenh264 --enable-encoder=libvpx_vp9 --enable-encoder=pcm_s16le --enable-parser=aac --enable-parser=aac_latm --enable-parser=flac --enable-parser=gif --enable-parser=h264 --enable-parser=hevc --enable-parser=mpeg4video --enable-parser=mpegaudio --enable-parser=opus --enable-parser=vorbis --enable-demuxer=aac --enable-demuxer=flac --enable-demuxer=gif --enable-demuxer=h264 --enable-demuxer=hevc --enable-demuxer=matroska --enable-demuxer=m4v --enable-demuxer=mov --enable-demuxer=mp3 --enable-demuxer=ogg --enable-demuxer=wav --enable-muxer=mp4 --enable-muxer=ogg --enable-muxer=opus --enable-muxer=wav --enable-muxer=webm
 
 make -j"$NUMBER_OF_PROCESSORS"
-find libavcodec/aarch64 libswresample/aarch64 libswscale/aarch64 libavutil/aarch64 -type f -name '*.d' -delete
+find libavcodec/aarch64 libswresample/aarch64 libswscale/aarch64 libavutil/aarch64 -type f -name '*.d' -delete 2>/dev/null || true
 make -j"$NUMBER_OF_PROCESSORS" install
+echo "=== FFMPEG BUILD COMPLETE ==="
 ''')
-                except Exception as e:
-                    print('[WARN] Could not patch build_ffmpeg_win.sh:', e)
+            except Exception as e:
+                print('[WARN] Could not patch build_ffmpeg_win.sh:', e)
         os.chdir(stage['directory'])
         if not run(commands):
             print(prefix + ': FAILED')
