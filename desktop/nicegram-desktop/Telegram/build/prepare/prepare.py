@@ -588,9 +588,27 @@ echo "=== POST-CONFIG CLEANUP ==="
 find . -type f \\( -name "*.sh" -o -name "*.pl" -o -name "*.mk" -o -name "Makefile" \\) -exec sed -i 's/\\r$//' {} + 2>/dev/null || true
 find . -type f \\( -name "*.sh" -o -name "*.pl" \\) -exec chmod +x {} + 2>/dev/null || true
 
+# Explicitly invoke scripts via perl/bash to prevent Windows CreateProcess 193 errors
+sed -i 's|\\$(SRC_PATH_BARE)/build/make/rtcd.pl|perl \\$(SRC_PATH_BARE)/build/make/rtcd.pl|g' libs.mk 2>/dev/null || true
+sed -i 's|\\$(SRC_PATH_BARE)/build/make/gen_msvs_def.sh|bash \\$(SRC_PATH_BARE)/build/make/gen_msvs_def.sh|g' libs.mk 2>/dev/null || true
+sed -i 's|\\$(GEN_VCPROJ)|bash \\$(GEN_VCPROJ)|g' libs.mk 2>/dev/null || true
+sed -i 's|\\$(SRC_PATH_BARE)/build/make/gen_msvs_sln.sh|bash \\$(SRC_PATH_BARE)/build/make/gen_msvs_sln.sh|g' solution.mk 2>/dev/null || true
+sed -i 's|\\$(SRC_PATH_BARE)/build/make/version.sh|bash \\$(SRC_PATH_BARE)/build/make/version.sh|g' libs.mk 2>/dev/null || true
+sed -i '1iSHELL := /usr/bin/bash' Makefile 2>/dev/null || true
+echo "SHELL := /usr/bin/bash" >> config.mk 2>/dev/null || true
+
+# Pre-generate configuration and rtcd headers
+perl build/make/rtcd.pl --arch=x86_64 --sym=vp8_rtcd --config=libs-x86_64-win64-vs17.mk vp8/common/rtcd_defs.pl > vp8_rtcd.h 2>/dev/null || true
+perl build/make/rtcd.pl --arch=x86_64 --sym=vp9_rtcd --config=libs-x86_64-win64-vs17.mk vp9/common/vp9_rtcd_defs.pl > vp9_rtcd.h 2>/dev/null || true
+perl build/make/rtcd.pl --arch=x86_64 --sym=vpx_dsp_rtcd --config=libs-x86_64-win64-vs17.mk vpx_dsp/vpx_dsp_rtcd_defs.pl > vpx_dsp_rtcd.h 2>/dev/null || true
+perl build/make/rtcd.pl --arch=x86_64 --sym=vpx_scale_rtcd --config=libs-x86_64-win64-vs17.mk vpx_scale/vpx_scale_rtcd.pl > vpx_scale_rtcd.h 2>/dev/null || true
+grep -E "#define [A-Z0-9_]+ [01]" vpx_config.h | awk '{print $2 " equ " $3}' > vpx_config.asm 2>/dev/null || true
+bash build/make/version.sh . vpx_version.h 2>/dev/null || true
+
 echo "=== GENERATING LIBVPX MAKEFILES AND PROJECTS ==="
-make NO_LAUNCH_DEVENV=1 V=1 -j1 target=libs || make V=1 target=libs || true
-make NO_LAUNCH_DEVENV=1 V=1 -j1 target=solution || make V=1 target=solution || true
+make SHELL=/usr/bin/bash NO_LAUNCH_DEVENV=1 V=1 -j1 target=libs || make SHELL=/usr/bin/bash V=1 target=libs || true
+make SHELL=/usr/bin/bash NO_LAUNCH_DEVENV=1 V=1 -j1 target=solution || make SHELL=/usr/bin/bash V=1 target=solution || true
+make SHELL=/usr/bin/bash NO_LAUNCH_DEVENV=1 V=1 -j1 || true
 
 echo "=== LOCATING MSBUILD ==="
 MSBUILD_BIN=""

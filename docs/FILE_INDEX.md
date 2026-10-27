@@ -38,7 +38,7 @@
 | `data/scraped_members_db.h` | 17 KB | Written to cWorkingDir()+"tdata/ggtg_db/" as one small JSON index plus one JSON file per base, entirely separate from the account's own encrypted local storage (see BaseDbPath in the .cpp) so a many-thousand-row base never bloats/slows down unrelated saves. A … |
 | `data/sms_prompts.cpp` | 9 KB | Same directory as scraped_members_db.cpp's DbDir(), duplicated locally rather than exported from there - both files independently keep their own small ReadJson/WriteJson pair, matching this codebase's existing one-file-per-concern style for the "tdata/ggtg_db/… |
 | `data/sms_prompts.h` | 4 KB | Saved, reusable "Отправка SMS" message texts (see settings/sms_campaign.cpp's SetupTextSection), kept in the same "tdata/ggtg_db/" directory as the bases/sent-tracking (see scraped_members_db.h) - the local equivalent of tg-web-panel's own per-owner "sms-promp… |
-| `history/ggtg_sms_templates_panel.h` | 11 KB |  |
+| `history/ggtg_sms_templates_panel.h` | 14 KB | Exactly 3 horizontal bars for reordering |
 | `main/session_duplicate.cpp` | 20 KB | How many times to re-poll auth.exportLoginToken on the throwaway side after auth.acceptLoginToken has already succeeded on the real account's side, waiting for the server to reflect that - the accept call's own response already confirms the server processed it… |
 | `main/session_duplicate.h` | 4 KB | Mints a genuinely new, independent MTProto session for `account`'s already-logged-in user - its own auth key, its own entry in Telegram's "Active Sessions" (revocable there on its own, unaffected by anything that happens to `account`'s own session) - via the s… |
 | `mtproto/proxy_pool.cpp` | 9 KB |  |

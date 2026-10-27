@@ -271,7 +271,7 @@ jobs:
           _CL_: ""
           MSYS2_ARG_CONV_EXCL: "*"
         run: |
-          & cmd.exe /c "call build\prepare\win.bat silent" | Tee-Object -FilePath "D:\TBuild\prepare_deps.log"
+          & cmd.exe /c "call build\prepare\win.bat silent 2>&1" | Tee-Object -FilePath "D:\TBuild\prepare_deps.log"
           if ($LASTEXITCODE -ne 0) {
             exit $LASTEXITCODE
           }
