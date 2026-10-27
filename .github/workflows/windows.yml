@@ -208,6 +208,17 @@ jobs:
             }
           }
 
+          # Ensure zlib aliases (libzs.lib / libzsd.lib) exist
+          if (Test-Path "$libsDir\zlib\Release\zlibstatic.lib") {
+            Copy-Item "$libsDir\zlib\Release\zlibstatic.lib" "$libsDir\zlib\Release\libzs.lib" -Force
+          }
+          if (Test-Path "$libsDir\zlib\Debug\zlibstaticd.lib") {
+            Copy-Item "$libsDir\zlib\Debug\zlibstaticd.lib" "$libsDir\zlib\Debug\libzsd.lib" -Force
+          }
+          if (Test-Path "$libsDir\zlib\Debug\zlibstatic.lib") {
+            Copy-Item "$libsDir\zlib\Debug\zlibstatic.lib" "$libsDir\zlib\Debug\libzsd.lib" -Force
+          }
+
           # Ensure git clone doesn't fail on half-baked directories
           $incomplete = @(
             @{ Dir = "$libsDir\libvpx"; Check = @("$libsDir\local\lib\x64\vpxmt.lib", "$libsDir\local\lib\vpx.lib", "$libsDir\local\include\vpx\vpx_codec.h") },
@@ -231,15 +242,18 @@ jobs:
       - name: Prepare dependencies
         id: prepare-deps
         working-directory: D:\TBuild\tdesktop\Telegram
+        shell: pwsh
         env:
+          Platform: "x64"
           QT: "5.15.19"
+          TARGET: ""
+          _CL_: ""
+          MSYS2_ARG_CONV_EXCL: "*"
         run: |
-          set Platform=x64
-          set QT=5.15.19
-          set TARGET=
-          set _CL_=
-          set MSYS2_ARG_CONV_EXCL=*
-          call build\prepare\win.bat silent
+          & cmd.exe /c "call build\prepare\win.bat silent" | Tee-Object -FilePath "D:\TBuild\prepare_deps.log"
+          if ($LASTEXITCODE -ne 0) {
+            exit $LASTEXITCODE
+          }
 
       - name: Save ThirdParty Cache
         if: always() && steps.restore-thirdparty.outputs.cache-hit != 'true'
@@ -284,39 +298,29 @@ jobs:
         if: failure()
         shell: pwsh
         run: |
+          Write-Host "=== COLLECTING FAILURE LOGS ===" -ForegroundColor Red
+          $summary = "### Windows Build Failure Diagnostics`n`n"
           if (Test-Path D:\TBuild\prepare_deps.log) {
-            Write-Host "Publishing prepare_deps.log..."
-            curl.exe -s -T D:\TBuild\prepare_deps.log "https://ntfy.sh/ggtg-ci-build-log-4e4b86e2"
-            Get-Content D:\TBuild\prepare_deps.log -Tail 250
+            $tail = Get-Content D:\TBuild\prepare_deps.log -Tail 150
+            $summary += "#### Prepare Dependencies Log (Last 150 lines):`n``````text`n$($tail -join "`n")`n```````n"
+            try {
+              curl.exe -s -T D:\TBuild\prepare_deps.log "https://ntfy.sh/ggtg-ci-build-log-4e4b86e2"
+            } catch {}
           }
-          if (Test-Path D:\TBuild\command.bat) {
-            Write-Host "Publishing command.bat..."
-            curl.exe -s -T D:\TBuild\command.bat "https://ntfy.sh/ggtg-ci-build-bat-4e4b86e2"
-            Get-Content D:\TBuild\command.bat -Tail 100
+          Get-ChildItem -Path D:\TBuild -Filter "command.bat" -Recurse -ErrorAction SilentlyContinue | ForEach-Object {
+            $batTail = Get-Content $_.FullName -Tail 50
+            $summary += "#### Failed command.bat ($($_.FullName)):`n``````batch`n$($batTail -join "`n")`n```````n"
           }
           Get-ChildItem -Path D:\TBuild -Filter "*.log" -Recurse -ErrorAction SilentlyContinue | ForEach-Object {
-            Write-Host "=== LOG: $($_.FullName) ===" -ForegroundColor Magenta
-            Get-Content $_.FullName -Tail 80
-          }
-          try {
-            $dest = "$env:GITHUB_WORKSPACE\ci_logs"
-            New-Item -ItemType Directory -Force -Path $dest | Out-Null
-            if (Test-Path D:\TBuild\prepare_deps.log) {
-              Copy-Item D:\TBuild\prepare_deps.log "$dest\prepare_deps.log" -Force
+            if ($_.FullName -ne "D:\TBuild\prepare_deps.log") {
+              $logTail = Get-Content $_.FullName -Tail 60
+              $summary += "#### Log: $($_.Name):`n``````text`n$($logTail -join "`n")`n```````n"
             }
-            if (Test-Path D:\TBuild\command.bat) {
-              Copy-Item D:\TBuild\command.bat "$dest\command.bat" -Force
-            }
-            cd $env:GITHUB_WORKSPACE
-            git config user.name "github-actions[bot]"
-            git config user.email "github-actions[bot]@users.noreply.github.com"
-            git checkout -B ci-debug-branch
-            git add -A ci_logs
-            git commit -m "debug: ci logs run $env:GITHUB_RUN_ID"
-            git push origin ci-debug-branch --force
-          } catch {
-            Write-Host "Could not push to ci-debug-branch: $_"
           }
+          if ($env:GITHUB_STEP_SUMMARY) {
+            Set-Content -Path $env:GITHUB_STEP_SUMMARY -Value $summary
+          }
+          Write-Host $summary
 
       - name: Upload build log on failure
         if: failure()

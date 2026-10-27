@@ -790,8 +790,11 @@ win:
         -DZLIB_MINIZIP_BUILD_SHARED=OFF ^
         -DZLIB_MINIZIP_BUILD_TESTING=OFF
     cmake --build . --config Debug
+    if exist Debug\zlibstaticd.lib copy /y Debug\zlibstaticd.lib Debug\libzsd.lib
+    if exist Debug\zlibstatic.lib copy /y Debug\zlibstatic.lib Debug\libzsd.lib
 release:
     cmake --build . --config Release
+    if exist Release\zlibstatic.lib copy /y Release\zlibstatic.lib Release\libzs.lib
 mac:
     CFLAGS="$MIN_VER $UNGUARDED" LDFLAGS="$MIN_VER" ./configure \\
         --static \\
