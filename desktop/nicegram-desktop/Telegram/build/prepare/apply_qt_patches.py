@@ -18,7 +18,7 @@ def main():
     for p in patches:
         patch_name = os.path.basename(p)
         print(f'  -> Applying {patch_name} ...', flush=True)
-        res = subprocess.run(['git', 'apply', p, '-v'])
+        res = subprocess.run(['git', 'apply', '--ignore-space-change', '--ignore-whitespace', p, '-v'])
         if res.returncode != 0:
             print(f'[ERROR] Failed to apply {patch_name} with exit code {res.returncode}')
             return res.returncode

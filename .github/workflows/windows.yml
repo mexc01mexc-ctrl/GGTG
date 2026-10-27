@@ -296,6 +296,11 @@ jobs:
             $qtCmake = "$qtPrefix\lib\cmake\Qt5\Qt5Config.cmake"
             if (Test-Path $qtCmake) {
               Write-Host "Valid Qt 5.15.19 installation confirmed at $qtPrefix."
+              New-Item -ItemType Directory -Force -Path "$libsDir\cache_keys" -ErrorAction SilentlyContinue | Out-Null
+              Set-Content -Path "$libsDir\cache_keys\qt_5.15.19" -Value "cached" -ErrorAction SilentlyContinue
+              if (-not (Test-Path "$libsDir\qt_5.15.19")) {
+                New-Item -ItemType Directory -Force -Path "$libsDir\qt_5.15.19" -ErrorAction SilentlyContinue | Out-Null
+              }
             } else {
               Write-Host "Qt 5.15.19 is not fully installed ($qtCmake missing)."
               Write-Host "Purging any stale Qt cache key, directory, and junctions..."

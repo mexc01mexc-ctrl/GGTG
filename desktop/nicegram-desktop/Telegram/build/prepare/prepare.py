@@ -268,15 +268,16 @@ def checkCacheKey(stage):
     if not 'key' in stage:
         error('Key not set in stage: ' + stage['name'])
     key = keyPath(stage)
-    if not os.path.exists(os.path.join(stage['directory'], stage['name'])):
-        return 'NotFound'
     if stage['name'].startswith('qt_'):
         qt_ver = stage['name'][3:]
         qt_prefix = os.path.join(stage['directory'], 'Qt-' + qt_ver)
         if win:
             qt_cmake = os.path.join(qt_prefix, 'lib', 'cmake', 'Qt5', 'Qt5Config.cmake')
-            if not os.path.exists(qt_cmake):
-                return 'NotFound'
+            if os.path.exists(qt_cmake):
+                return 'Good'
+            return 'NotFound'
+    if not os.path.exists(os.path.join(stage['directory'], stage['name'])):
+        return 'NotFound'
     if not os.path.exists(key):
         return 'Stale'
     with open(key, 'r') as file:
