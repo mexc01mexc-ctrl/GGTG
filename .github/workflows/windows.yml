@@ -130,6 +130,12 @@ jobs:
           # 5. Disable git autocrlf so cloned bash scripts and makefiles keep LF endings
           git config --global core.autocrlf false
 
+          # 6. Put MSYS2 usr/bin in PATH before System32 so bash/sh invoke MSYS2 rather than WSL stub
+          if (Test-Path "C:\msys64\usr\bin") {
+            Add-Content -Path $env:GITHUB_PATH -Value "C:\msys64\usr\bin"
+            $env:PATH = "C:\msys64\usr\bin;$env:PATH"
+          }
+
       - name: Prepare build tree
         shell: pwsh
         run: |

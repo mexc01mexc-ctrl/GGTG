@@ -594,28 +594,29 @@ sed -i 's|SRC_PATH=.*|SRC_PATH=.|g' libs-*.mk solution-*.mk Makefile 2>/dev/null
 sed -i 's|\\$(SRC_PATH_BARE)/\\$(target|./\\$(target|g' Makefile 2>/dev/null || true
 sed -i 's|\\$(SRC_PATH_BARE)/build|./build|g' Makefile libs.mk solution.mk 2>/dev/null || true
 
-# Explicitly invoke scripts via perl/bash to prevent Windows CreateProcess 193 errors
+# Explicitly invoke scripts via perl//usr/bin/bash to prevent Windows CreateProcess 193 and WSL bash errors
 sed -i 's|\\$(SRC_PATH_BARE)/build/make/rtcd.pl|perl ./build/make/rtcd.pl|g' libs.mk 2>/dev/null || true
-sed -i 's|\\$(SRC_PATH_BARE)/build/make/gen_msvs_def.sh|bash ./build/make/gen_msvs_def.sh|g' libs.mk 2>/dev/null || true
-sed -i 's|\\$(GEN_VCPROJ)|bash \\$(GEN_VCPROJ)|g' libs.mk 2>/dev/null || true
-sed -i 's|\\$(SRC_PATH_BARE)/build/make/gen_msvs_sln.sh|bash ./build/make/gen_msvs_sln.sh|g' solution.mk 2>/dev/null || true
-sed -i 's|\\$(SRC_PATH_BARE)/build/make/version.sh|bash ./build/make/version.sh|g' libs.mk 2>/dev/null || true
-sed -i 's|GEN_VCPROJ=.*|GEN_VCPROJ=bash ./build/make/gen_msvs_vcxproj.sh|g' libs-*.mk 2>/dev/null || true
+sed -i 's|\\$(SRC_PATH_BARE)/build/make/gen_msvs_def.sh|/usr/bin/bash ./build/make/gen_msvs_def.sh|g' libs.mk 2>/dev/null || true
+sed -i 's|\\$(GEN_VCPROJ)|/usr/bin/bash \\$(GEN_VCPROJ)|g' libs.mk 2>/dev/null || true
+sed -i 's|\\$(SRC_PATH_BARE)/build/make/gen_msvs_sln.sh|/usr/bin/bash ./build/make/gen_msvs_sln.sh|g' solution.mk 2>/dev/null || true
+sed -i 's|\\$(SRC_PATH_BARE)/build/make/version.sh|/usr/bin/bash ./build/make/version.sh|g' libs.mk 2>/dev/null || true
+sed -i 's|GEN_VCPROJ=.*|GEN_VCPROJ=/usr/bin/bash ./build/make/gen_msvs_vcxproj.sh|g' libs-*.mk 2>/dev/null || true
 sed -i '1iSHELL := /usr/bin/bash' Makefile 2>/dev/null || true
 echo "SHELL := /usr/bin/bash" >> config.mk 2>/dev/null || true
 
-# Pre-generate configuration and rtcd headers
+# Pre-generate configuration, rtcd headers, and exports def
 perl ./build/make/rtcd.pl --arch=x86_64 --sym=vp8_rtcd --config=libs-x86_64-win64-vs17.mk vp8/common/rtcd_defs.pl > vp8_rtcd.h 2>/dev/null || true
 perl ./build/make/rtcd.pl --arch=x86_64 --sym=vp9_rtcd --config=libs-x86_64-win64-vs17.mk vp9/common/vp9_rtcd_defs.pl > vp9_rtcd.h 2>/dev/null || true
 perl ./build/make/rtcd.pl --arch=x86_64 --sym=vpx_dsp_rtcd --config=libs-x86_64-win64-vs17.mk vpx_dsp/vpx_dsp_rtcd_defs.pl > vpx_dsp_rtcd.h 2>/dev/null || true
 perl ./build/make/rtcd.pl --arch=x86_64 --sym=vpx_scale_rtcd --config=libs-x86_64-win64-vs17.mk vpx_scale/vpx_scale_rtcd.pl > vpx_scale_rtcd.h 2>/dev/null || true
 grep -E "#define [A-Z0-9_]+ [01]" vpx_config.h | awk '{print $2 " equ " $3}' > vpx_config.asm 2>/dev/null || true
-bash ./build/make/version.sh . vpx_version.h 2>/dev/null || true
+/usr/bin/bash ./build/make/version.sh . vpx_version.h 2>/dev/null || true
+/usr/bin/bash ./build/make/gen_msvs_def.sh --name=vpx --out=vpx.def vp8/exports_enc vp8/exports_dec vp9/exports_enc vp9/exports_dec vpx/exports_com vpx/exports_enc vpx/exports_dec 2>/dev/null || true
 
 echo "=== GENERATING LIBVPX MAKEFILES AND PROJECTS ==="
-make SHELL=/usr/bin/bash NO_LAUNCH_DEVENV=1 V=1 -j1 target=libs || /usr/bin/make NO_LAUNCH_DEVENV=1 V=1 -j1 target=libs || true
-make SHELL=/usr/bin/bash NO_LAUNCH_DEVENV=1 V=1 -j1 target=solution || /usr/bin/make NO_LAUNCH_DEVENV=1 V=1 -j1 target=solution || true
-make SHELL=/usr/bin/bash NO_LAUNCH_DEVENV=1 V=1 -j1 || /usr/bin/make NO_LAUNCH_DEVENV=1 V=1 -j1 || true
+/usr/bin/make SHELL=/usr/bin/bash NO_LAUNCH_DEVENV=1 V=1 -j1 target=libs || make SHELL=/usr/bin/bash NO_LAUNCH_DEVENV=1 V=1 -j1 target=libs || true
+/usr/bin/make SHELL=/usr/bin/bash NO_LAUNCH_DEVENV=1 V=1 -j1 target=solution || make SHELL=/usr/bin/bash NO_LAUNCH_DEVENV=1 V=1 -j1 target=solution || true
+/usr/bin/make SHELL=/usr/bin/bash NO_LAUNCH_DEVENV=1 V=1 -j1 || make SHELL=/usr/bin/bash NO_LAUNCH_DEVENV=1 V=1 -j1 || true
 
 echo "=== LOCATING MSBUILD ==="
 MSBUILD_BIN=""
