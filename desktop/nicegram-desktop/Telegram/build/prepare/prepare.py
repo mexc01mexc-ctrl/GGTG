@@ -1499,7 +1499,7 @@ stage('ffmpeg', """
     cd ffmpeg
 win:
 depends:patches/ffmpeg.patch
-    git apply ../patches/ffmpeg.patch
+    git apply --ignore-space-change --ignore-whitespace ../patches/ffmpeg.patch
 
     if exist %THIRDPARTY_DIR%\\msys64\\usr\\bin\\link.exe del /f /q %THIRDPARTY_DIR%\\msys64\\usr\\bin\\link.exe
     if exist C:\\msys64\\usr\\bin\\link.exe del /f /q C:\\msys64\\usr\\bin\\link.exe
@@ -1690,7 +1690,7 @@ stage('libheif', """
 depends:patches/libheif.patch
     git clone -b v1.23.5 https://github.com/strukturag/libheif.git
     cd libheif
-    git apply ../patches/libheif.patch
+    git apply --ignore-space-change --ignore-whitespace ../patches/libheif.patch
 win:
     %THIRDPARTY_DIR%\\msys64\\usr\\bin\\sed.exe -i 's/HAVE_VISIBILITY/LIBHEIF_STATIC_BUILD/g' libheif/CMakeLists.txt
     %THIRDPARTY_DIR%\\msys64\\usr\\bin\\sed.exe -i 's/HAVE_VISIBILITY/LIBHEIF_STATIC_BUILD/g' heifio/CMakeLists.txt
@@ -1824,7 +1824,7 @@ stage('breakpad', """
     cd breakpad
     git checkout dfcb7b6799
 depends:patches/breakpad.diff
-    git apply ../patches/breakpad.diff
+    git apply --ignore-space-change --ignore-whitespace ../patches/breakpad.diff
     git clone -b release-1.11.0 https://github.com/google/googletest src/testing
 win:
     SET "PYTHONUTF8=1"
@@ -2042,7 +2042,7 @@ win:
     cd qtbase
     setlocal enabledelayedexpansion
     for /r %%i in (..\\..\\patches\\qtbase_%QT%\\*) do (
-        git apply %%i -v
+        git apply --ignore-space-change --ignore-whitespace %%i -v
         if errorlevel 1 (
             echo ERROR: Applying patch %%~nxi failed!
             exit /b 1
@@ -2333,7 +2333,7 @@ win_mac:
     git clone https://github.com/i582/wallet-engine.git
     cd wallet-engine
     git checkout """ + walletEngineRevision + """
-    git apply ../patches/wallet-engine.patch
+    git apply --ignore-space-change --ignore-whitespace ../patches/wallet-engine.patch
 """)
 
 # Every Rust library is built into one archive. A Rust staticlib carries its
