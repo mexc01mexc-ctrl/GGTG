@@ -757,75 +757,72 @@ cd "$FullScriptPath/../nv-codec-headers"
 make PREFIX="$FullScriptPath/../local" install
 cd "$FullScriptPath/../ffmpeg"
 
-mkdir -p "$FullScriptPath/../local/lib/pkgconfig"
-mkdir -p "$FullScriptPath/../local/lib64/pkgconfig"
+LOCAL_PREFIX_POS="$FullScriptPath/../local"
+LOCAL_PREFIX_WIN=$(cygpath -m "$LOCAL_PREFIX_POS" 2>/dev/null || echo "$LOCAL_PREFIX_POS")
+POS_LIB_PKG="$LOCAL_PREFIX_POS/lib/pkgconfig"
+WIN_LIB_PKG="$LOCAL_PREFIX_WIN/lib/pkgconfig"
 
-# Copy any misplaced .pc files to local/lib/pkgconfig
-find "$FullScriptPath/.." -type f -name "*.pc" -exec cp -f {} "$FullScriptPath/../local/lib/pkgconfig/" \\; 2>/dev/null || true
+mkdir -p "$POS_LIB_PKG"
+mkdir -p "$LOCAL_PREFIX_POS/lib64/pkgconfig"
 
-# Ensure fallback pkg-config files exist for ffmpeg dependencies
-if [ ! -f "$FullScriptPath/../local/lib/pkgconfig/dav1d.pc" ]; then
-cat << 'EOF' > "$FullScriptPath/../local/lib/pkgconfig/dav1d.pc"
-prefix=${pcfiledir}/../..
-exec_prefix=${prefix}
-libdir=${prefix}/lib
-includedir=${prefix}/include
+# Delete any meson build-tree uninstalled .pc files to prevent picking up builddir paths
+find "$FullScriptPath/.." -path "*/meson-private/*.pc" -delete 2>/dev/null || true
+
+# Write canonical .pc files pointing directly to local prefix
+cat << EOF > "$POS_LIB_PKG/dav1d.pc"
+prefix=$LOCAL_PREFIX_WIN
+exec_prefix=\${prefix}
+libdir=\${prefix}/lib
+includedir=\${prefix}/include
 
 Name: libdav1d
 Description: AV1 decoding library
 Version: 1.4.3
-Libs: -L${libdir} -ldav1d
-Cflags: -I${includedir}
+Libs: -L\${libdir} -ldav1d
+Cflags: -I\${includedir}
 EOF
-fi
 
-if [ ! -f "$FullScriptPath/../local/lib/pkgconfig/openh264.pc" ]; then
-cat << 'EOF' > "$FullScriptPath/../local/lib/pkgconfig/openh264.pc"
-prefix=${pcfiledir}/../..
-exec_prefix=${prefix}
-libdir=${prefix}/lib
-includedir=${prefix}/include
+cat << EOF > "$POS_LIB_PKG/openh264.pc"
+prefix=$LOCAL_PREFIX_WIN
+exec_prefix=\${prefix}
+libdir=\${prefix}/lib
+includedir=\${prefix}/include
 
 Name: openh264
 Description: OpenH264 library
 Version: 2.6.0
-Libs: -L${libdir} -lopenh264
-Cflags: -I${includedir}
+Libs: -L\${libdir} -lopenh264
+Cflags: -I\${includedir}
 EOF
-fi
 
-if [ ! -f "$FullScriptPath/../local/lib/pkgconfig/opus.pc" ]; then
-cat << 'EOF' > "$FullScriptPath/../local/lib/pkgconfig/opus.pc"
-prefix=${pcfiledir}/../..
-exec_prefix=${prefix}
-libdir=${prefix}/lib
-includedir=${prefix}/include
+cat << EOF > "$POS_LIB_PKG/opus.pc"
+prefix=$LOCAL_PREFIX_WIN
+exec_prefix=\${prefix}
+libdir=\${prefix}/lib
+includedir=\${prefix}/include
 
 Name: Opus
 Description: Opus IETF audio codec
 Version: 1.5.2
-Libs: -L${libdir} -lopus
-Cflags: -I${includedir}/opus
+Libs: -L\${libdir} -lopus
+Cflags: -I\${includedir}/opus
 EOF
-fi
 
-if [ ! -f "$FullScriptPath/../local/lib/pkgconfig/vpx.pc" ]; then
-cat << 'EOF' > "$FullScriptPath/../local/lib/pkgconfig/vpx.pc"
-prefix=${pcfiledir}/../..
-exec_prefix=${prefix}
-libdir=${prefix}/lib
-includedir=${prefix}/include
+cat << EOF > "$POS_LIB_PKG/vpx.pc"
+prefix=$LOCAL_PREFIX_WIN
+exec_prefix=\${prefix}
+libdir=\${prefix}/lib
+includedir=\${prefix}/include
 
 Name: vpx
 Description: WebM Project VPx Codec Implementation
 Version: 1.15.0
-Libs: -L${libdir} -lvpxmt
-Cflags: -I${includedir}
+Libs: -L\${libdir} -lvpxmt
+Cflags: -I\${includedir}
 EOF
-fi
 
 # Ensure library aliases in local/lib for MSVC linking
-LOCAL_LIB="$FullScriptPath/../local/lib"
+LOCAL_LIB="$LOCAL_PREFIX_POS/lib"
 [ -f "$LOCAL_LIB/libdav1d.a" ] && [ ! -f "$LOCAL_LIB/dav1d.lib" ] && cp -f "$LOCAL_LIB/libdav1d.a" "$LOCAL_LIB/dav1d.lib" || true
 [ -f "$LOCAL_LIB/dav1d.lib" ] && [ ! -f "$LOCAL_LIB/libdav1d.lib" ] && cp -f "$LOCAL_LIB/dav1d.lib" "$LOCAL_LIB/libdav1d.lib" || true
 
@@ -845,10 +842,13 @@ if [ -f "$LOCAL_LIB/vpxmt.lib" ]; then
     [ ! -f "$LOCAL_LIB/libvpx.lib" ] && cp -f "$LOCAL_LIB/vpxmt.lib" "$LOCAL_LIB/libvpx.lib" || true
 fi
 
-# Detect PKG_CONFIG_PATH format
-POS_LIB_PKG="$FullScriptPath/../local/lib/pkgconfig"
-WIN_LIB_PKG=$(cygpath -m "$POS_LIB_PKG" 2>/dev/null || echo "$POS_LIB_PKG")
+# Extra defense-in-depth: copy library files to any dav1d/openh264 build directories
+find "$FullScriptPath/../dav1d" -type d -name "src" -exec cp -f "$LOCAL_LIB/dav1d.lib" {} \\; 2>/dev/null || true
+find "$FullScriptPath/../dav1d" -type d -name "builddir*" -exec cp -f "$LOCAL_LIB/dav1d.lib" {} \\; 2>/dev/null || true
+find "$FullScriptPath/../openh264" -type d -name "src" -exec cp -f "$LOCAL_LIB/openh264.lib" {} \\; 2>/dev/null || true
+find "$FullScriptPath/../openh264" -type d -name "builddir*" -exec cp -f "$LOCAL_LIB/openh264.lib" {} \\; 2>/dev/null || true
 
+# Detect PKG_CONFIG_PATH format
 echo "=== VERIFYING PKG-CONFIG DETECTION ==="
 echo "which pkg-config: $(which pkg-config 2>/dev/null || echo 'not found')"
 echo "POSIX pkg path: $POS_LIB_PKG"
@@ -856,14 +856,13 @@ echo "Windows pkg path: $WIN_LIB_PKG"
 
 if PKG_CONFIG_PATH="$POS_LIB_PKG" pkg-config --exists "dav1d >= 1.0.0" 2>/dev/null; then
     echo "pkg-config works with POSIX path format."
-    export PKG_CONFIG_PATH="$POS_LIB_PKG:$FullScriptPath/../local/lib64/pkgconfig:$PKG_CONFIG_PATH"
+    export PKG_CONFIG_PATH="$POS_LIB_PKG:$LOCAL_PREFIX_POS/lib64/pkgconfig:$PKG_CONFIG_PATH"
 elif PKG_CONFIG_PATH="$WIN_LIB_PKG" pkg-config --exists "dav1d >= 1.0.0" 2>/dev/null; then
     echo "pkg-config works with Windows path format."
     export PKG_CONFIG_PATH="$WIN_LIB_PKG;$WIN_LIB_PKG/../lib64/pkgconfig;$PKG_CONFIG_PATH"
 else
     echo "Testing combined PKG_CONFIG_PATH format..."
     export PKG_CONFIG_PATH="$WIN_LIB_PKG;$POS_LIB_PKG:$PKG_CONFIG_PATH"
-    pkg-config --debug --exists --print-errors "dav1d >= 1.0.0" || true
 fi
 
 echo "pkg-config modversions:"
@@ -871,6 +870,8 @@ pkg-config --modversion dav1d || true
 pkg-config --modversion openh264 || true
 pkg-config --modversion opus || true
 pkg-config --modversion vpx || true
+echo "pkg-config libs dav1d: $(pkg-config --libs dav1d || true)"
+echo "pkg-config cflags dav1d: $(pkg-config --cflags dav1d || true)"
 
 export PATH="$FullExecPath/../gas-preprocessor:$PATH"
 echo '#!/bin/sh' > "$FullExecPath/../gas-preprocessor/cpp"
