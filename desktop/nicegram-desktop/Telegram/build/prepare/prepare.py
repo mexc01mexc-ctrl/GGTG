@@ -757,14 +757,137 @@ cd "$FullScriptPath/../nv-codec-headers"
 make PREFIX="$FullScriptPath/../local" install
 cd "$FullScriptPath/../ffmpeg"
 
-export PKG_CONFIG_PATH="$FullScriptPath/../local/lib/pkgconfig:$FullScriptPath/../local/lib64/pkgconfig:$FullExecPath/../local/lib/pkgconfig:$PKG_CONFIG_PATH"
+mkdir -p "$FullScriptPath/../local/lib/pkgconfig"
+mkdir -p "$FullScriptPath/../local/lib64/pkgconfig"
+
+# Copy any misplaced .pc files to local/lib/pkgconfig
+find "$FullScriptPath/.." -type f -name "*.pc" -exec cp -f {} "$FullScriptPath/../local/lib/pkgconfig/" \\; 2>/dev/null || true
+
+# Ensure fallback pkg-config files exist for ffmpeg dependencies
+if [ ! -f "$FullScriptPath/../local/lib/pkgconfig/dav1d.pc" ]; then
+cat << 'EOF' > "$FullScriptPath/../local/lib/pkgconfig/dav1d.pc"
+prefix=${pcfiledir}/../..
+exec_prefix=${prefix}
+libdir=${prefix}/lib
+includedir=${prefix}/include
+
+Name: libdav1d
+Description: AV1 decoding library
+Version: 1.4.3
+Libs: -L${libdir} -ldav1d
+Cflags: -I${includedir}
+EOF
+fi
+
+if [ ! -f "$FullScriptPath/../local/lib/pkgconfig/openh264.pc" ]; then
+cat << 'EOF' > "$FullScriptPath/../local/lib/pkgconfig/openh264.pc"
+prefix=${pcfiledir}/../..
+exec_prefix=${prefix}
+libdir=${prefix}/lib
+includedir=${prefix}/include
+
+Name: openh264
+Description: OpenH264 library
+Version: 2.6.0
+Libs: -L${libdir} -lopenh264
+Cflags: -I${includedir}
+EOF
+fi
+
+if [ ! -f "$FullScriptPath/../local/lib/pkgconfig/opus.pc" ]; then
+cat << 'EOF' > "$FullScriptPath/../local/lib/pkgconfig/opus.pc"
+prefix=${pcfiledir}/../..
+exec_prefix=${prefix}
+libdir=${prefix}/lib
+includedir=${prefix}/include
+
+Name: Opus
+Description: Opus IETF audio codec
+Version: 1.5.2
+Libs: -L${libdir} -lopus
+Cflags: -I${includedir}/opus
+EOF
+fi
+
+if [ ! -f "$FullScriptPath/../local/lib/pkgconfig/vpx.pc" ]; then
+cat << 'EOF' > "$FullScriptPath/../local/lib/pkgconfig/vpx.pc"
+prefix=${pcfiledir}/../..
+exec_prefix=${prefix}
+libdir=${prefix}/lib
+includedir=${prefix}/include
+
+Name: vpx
+Description: WebM Project VPx Codec Implementation
+Version: 1.15.0
+Libs: -L${libdir} -lvpxmt
+Cflags: -I${includedir}
+EOF
+fi
+
+# Ensure library aliases in local/lib for MSVC linking
+LOCAL_LIB="$FullScriptPath/../local/lib"
+[ -f "$LOCAL_LIB/libdav1d.a" ] && [ ! -f "$LOCAL_LIB/dav1d.lib" ] && cp -f "$LOCAL_LIB/libdav1d.a" "$LOCAL_LIB/dav1d.lib" || true
+[ -f "$LOCAL_LIB/dav1d.lib" ] && [ ! -f "$LOCAL_LIB/libdav1d.lib" ] && cp -f "$LOCAL_LIB/dav1d.lib" "$LOCAL_LIB/libdav1d.lib" || true
+
+[ -f "$LOCAL_LIB/libopenh264.a" ] && [ ! -f "$LOCAL_LIB/openh264.lib" ] && cp -f "$LOCAL_LIB/libopenh264.a" "$LOCAL_LIB/openh264.lib" || true
+[ -f "$LOCAL_LIB/openh264.lib" ] && [ ! -f "$LOCAL_LIB/libopenh264.lib" ] && cp -f "$LOCAL_LIB/openh264.lib" "$LOCAL_LIB/libopenh264.lib" || true
+
+[ -f "$LOCAL_LIB/libopus.a" ] && [ ! -f "$LOCAL_LIB/opus.lib" ] && cp -f "$LOCAL_LIB/libopus.a" "$LOCAL_LIB/opus.lib" || true
+[ -f "$LOCAL_LIB/opus.lib" ] && [ ! -f "$LOCAL_LIB/libopus.lib" ] && cp -f "$LOCAL_LIB/opus.lib" "$LOCAL_LIB/libopus.lib" || true
+
+if [ -f "$LOCAL_LIB/x64/vpxmt.lib" ]; then
+    cp -f "$LOCAL_LIB/x64/vpxmt.lib" "$LOCAL_LIB/vpxmt.lib" 2>/dev/null || true
+    cp -f "$LOCAL_LIB/x64/vpxmt.lib" "$LOCAL_LIB/vpx.lib" 2>/dev/null || true
+    cp -f "$LOCAL_LIB/x64/vpxmt.lib" "$LOCAL_LIB/libvpx.lib" 2>/dev/null || true
+fi
+if [ -f "$LOCAL_LIB/vpxmt.lib" ]; then
+    [ ! -f "$LOCAL_LIB/vpx.lib" ] && cp -f "$LOCAL_LIB/vpxmt.lib" "$LOCAL_LIB/vpx.lib" || true
+    [ ! -f "$LOCAL_LIB/libvpx.lib" ] && cp -f "$LOCAL_LIB/vpxmt.lib" "$LOCAL_LIB/libvpx.lib" || true
+fi
+
+# Detect PKG_CONFIG_PATH format
+POS_LIB_PKG="$FullScriptPath/../local/lib/pkgconfig"
+WIN_LIB_PKG=$(cygpath -m "$POS_LIB_PKG" 2>/dev/null || echo "$POS_LIB_PKG")
+
+echo "=== VERIFYING PKG-CONFIG DETECTION ==="
+echo "which pkg-config: $(which pkg-config 2>/dev/null || echo 'not found')"
+echo "POSIX pkg path: $POS_LIB_PKG"
+echo "Windows pkg path: $WIN_LIB_PKG"
+
+if PKG_CONFIG_PATH="$POS_LIB_PKG" pkg-config --exists "dav1d >= 1.0.0" 2>/dev/null; then
+    echo "pkg-config works with POSIX path format."
+    export PKG_CONFIG_PATH="$POS_LIB_PKG:$FullScriptPath/../local/lib64/pkgconfig:$PKG_CONFIG_PATH"
+elif PKG_CONFIG_PATH="$WIN_LIB_PKG" pkg-config --exists "dav1d >= 1.0.0" 2>/dev/null; then
+    echo "pkg-config works with Windows path format."
+    export PKG_CONFIG_PATH="$WIN_LIB_PKG;$WIN_LIB_PKG/../lib64/pkgconfig;$PKG_CONFIG_PATH"
+else
+    echo "Testing combined PKG_CONFIG_PATH format..."
+    export PKG_CONFIG_PATH="$WIN_LIB_PKG;$POS_LIB_PKG:$PKG_CONFIG_PATH"
+    pkg-config --debug --exists --print-errors "dav1d >= 1.0.0" || true
+fi
+
+echo "pkg-config modversions:"
+pkg-config --modversion dav1d || true
+pkg-config --modversion openh264 || true
+pkg-config --modversion opus || true
+pkg-config --modversion vpx || true
+
 export PATH="$FullExecPath/../gas-preprocessor:$PATH"
 echo '#!/bin/sh' > "$FullExecPath/../gas-preprocessor/cpp"
 echo 'cl "$@"' >> "$FullExecPath/../gas-preprocessor/cpp"
 chmod a+x "$FullExecPath/../gas-preprocessor/cpp"
 sed -i 's/\\r$//' "$FullExecPath/../gas-preprocessor/cpp" 2>/dev/null || true
 
-./configure --prefix="$FullScriptPath/../local" $ARCH_PARAM --toolchain=msvc --extra-cflags="-DCONFIG_SAFE_BITSTREAM_READER=1" --extra-cxxflags="-DCONFIG_SAFE_BITSTREAM_READER=1" --disable-programs --disable-doc --disable-network --disable-everything --enable-ffnvcodec --enable-nvdec --enable-cuvid --enable-hwaccel=av1_d3d11va --enable-hwaccel=av1_d3d11va2 --enable-hwaccel=av1_dxva2 --enable-hwaccel=av1_nvdec --enable-hwaccel=h264_d3d11va --enable-hwaccel=h264_d3d11va2 --enable-hwaccel=h264_dxva2 --enable-hwaccel=h264_nvdec --enable-hwaccel=hevc_d3d11va --enable-hwaccel=hevc_d3d11va2 --enable-hwaccel=hevc_dxva2 --enable-hwaccel=hevc_nvdec --enable-hwaccel=mpeg2_d3d11va --enable-hwaccel=mpeg2_d3d11va2 --enable-hwaccel=mpeg2_dxva2 --enable-hwaccel=mpeg2_nvdec --enable-hwaccel=mpeg4_nvdec --enable-hwaccel=vp8_nvdec --enable-protocol=file --enable-libdav1d --enable-libopenh264 --enable-libopus --enable-libvpx --enable-decoder=aac --enable-decoder=aac_fixed --enable-decoder=aac_latm --enable-decoder=aasc --enable-decoder=ac3 --enable-decoder=alac --enable-decoder=av1 --enable-decoder=av1_cuvid --enable-decoder=eac3 --enable-decoder=flac --enable-decoder=gif --enable-decoder=h264 --enable-decoder=hevc --enable-decoder=libdav1d --enable-decoder=libvpx_vp8 --enable-decoder=libvpx_vp9 --enable-decoder=mp1 --enable-decoder=mp1float --enable-decoder=mp2 --enable-decoder=mp2float --enable-decoder=mp3 --enable-decoder=mp3adu --enable-decoder=mp3adufloat --enable-decoder=mp3float --enable-decoder=mp3on4 --enable-decoder=mp3on4float --enable-decoder=mpeg4 --enable-decoder=msmpeg4v2 --enable-decoder=msmpeg4v3 --enable-decoder=opus --enable-decoder=pcm_alaw --enable-decoder=pcm_f32be --enable-decoder=pcm_f32le --enable-decoder=pcm_f64be --enable-decoder=pcm_f64le --enable-decoder=pcm_lxf --enable-decoder=pcm_mulaw --enable-decoder=pcm_s16be --enable-decoder=pcm_s16be_planar --enable-decoder=pcm_s16le --enable-decoder=pcm_s16le_planar --enable-decoder=pcm_s24be --enable-decoder=pcm_s24daud --enable-decoder=pcm_s24le --enable-decoder=pcm_s24le_planar --enable-decoder=pcm_s32be --enable-decoder=pcm_s32le --enable-decoder=pcm_s32le_planar --enable-decoder=pcm_s64be --enable-decoder=pcm_s64le --enable-decoder=pcm_s8 --enable-decoder=pcm_s8_planar --enable-decoder=pcm_u16be --enable-decoder=pcm_u16le --enable-decoder=pcm_u24be --enable-decoder=pcm_u24le --enable-decoder=pcm_u32be --enable-decoder=pcm_u32le --enable-decoder=pcm_u8 --enable-decoder=vorbis --enable-decoder=vp8 --enable-decoder=wavpack --enable-decoder=wmalossless --enable-decoder=wmapro --enable-decoder=wmav1 --enable-decoder=wmav2 --enable-decoder=wmavoice --enable-filter=atempo --enable-encoder=aac --enable-encoder=libopus --enable-encoder=libopenh264 --enable-encoder=libvpx_vp9 --enable-encoder=pcm_s16le --enable-parser=aac --enable-parser=aac_latm --enable-parser=flac --enable-parser=gif --enable-parser=h264 --enable-parser=hevc --enable-parser=mpeg4video --enable-parser=mpegaudio --enable-parser=opus --enable-parser=vorbis --enable-demuxer=aac --enable-demuxer=flac --enable-demuxer=gif --enable-demuxer=h264 --enable-demuxer=hevc --enable-demuxer=matroska --enable-demuxer=m4v --enable-demuxer=mov --enable-demuxer=mp3 --enable-demuxer=ogg --enable-demuxer=wav --enable-muxer=mp4 --enable-muxer=ogg --enable-muxer=opus --enable-muxer=wav --enable-muxer=webm
+./configure --prefix="$FullScriptPath/../local" $ARCH_PARAM --toolchain=msvc --extra-cflags="-DCONFIG_SAFE_BITSTREAM_READER=1" --extra-cxxflags="-DCONFIG_SAFE_BITSTREAM_READER=1" --disable-programs --disable-doc --disable-network --disable-everything --enable-ffnvcodec --enable-nvdec --enable-cuvid --enable-hwaccel=av1_d3d11va --enable-hwaccel=av1_d3d11va2 --enable-hwaccel=av1_dxva2 --enable-hwaccel=av1_nvdec --enable-hwaccel=h264_d3d11va --enable-hwaccel=h264_d3d11va2 --enable-hwaccel=h264_dxva2 --enable-hwaccel=h264_nvdec --enable-hwaccel=hevc_d3d11va --enable-hwaccel=hevc_d3d11va2 --enable-hwaccel=hevc_dxva2 --enable-hwaccel=hevc_nvdec --enable-hwaccel=mpeg2_d3d11va --enable-hwaccel=mpeg2_d3d11va2 --enable-hwaccel=mpeg2_dxva2 --enable-hwaccel=mpeg2_nvdec --enable-hwaccel=mpeg4_nvdec --enable-hwaccel=vp8_nvdec --enable-protocol=file --enable-libdav1d --enable-libopenh264 --enable-libopus --enable-libvpx --enable-decoder=aac --enable-decoder=aac_fixed --enable-decoder=aac_latm --enable-decoder=aasc --enable-decoder=ac3 --enable-decoder=alac --enable-decoder=av1 --enable-decoder=av1_cuvid --enable-decoder=eac3 --enable-decoder=flac --enable-decoder=gif --enable-decoder=h264 --enable-decoder=hevc --enable-decoder=libdav1d --enable-decoder=libvpx_vp8 --enable-decoder=libvpx_vp9 --enable-decoder=mp1 --enable-decoder=mp1float --enable-decoder=mp2 --enable-decoder=mp2float --enable-decoder=mp3 --enable-decoder=mp3adu --enable-decoder=mp3adufloat --enable-decoder=mp3float --enable-decoder=mp3on4 --enable-decoder=mp3on4float --enable-decoder=mpeg4 --enable-decoder=msmpeg4v2 --enable-decoder=msmpeg4v3 --enable-decoder=opus --enable-decoder=pcm_alaw --enable-decoder=pcm_f32be --enable-decoder=pcm_f32le --enable-decoder=pcm_f64be --enable-decoder=pcm_f64le --enable-decoder=pcm_lxf --enable-decoder=pcm_mulaw --enable-decoder=pcm_s16be --enable-decoder=pcm_s16be_planar --enable-decoder=pcm_s16le --enable-decoder=pcm_s16le_planar --enable-decoder=pcm_s24be --enable-decoder=pcm_s24daud --enable-decoder=pcm_s24le --enable-decoder=pcm_s24le_planar --enable-decoder=pcm_s32be --enable-decoder=pcm_s32le --enable-decoder=pcm_s32le_planar --enable-decoder=pcm_s64be --enable-decoder=pcm_s64le --enable-decoder=pcm_s8 --enable-decoder=pcm_s8_planar --enable-decoder=pcm_u16be --enable-decoder=pcm_u16le --enable-decoder=pcm_u24be --enable-decoder=pcm_u24le --enable-decoder=pcm_u32be --enable-decoder=pcm_u32le --enable-decoder=pcm_u8 --enable-decoder=vorbis --enable-decoder=vp8 --enable-decoder=wavpack --enable-decoder=wmalossless --enable-decoder=wmapro --enable-decoder=wmav1 --enable-decoder=wmav2 --enable-decoder=wmavoice --enable-filter=atempo --enable-encoder=aac --enable-encoder=libopus --enable-encoder=libopenh264 --enable-encoder=libvpx_vp9 --enable-encoder=pcm_s16le --enable-parser=aac --enable-parser=aac_latm --enable-parser=flac --enable-parser=gif --enable-parser=h264 --enable-parser=hevc --enable-parser=mpeg4video --enable-parser=mpegaudio --enable-parser=opus --enable-parser=vorbis --enable-demuxer=aac --enable-demuxer=flac --enable-demuxer=gif --enable-demuxer=h264 --enable-demuxer=hevc --enable-demuxer=matroska --enable-demuxer=m4v --enable-demuxer=mov --enable-demuxer=mp3 --enable-demuxer=ogg --enable-demuxer=wav --enable-muxer=mp4 --enable-muxer=ogg --enable-muxer=opus --enable-muxer=wav --enable-muxer=webm || {
+    echo "=== FFMPEG CONFIGURE FAILED ==="
+    for log in ffbuild/config.log config.log; do
+        if [ -f "$log" ]; then
+            echo "=== DUMPING $log ==="
+            tail -n 150 "$log"
+        fi
+    done
+    exit 1
+}
 
 make -j"$NUMBER_OF_PROCESSORS"
 find libavcodec/aarch64 libswresample/aarch64 libswscale/aarch64 libavutil/aarch64 -type f -name '*.d' -delete 2>/dev/null || true
@@ -789,15 +912,16 @@ echo "=== FFMPEG BUILD COMPLETE ==="
                         pass
             elif win and stage['name'] == 'ffmpeg':
                 cfg = os.path.join(stage['directory'], 'ffmpeg', 'ffbuild', 'config.log')
+                if not os.path.isfile(cfg):
+                    cfg = os.path.join(stage['directory'], 'ffmpeg', 'config.log')
                 if os.path.isfile(cfg):
                     try:
                         with open(cfg, 'r', errors='ignore') as f:
                             lines = f.readlines()
-                        if any('failed' in l.lower() for l in lines[-30:]):
-                            print('=== FFMPEG CONFIG.LOG (FAILURE) ===')
-                            print(''.join(lines[-80:]))
-                    except Exception:
-                        pass
+                        print('=== FFMPEG CONFIG.LOG (FAILURE) ===')
+                        print(''.join(lines[-150:]))
+                    except Exception as e:
+                        print('[WARN] Could not print config.log:', e)
             finish(1)
         writeCacheKey(stage)
 
@@ -847,6 +971,7 @@ win:
 
     pacman -S --noconfirm --needed ^
         make ^
+        pkgconf ^
         mingw-w64-ucrt-x86_64-diffutils ^
         mingw-w64-ucrt-x86_64-gperf ^
         mingw-w64-ucrt-x86_64-nasm ^

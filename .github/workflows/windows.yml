@@ -185,6 +185,16 @@ jobs:
               Add-Content -Path $env:GITHUB_PATH -Value "C:\msys64\usr\bin"
               $env:PATH = "C:\msys64\usr\bin;$env:PATH"
             }
+
+            # 7. Ensure MSYS2 has pkgconf installed so /usr/bin/pkg-config is available
+            try {
+              if (Test-Path "C:\msys64\usr\bin\pacman.exe") {
+                Write-Host "Installing MSYS2 pkgconf in C:\msys64..."
+                & "C:\msys64\usr\bin\pacman.exe" -S --noconfirm --needed pkgconf make
+              }
+            } catch {
+              Write-Warning "Could not install MSYS2 pkgconf: $_"
+            }
           } catch {
             Write-Warning "Configure environment warning: $_"
           }
@@ -320,6 +330,44 @@ jobs:
             }
             if (Test-Path "$libsDir\zlib\Debug\zlibstatic.lib") {
               Copy-Item "$libsDir\zlib\Debug\zlibstatic.lib" "$libsDir\zlib\Debug\libzsd.lib" -Force -ErrorAction SilentlyContinue
+            }
+
+            # Ensure MSYS2 pkgconf exists in ThirdParty msys64
+            try {
+              if (Test-Path "$tpDir\msys64\usr\bin\pacman.exe") {
+                & "$tpDir\msys64\usr\bin\pacman.exe" -S --noconfirm --needed pkgconf make
+              }
+            } catch {}
+
+            # Ensure library aliases in local\lib
+            $localLib = "$libsDir\local\lib"
+            if (Test-Path $localLib) {
+              $libPairs = @(
+                @("libdav1d.a", "dav1d.lib"),
+                @("dav1d.lib", "libdav1d.lib"),
+                @("libopenh264.a", "openh264.lib"),
+                @("openh264.lib", "libopenh264.lib"),
+                @("opus.lib", "libopus.lib"),
+                @("libopus.a", "opus.lib"),
+                @("vpxmt.lib", "vpx.lib"),
+                @("vpx.lib", "libvpx.lib")
+              )
+              foreach ($pair in $libPairs) {
+                $src = Join-Path $localLib $pair[0]
+                $dst = Join-Path $localLib $pair[1]
+                if ((Test-Path $src) -and (-not (Test-Path $dst))) {
+                  Copy-Item $src $dst -Force -ErrorAction SilentlyContinue
+                  Write-Host "Created library alias: $dst from $src"
+                }
+              }
+            }
+            $localLibX64 = "$libsDir\local\lib\x64"
+            if (Test-Path $localLibX64) {
+              if (Test-Path "$localLibX64\vpxmt.lib") {
+                if (-not (Test-Path "$localLib\vpxmt.lib")) { Copy-Item "$localLibX64\vpxmt.lib" "$localLib\vpxmt.lib" -Force -ErrorAction SilentlyContinue }
+                if (-not (Test-Path "$localLib\vpx.lib")) { Copy-Item "$localLibX64\vpxmt.lib" "$localLib\vpx.lib" -Force -ErrorAction SilentlyContinue }
+                if (-not (Test-Path "$localLibX64\vpx.lib")) { Copy-Item "$localLibX64\vpxmt.lib" "$localLibX64\vpx.lib" -Force -ErrorAction SilentlyContinue }
+              }
             }
 
             # Ensure git clone doesn't fail on half-baked directories
