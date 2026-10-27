@@ -105,17 +105,23 @@ jobs:
             Write-Host "Copying yasm to C:\msys64\usr\bin\yasm.exe..."
             Copy-Item -Path $yasm -Destination "C:\msys64\usr\bin\yasm.exe" -Force
           }
-          # 3. Ensure MSBuild wrapper is in MSYS2 path
+          # 3. Add real MSBuild directory to PATH and ensure yasm is available
           $vswhere = Join-Path ${env:ProgramFiles(x86)} 'Microsoft Visual Studio\Installer\vswhere.exe'
           if (Test-Path $vswhere) {
             $msbuild = & $vswhere -latest -requires Microsoft.Component.MSBuild -find MSBuild\**\Bin\MSBuild.exe | Select-Object -First 1
-            if ($msbuild -and (Test-Path "C:\msys64\usr\bin")) {
-              $bashPath = $msbuild.Replace('\', '/').Replace('C:', '/c')
-              Write-Host "Setting up MSYS2 msbuild wrapper pointing to $bashPath..."
-              Set-Content -Path "C:\msys64\usr\bin\msbuild" -Value "#!/bin/sh`nexec `"$bashPath`" `"`$@`"" -NoNewline
-              Set-Content -Path "C:\msys64\usr\bin\msbuild.exe" -Value "#!/bin/sh`nexec `"$bashPath`" `"`$@`"" -NoNewline
+            if ($msbuild) {
+              $msbuildDir = Split-Path $msbuild
+              Write-Host "Found MSBuild at $msbuild"
+              Add-Content -Path $env:GITHUB_PATH -Value $msbuildDir
+              $env:PATH = "$msbuildDir;$env:PATH"
+              if ($yasm) {
+                Copy-Item -Path $yasm -Destination "$msbuildDir\yasm.exe" -Force -ErrorAction SilentlyContinue
+              }
             }
           }
+          # Purge any fake msbuild scripts in C:\msys64\usr\bin
+          Remove-Item -Path "C:\msys64\usr\bin\msbuild.exe" -Force -ErrorAction SilentlyContinue
+          Remove-Item -Path "C:\msys64\usr\bin\msbuild" -Force -ErrorAction SilentlyContinue
           # 4. Prevent MSYS2 from mangling compiler flags (/FS, /bigobj, /m:2, etc.)
           Add-Content -Path $env:GITHUB_ENV -Value "MSYS2_ARG_CONV_EXCL=*"
           Add-Content -Path $env:GITHUB_ENV -Value "CHERE_INVOKING=enabled_from_arguments"
@@ -163,10 +169,12 @@ jobs:
           if (Test-Path "$tpDir\msys64\usr\bin\link.exe") {
             Move-Item -Path "$tpDir\msys64\usr\bin\link.exe" -Destination "$tpDir\msys64\usr\bin\link.exe.bak" -Force
           }
-          # Ensure corrupt fake msbuild.exe text wrapper is deleted
-          if (Test-Path "$tpDir\msys64\usr\bin\msbuild.exe") {
-            Remove-Item -Path "$tpDir\msys64\usr\bin\msbuild.exe" -Force
-          }
+          # Ensure corrupt fake msbuild scripts are deleted
+          Remove-Item -Path "$tpDir\msys64\usr\bin\msbuild.exe" -Force -ErrorAction SilentlyContinue
+          Remove-Item -Path "$tpDir\msys64\usr\bin\msbuild" -Force -ErrorAction SilentlyContinue
+          Remove-Item -Path "C:\msys64\usr\bin\msbuild.exe" -Force -ErrorAction SilentlyContinue
+          Remove-Item -Path "C:\msys64\usr\bin\msbuild" -Force -ErrorAction SilentlyContinue
+
           # Ensure yasm exists in MSYS2 and toolchain paths
           $yasm = (Get-Command yasm.exe -ErrorAction SilentlyContinue).Source
           if (-not $yasm -and (Test-Path "C:\ProgramData\chocolatey\bin\yasm.exe")) {
@@ -180,12 +188,10 @@ jobs:
             $msbuild = & $vswhere -latest -requires Microsoft.Component.MSBuild -find MSBuild\**\Bin\MSBuild.exe | Select-Object -First 1
             if ($msbuild) {
               $msbuildDir = Split-Path $msbuild
+              Add-Content -Path $env:GITHUB_PATH -Value $msbuildDir
+              $env:PATH = "$msbuildDir;$env:PATH"
               if ($yasm) {
                 Copy-Item -Path $yasm -Destination "$msbuildDir\yasm.exe" -Force -ErrorAction SilentlyContinue
-              }
-              if (Test-Path "$tpDir\msys64\usr\bin") {
-                $bashPath = $msbuild.Replace('\', '/').Replace('C:', '/c')
-                Set-Content -Path "$tpDir\msys64\usr\bin\msbuild" -Value "#!/bin/sh`nexec `"$bashPath`" `"`$@`"" -NoNewline
               }
             }
           }
@@ -230,9 +236,9 @@ jobs:
 
           # Ensure git clone doesn't fail on half-baked directories
           $incomplete = @(
-            @{ Dir = "$libsDir\libvpx"; Check = @("$libsDir\local\lib\x64\vpxmt.lib", "$libsDir\local\lib\vpx.lib", "$libsDir\local\include\vpx\vpx_codec.h") },
-            @{ Dir = "$libsDir\ffmpeg"; Check = @("$libsDir\ffmpeg\libavcodec\avcodec.lib", "$libsDir\local\include\libavcodec\avcodec.h") },
-            @{ Dir = "$libsDir\openal-soft"; Check = @("$libsDir\openal-soft\build\RelWithDebInfo\OpenAL32.lib", "$libsDir\local\include\AL\al.h") }
+            @{ Dir = "$libsDir\libvpx"; Check = @("$libsDir\local\lib\x64\vpxmt.lib", "$libsDir\local\lib\vpx.lib"); Key = "$libsDir\cache_keys\libvpx" },
+            @{ Dir = "$libsDir\ffmpeg"; Check = @("$libsDir\ffmpeg\libavcodec\avcodec.lib", "$libsDir\local\include\libavcodec\avcodec.h"); Key = "$libsDir\cache_keys\ffmpeg" },
+            @{ Dir = "$libsDir\openal-soft"; Check = @("$libsDir\openal-soft\build\RelWithDebInfo\OpenAL32.lib", "$libsDir\local\include\AL\al.h"); Key = "$libsDir\cache_keys\openal-soft" }
           )
           foreach ($item in $incomplete) {
             $isComplete = $false
@@ -245,6 +251,9 @@ jobs:
                 $_.Attributes = 'Normal'
               }
               Remove-Item -Path $item.Dir -Recurse -Force -ErrorAction SilentlyContinue
+              if ($item.Key -and (Test-Path $item.Key)) {
+                Remove-Item -Path $item.Key -Force -ErrorAction SilentlyContinue
+              }
             }
           }
 

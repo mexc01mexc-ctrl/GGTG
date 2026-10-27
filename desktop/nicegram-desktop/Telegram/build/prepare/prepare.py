@@ -565,19 +565,65 @@ pushd $(dirname "$0") > /dev/null
 FullScriptPath=$(pwd)
 popd > /dev/null
 
-./configure --prefix="$FullScriptPath/../local" --target="$TOOLCHAIN" --as=yasm --disable-examples --disable-unit-tests --disable-tools --disable-docs --enable-static-msvcrt --enable-vp8 --enable-vp9 --enable-webm-io --size-limit=4096x4096
+echo "=== CONFIGURING LIBVPX ==="
+./configure --prefix="$FullScriptPath/../local" \
+    --target="$TOOLCHAIN" \
+    --as=yasm \
+    --disable-examples \
+    --disable-unit-tests \
+    --disable-tools \
+    --disable-docs \
+    --enable-static-msvcrt \
+    --enable-vp8 \
+    --enable-vp9 \
+    --enable-webm-io \
+    --size-limit=4096x4096
 
-if ! make -j"$NUMBER_OF_PROCESSORS"; then
-    echo "=== LIBVPX MAKE RETRY WITH VERBOSE OUTPUT ==="
-    make V=1 || exit 1
+echo "=== GENERATING LIBVPX MAKEFILES AND PROJECTS ==="
+make NO_LAUNCH_DEVENV=1 -j"$NUMBER_OF_PROCESSORS"
+
+echo "=== LOCATING MSBUILD ==="
+MSBUILD_BIN=""
+if command -v msbuild.exe >/dev/null 2>&1; then
+    MSBUILD_BIN="msbuild.exe"
+elif command -v MSBuild.exe >/dev/null 2>&1; then
+    MSBUILD_BIN="MSBuild.exe"
+else
+    for p in "/c/Program Files/Microsoft Visual Studio"/*/*/MSBuild/Current/Bin/MSBuild.exe \
+             "/c/Program Files (x86)/Microsoft Visual Studio"/*/*/MSBuild/Current/Bin/MSBuild.exe; do
+        if [ -f "$p" ]; then
+            MSBUILD_BIN="$p"
+            break
+        fi
+    done
 fi
-make -j"$NUMBER_OF_PROCESSORS" install
 
+echo "Using MSBuild at: $MSBUILD_BIN"
+if [ -n "$MSBUILD_BIN" ]; then
+    "$MSBUILD_BIN" vpx.sln -m -t:Build -p:Configuration=Release -p:Platform=x64 || \
+    "$MSBUILD_BIN" vpx.sln -m -t:Build -p:Configuration=Release -p:Platform=x64 -p:PlatformToolset=v144 || \
+    cmd.exe /c "msbuild.exe vpx.sln /m /t:Build /p:Configuration=Release /p:Platform=x64"
+else
+    cmd.exe /c "msbuild.exe vpx.sln /m /t:Build /p:Configuration=Release /p:Platform=x64"
+fi
+
+echo "=== INSTALLING LIBVPX ==="
+make NO_LAUNCH_DEVENV=1 -j"$NUMBER_OF_PROCESSORS" install
+
+mkdir -p "$FullScriptPath/../local/lib/x64" "$FullScriptPath/../local/lib"
+if [ -f "x64/Release/vpxmt.lib" ]; then
+    cp -f "x64/Release/vpxmt.lib" "$FullScriptPath/../local/lib/x64/vpxmt.lib" 2>/dev/null || true
+    cp -f "x64/Release/vpxmt.lib" "$FullScriptPath/../local/lib/x64/vpx.lib" 2>/dev/null || true
+    cp -f "x64/Release/vpxmt.lib" "$FullScriptPath/../local/lib/vpxmt.lib" 2>/dev/null || true
+    cp -f "x64/Release/vpxmt.lib" "$FullScriptPath/../local/lib/vpx.lib" 2>/dev/null || true
+fi
 if [ -f "$FullScriptPath/../local/lib/x64/vpxmt.lib" ]; then
-    cp "$FullScriptPath/../local/lib/x64/vpxmt.lib" "$FullScriptPath/../local/lib/x64/vpx.lib" 2>/dev/null || true
-    cp "$FullScriptPath/../local/lib/x64/vpxmt.lib" "$FullScriptPath/../local/lib/vpxmt.lib" 2>/dev/null || true
-    cp "$FullScriptPath/../local/lib/x64/vpxmt.lib" "$FullScriptPath/../local/lib/vpx.lib" 2>/dev/null || true
+    cp -f "$FullScriptPath/../local/lib/x64/vpxmt.lib" "$FullScriptPath/../local/lib/x64/vpx.lib" 2>/dev/null || true
+    cp -f "$FullScriptPath/../local/lib/x64/vpxmt.lib" "$FullScriptPath/../local/lib/vpxmt.lib" 2>/dev/null || true
+    cp -f "$FullScriptPath/../local/lib/x64/vpxmt.lib" "$FullScriptPath/../local/lib/vpx.lib" 2>/dev/null || true
 fi
+
+echo "=== LIBVPX BUILD COMPLETE ==="
 ''')
                 except Exception as e:
                     print('[WARN] Could not patch build_libvpx_win.sh:', e)
@@ -1232,6 +1278,10 @@ win:
 
     if exist %THIRDPARTY_DIR%\\msys64\\usr\\bin\\link.exe del /f /q %THIRDPARTY_DIR%\\msys64\\usr\\bin\\link.exe
     if exist C:\\msys64\\usr\\bin\\link.exe del /f /q C:\\msys64\\usr\\bin\\link.exe
+    if exist %THIRDPARTY_DIR%\\msys64\\usr\\bin\\msbuild.exe del /f /q %THIRDPARTY_DIR%\\msys64\\usr\\bin\\msbuild.exe
+    if exist %THIRDPARTY_DIR%\\msys64\\usr\\bin\\msbuild del /f /q %THIRDPARTY_DIR%\\msys64\\usr\\bin\\msbuild
+    if exist C:\\msys64\\usr\\bin\\msbuild.exe del /f /q C:\\msys64\\usr\\bin\\msbuild.exe
+    if exist C:\\msys64\\usr\\bin\\msbuild del /f /q C:\\msys64\\usr\\bin\\msbuild
 
     SET "TARGET="
     SET "_CL_="
@@ -1342,6 +1392,10 @@ depends:patches/ffmpeg.patch
 
     if exist %THIRDPARTY_DIR%\\msys64\\usr\\bin\\link.exe del /f /q %THIRDPARTY_DIR%\\msys64\\usr\\bin\\link.exe
     if exist C:\\msys64\\usr\\bin\\link.exe del /f /q C:\\msys64\\usr\\bin\\link.exe
+    if exist %THIRDPARTY_DIR%\\msys64\\usr\\bin\\msbuild.exe del /f /q %THIRDPARTY_DIR%\\msys64\\usr\\bin\\msbuild.exe
+    if exist %THIRDPARTY_DIR%\\msys64\\usr\\bin\\msbuild del /f /q %THIRDPARTY_DIR%\\msys64\\usr\\bin\\msbuild
+    if exist C:\\msys64\\usr\\bin\\msbuild.exe del /f /q C:\\msys64\\usr\\bin\\msbuild.exe
+    if exist C:\\msys64\\usr\\bin\\msbuild del /f /q C:\\msys64\\usr\\bin\\msbuild
 
     SET "TARGET="
     SET "_CL_="
