@@ -597,10 +597,10 @@ sed -i 's|\\$(SRC_PATH_BARE)/build|./build|g' Makefile libs.mk solution.mk 2>/de
 # Explicitly invoke scripts via perl//usr/bin/bash to prevent Windows CreateProcess 193 and WSL bash errors
 sed -i 's|\\$(SRC_PATH_BARE)/build/make/rtcd.pl|perl ./build/make/rtcd.pl|g' libs.mk 2>/dev/null || true
 sed -i 's|\\$(SRC_PATH_BARE)/build/make/gen_msvs_def.sh|/usr/bin/bash ./build/make/gen_msvs_def.sh|g' libs.mk 2>/dev/null || true
-sed -i 's|\\$(GEN_VCPROJ)|/usr/bin/bash \\$(GEN_VCPROJ)|g' libs.mk 2>/dev/null || true
 sed -i 's|\\$(SRC_PATH_BARE)/build/make/gen_msvs_sln.sh|/usr/bin/bash ./build/make/gen_msvs_sln.sh|g' solution.mk 2>/dev/null || true
 sed -i 's|\\$(SRC_PATH_BARE)/build/make/version.sh|/usr/bin/bash ./build/make/version.sh|g' libs.mk 2>/dev/null || true
 sed -i 's|GEN_VCPROJ=.*|GEN_VCPROJ=/usr/bin/bash ./build/make/gen_msvs_vcxproj.sh|g' libs-*.mk 2>/dev/null || true
+sed -i 's|GEN_SLN=.*|GEN_SLN=/usr/bin/bash ./build/make/gen_msvs_sln.sh|g' solution-*.mk 2>/dev/null || true
 sed -i '1iSHELL := /usr/bin/bash' Makefile 2>/dev/null || true
 echo "SHELL := /usr/bin/bash" >> config.mk 2>/dev/null || true
 
@@ -664,7 +664,9 @@ mkdir -p "$FullScriptPath/../local/include/vpx"
 
 # Copy headers
 cp -f vpx/*.h "$FullScriptPath/../local/include/vpx/" 2>/dev/null || true
+cp -f vpx/*.h "$FullScriptPath/../local/include/" 2>/dev/null || true
 cp -f vpx_version.h "$FullScriptPath/../local/include/vpx/" 2>/dev/null || true
+cp -f vpx_version.h "$FullScriptPath/../local/include/" 2>/dev/null || true
 
 # Find compiled .lib files and copy to expected destinations
 for libpath in x64/Release/*.lib Release/*.lib ./*.lib; do
