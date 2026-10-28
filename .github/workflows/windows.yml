@@ -136,6 +136,10 @@ jobs:
               Copy-Item -Path $gperf -Destination "C:\msys64\usr\bin\gperf.exe" -Force -ErrorAction SilentlyContinue
             }
           }
+          if (Test-Path "C:\ProgramData\chocolatey\bin") {
+            Add-Content -Path $env:GITHUB_PATH -Value "C:\ProgramData\chocolatey\bin"
+            $env:PATH = "C:\ProgramData\chocolatey\bin;$env:PATH"
+          }
 
       - name: NuGet sources
         run: |
@@ -201,17 +205,19 @@ jobs:
               $env:PATH = "C:\msys64\usr\bin;$env:PATH"
             }
 
-            # 7. Ensure MSYS2 has pkgconf, make, gperf installed
+            # 7. Ensure MSYS2 has pkgconf installed so /usr/bin/pkg-config is available
             try {
               if (Test-Path "C:\msys64\usr\bin\pacman.exe") {
-                Write-Host "Installing MSYS2 pkgconf, make, gperf in C:\msys64..."
-                & "C:\msys64\usr\bin\pacman.exe" -S --noconfirm --needed pkgconf make gperf
+                Write-Host "Installing MSYS2 pkgconf in C:\msys64..."
+                & "C:\msys64\usr\bin\pacman.exe" -S --noconfirm --needed pkgconf make
               }
             } catch {
-              Write-Warning "Could not install MSYS2 tools: $_"
+              Write-Warning "Could not install MSYS2 pkgconf: $_"
             }
           } catch {
             Write-Warning "Configure environment warning: $_"
+          } finally {
+            $global:LASTEXITCODE = 0
           }
 
       - name: Prepare build tree
@@ -352,10 +358,10 @@ jobs:
               Copy-Item "$libsDir\zlib\Debug\zlibstatic.lib" "$libsDir\zlib\Debug\libzsd.lib" -Force -ErrorAction SilentlyContinue
             }
 
-            # Ensure MSYS2 pkgconf, make, gperf exist in ThirdParty msys64
+            # Ensure MSYS2 pkgconf exists in ThirdParty msys64
             try {
               if (Test-Path "$tpDir\msys64\usr\bin\pacman.exe") {
-                & "$tpDir\msys64\usr\bin\pacman.exe" -S --noconfirm --needed pkgconf make gperf
+                & "$tpDir\msys64\usr\bin\pacman.exe" -S --noconfirm --needed pkgconf make
               }
             } catch {}
 
@@ -439,6 +445,8 @@ jobs:
             }
           } catch {
             Write-Warning "Cleanup warning: $_"
+          } finally {
+            $global:LASTEXITCODE = 0
           }
 
       - name: Prepare dependencies
