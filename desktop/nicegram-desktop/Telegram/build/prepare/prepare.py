@@ -2364,12 +2364,17 @@ win:
     SET OPENSSL_DIR=%LIBS_DIR%\\openssl3
     SET OPENSSL_LIBS_DIR=%OPENSSL_DIR%\\out
     SET ZLIB_LIBS_DIR=%LIBS_DIR%\\zlib
+    SET "GPERF_PATH=%THIRDPARTY_DIR%\\msys64\\usr\\bin\\gperf.exe"
+    if not exist "%GPERF_PATH%" if exist "C:\\msys64\\usr\\bin\\gperf.exe" SET "GPERF_PATH=C:\\msys64\\usr\\bin\\gperf.exe"
+    if not exist "%GPERF_PATH%" if exist "C:\\ProgramData\\chocolatey\\bin\\gperf.exe" SET "GPERF_PATH=C:\\ProgramData\\chocolatey\\bin\\gperf.exe"
+    if not exist "%GPERF_PATH%" SET "GPERF_PATH=gperf.exe"
     %THIRDPARTY_DIR%\\msys64\\usr\\bin\\sed -i "s/STREQUAL/MATCHES/" td/generate/CMakeLists.txt
     mkdir out
     cd out
     mkdir Debug
     cd Debug
     cmake ^
+        -DGPERF_EXECUTABLE:FILEPATH="%GPERF_PATH%" ^
         -DOPENSSL_FOUND=1 ^
         -DOPENSSL_INCLUDE_DIR=%OPENSSL_DIR%\\include ^
         -DOPENSSL_CRYPTO_LIBRARY="%OPENSSL_LIBS_DIR%.dbg\\libcrypto.lib" ^
@@ -2392,6 +2397,7 @@ release:
     mkdir Release
     cd Release
     cmake ^
+        -DGPERF_EXECUTABLE:FILEPATH="%GPERF_PATH%" ^
         -DOPENSSL_FOUND=1 ^
         -DOPENSSL_INCLUDE_DIR=%OPENSSL_DIR%\\include ^
         -DOPENSSL_CRYPTO_LIBRARY="%OPENSSL_LIBS_DIR%\\libcrypto.lib" ^

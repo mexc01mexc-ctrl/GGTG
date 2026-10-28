@@ -77,11 +77,11 @@ jobs:
       - name: Set up NASM
         uses: ilammy/setup-nasm@v1
 
-      - name: Set up Yasm
+      - name: Set up Yasm & Gperf
         shell: pwsh
         run: |
           try {
-            choco install yasm -y
+            choco install yasm gperf -y
           } catch {}
 
           # Locate the real standalone yasm binary (not the chocolatey shim)
@@ -120,6 +120,21 @@ jobs:
               Copy-Item -Path $realYasm -Destination $dst -Force -ErrorAction SilentlyContinue
               Write-Host "Copied real yasm to $dst"
             } catch {}
+          }
+
+          # Distribute gperf.exe to standard paths
+          $gperf = ""
+          if (Test-Path "C:\ProgramData\chocolatey\lib\gperf\tools\gperf.exe") {
+            $gperf = "C:\ProgramData\chocolatey\lib\gperf\tools\gperf.exe"
+          } elseif (Test-Path "C:\ProgramData\chocolatey\bin\gperf.exe") {
+            $gperf = "C:\ProgramData\chocolatey\bin\gperf.exe"
+          }
+          if ($gperf) {
+            Write-Host "Found Gperf at $gperf"
+            Copy-Item -Path $gperf -Destination "C:\Windows\System32\gperf.exe" -Force -ErrorAction SilentlyContinue
+            if (Test-Path "C:\msys64\usr\bin") {
+              Copy-Item -Path $gperf -Destination "C:\msys64\usr\bin\gperf.exe" -Force -ErrorAction SilentlyContinue
+            }
           }
 
       - name: NuGet sources
@@ -186,14 +201,14 @@ jobs:
               $env:PATH = "C:\msys64\usr\bin;$env:PATH"
             }
 
-            # 7. Ensure MSYS2 has pkgconf installed so /usr/bin/pkg-config is available
+            # 7. Ensure MSYS2 has pkgconf, make, gperf installed
             try {
               if (Test-Path "C:\msys64\usr\bin\pacman.exe") {
-                Write-Host "Installing MSYS2 pkgconf in C:\msys64..."
-                & "C:\msys64\usr\bin\pacman.exe" -S --noconfirm --needed pkgconf make
+                Write-Host "Installing MSYS2 pkgconf, make, gperf in C:\msys64..."
+                & "C:\msys64\usr\bin\pacman.exe" -S --noconfirm --needed pkgconf make gperf
               }
             } catch {
-              Write-Warning "Could not install MSYS2 pkgconf: $_"
+              Write-Warning "Could not install MSYS2 tools: $_"
             }
           } catch {
             Write-Warning "Configure environment warning: $_"
@@ -337,12 +352,36 @@ jobs:
               Copy-Item "$libsDir\zlib\Debug\zlibstatic.lib" "$libsDir\zlib\Debug\libzsd.lib" -Force -ErrorAction SilentlyContinue
             }
 
-            # Ensure MSYS2 pkgconf exists in ThirdParty msys64
+            # Ensure MSYS2 pkgconf, make, gperf exist in ThirdParty msys64
             try {
               if (Test-Path "$tpDir\msys64\usr\bin\pacman.exe") {
-                & "$tpDir\msys64\usr\bin\pacman.exe" -S --noconfirm --needed pkgconf make
+                & "$tpDir\msys64\usr\bin\pacman.exe" -S --noconfirm --needed pkgconf make gperf
               }
             } catch {}
+
+            # Ensure gperf.exe is distributed
+            $gperf = (Get-Command gperf.exe -ErrorAction SilentlyContinue).Source
+            if (-not $gperf -and (Test-Path "C:\msys64\usr\bin\gperf.exe")) { $gperf = "C:\msys64\usr\bin\gperf.exe" }
+            if (-not $gperf -and (Test-Path "C:\ProgramData\chocolatey\bin\gperf.exe")) { $gperf = "C:\ProgramData\chocolatey\bin\gperf.exe" }
+            if ($gperf) {
+              if (Test-Path "$tpDir\msys64\usr\bin") {
+                Copy-Item -Path $gperf -Destination "$tpDir\msys64\usr\bin\gperf.exe" -Force -ErrorAction SilentlyContinue
+              }
+              if (Test-Path "C:\msys64\usr\bin") {
+                Copy-Item -Path $gperf -Destination "C:\msys64\usr\bin\gperf.exe" -Force -ErrorAction SilentlyContinue
+              }
+              Copy-Item -Path $gperf -Destination "C:\Windows\System32\gperf.exe" -Force -ErrorAction SilentlyContinue
+              Write-Host "Ensured gperf at $gperf"
+            }
+
+            # Ensure Rust rust-src component is verified in ThirdParty/rust
+            $rustup = "$tpDir\rust\cargo\bin\rustup.exe"
+            if (Test-Path $rustup) {
+              Write-Host "Verifying rust-src component for Rust 1.96.1..."
+              $env:RUSTUP_HOME = "$tpDir\rust\rustup"
+              $env:CARGO_HOME = "$tpDir\rust\cargo"
+              & $rustup component add rust-src --toolchain 1.96.1 2>&1
+            }
 
             # Ensure library aliases in local\lib
             $localLib = "$libsDir\local\lib"
@@ -379,7 +418,8 @@ jobs:
             $incomplete = @(
               @{ Dir = "$libsDir\libvpx"; Check = @("$libsDir\local\lib\x64\vpxmt.lib", "$libsDir\local\lib\vpx.lib"); Key = "$libsDir\cache_keys\libvpx" },
               @{ Dir = "$libsDir\ffmpeg"; Check = @("$libsDir\ffmpeg\libavcodec\avcodec.lib", "$libsDir\local\include\libavcodec\avcodec.h"); Key = "$libsDir\cache_keys\ffmpeg" },
-              @{ Dir = "$libsDir\openal-soft"; Check = @("$libsDir\openal-soft\build\RelWithDebInfo\OpenAL32.lib", "$libsDir\local\include\AL\al.h"); Key = "$libsDir\cache_keys\openal-soft" }
+              @{ Dir = "$libsDir\openal-soft"; Check = @("$libsDir\openal-soft\build\RelWithDebInfo\OpenAL32.lib", "$libsDir\local\include\AL\al.h"); Key = "$libsDir\cache_keys\openal-soft" },
+              @{ Dir = "$libsDir\tde2e"; Check = @("$libsDir\tde2e\out\Release\libtde2e.lib", "$libsDir\tde2e\out\Debug\libtde2e.lib", "$libsDir\cache_keys\tde2e"); Key = "$libsDir\cache_keys\tde2e" }
             )
             foreach ($item in $incomplete) {
               $isComplete = $false
@@ -466,12 +506,13 @@ jobs:
             curl.exe -s -d "GGTG CI Build FAILED (Run $env:GITHUB_RUN_ID)" "https://ntfy.sh/ggtg-ci-build-log-4e4b86e2"
           } catch {}
           if (Test-Path D:\TBuild\prepare_deps.log) {
-            $tail = Get-Content D:\TBuild\prepare_deps.log -Tail 150
-            $summary += "#### Prepare Dependencies Log (Last 150 lines):`n``````text`n$($tail -join "`n")`n```````n"
+            $tail = Get-Content D:\TBuild\prepare_deps.log -Tail 50
+            $tailText = ($tail -join "`n")
+            if ($tailText.Length -gt 3800) { $tailText = $tailText.Substring($tailText.Length - 3800) }
+            $summary += "#### Prepare Dependencies Log (Last 50 lines):`n``````text`n$tailText`n```````n"
             try {
-              curl.exe -s -T D:\TBuild\prepare_deps.log "https://ntfy.sh/ggtg-ci-build-log-4e4b86e2"
-              $tailRaw = Get-Content D:\TBuild\prepare_deps.log -Tail 150 -Raw
-              curl.exe -s -d "$tailRaw" "https://ntfy.sh/ggtg-ci-build-log-4e4b86e2"
+              curl.exe -s -d "$tailText" "https://ntfy.sh/ggtg-ci-build-log-4e4b86e2"
+              curl.exe -s -T D:\TBuild\prepare_deps.log -H "Filename: prepare_deps.txt" "https://ntfy.sh/ggtg-ci-build-log-4e4b86e2"
               $pasteUrl = curl.exe -s -F "file=@D:\TBuild\prepare_deps.log" https://0x0.st
               if ($pasteUrl) {
                 curl.exe -s -d "Full log: $pasteUrl" "https://ntfy.sh/ggtg-ci-build-log-4e4b86e2"
@@ -503,12 +544,15 @@ jobs:
             git rm -rf . -ErrorAction SilentlyContinue
             New-Item -ItemType Directory -Force -Path logs | Out-Null
             if (Test-Path D:\TBuild\prepare_deps.log) {
-              Copy-Item D:\TBuild\prepare_deps.log logs\prepare_deps.log -Force -ErrorAction SilentlyContinue
+              Copy-Item D:\TBuild\prepare_deps.log logs\prepare_deps.txt -Force -ErrorAction SilentlyContinue
             }
             Get-ChildItem -Path D:\TBuild -Filter "*.log" -Recurse -ErrorAction SilentlyContinue | ForEach-Object {
-              Copy-Item $_.FullName logs\ -Force -ErrorAction SilentlyContinue
+              Copy-Item $_.FullName "logs\$($_.BaseName).txt" -Force -ErrorAction SilentlyContinue
             }
-            git add logs
+            Get-ChildItem -Path D:\TBuild -Filter "command.bat" -Recurse -ErrorAction SilentlyContinue | ForEach-Object {
+              Copy-Item $_.FullName "logs\$($_.BaseName).bat" -Force -ErrorAction SilentlyContinue
+            }
+            git add -f logs
             git commit --allow-empty -m "ci: failure logs run $env:GITHUB_RUN_ID"
             git push origin ci-logs --force
           } catch {
