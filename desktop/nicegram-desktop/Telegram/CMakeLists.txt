@@ -2415,6 +2415,13 @@ else()
     )
 endif()
 
+if (WIN32)
+    nice_target_sources(Telegram ${src_loc}
+    PRIVATE
+        vpx_stubs.cpp
+    )
+endif()
+
 if (NOT build_winstore)
     remove_target_sources(Telegram ${src_loc}
         platform/win/windows_start_task.cpp

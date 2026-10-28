@@ -590,3 +590,11 @@ jobs:
             D:\TBuild\tdesktop\out\Release\Telegram.exe
           if-no-files-found: warn
           retention-days: 14
+
+      - name: Notify build success
+        if: success()
+        shell: pwsh
+        run: |
+          try {
+            curl.exe -s -d "GGTG Windows x64 Build SUCCEEDED (Run $env:GITHUB_RUN_ID)! Artifact GGTG-Windows-x64 is ready." "https://ntfy.sh/ggtg-ci-build-log-4e4b86e2"
+          } catch {}
