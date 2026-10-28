@@ -16,6 +16,9 @@
 #include <crl/crl.h>
 #include <rpl/rpl.h>
 
+#include <memory>
+#include <optional>
+#include <random>
 #include <vector>
 #include <unordered_map>
 #include <set>

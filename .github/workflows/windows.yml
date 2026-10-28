@@ -485,7 +485,7 @@ jobs:
           QT: "5.15.19"
         run: |
           set QT=5.15.19
-          call configure.bat x64 -D TDESKTOP_API_ID=2040 -D TDESKTOP_API_HASH=b18441a1ff607e10a989891a5462e627 -D CMAKE_DISABLE_PRECOMPILE_HEADERS=ON -D CMAKE_AUTOGEN_SKIP_PRECOMPILE_HEADERS=ON
+          call configure.bat x64 -D TDESKTOP_API_ID=2040 -D TDESKTOP_API_HASH=b18441a1ff607e10a989891a5462e627
 
       - name: Build GGTG EXE
         working-directory: D:\TBuild\tdesktop\out
