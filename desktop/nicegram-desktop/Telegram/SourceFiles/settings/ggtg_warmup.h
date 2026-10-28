@@ -503,7 +503,7 @@ private:
 		auto joinsAcc = std::make_shared<int>(0);
 
 		auto visitNext = std::make_shared<Fn<void()>>();
-		*visitNext = [=, this, countToVisit]() {
+		*visitNext = [=, this]() {
 			if (_cancelled || *visitIndex >= countToVisit) {
 				UpdateAccountWarmupStats(
 					account,

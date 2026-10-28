@@ -306,7 +306,21 @@ void CreateBackupSessionWith(
 	const QString &note,
 	Fn<void(Fn<void(QString password)> submit, Fn<void()> cancel)>
 		requestPassword,
+	Fn<void(QString error, QString id)> done,
+	bool asAndroid = false);
+
+void CreateMobileSessionWith(
+	not_null<Main::Account*> account,
+	const QString &note,
+	Fn<void(Fn<void(QString password)> submit, Fn<void()> cancel)>
+		requestPassword,
 	Fn<void(QString error, QString id)> done);
+
+void RunSequentialAccountsAction(
+	not_null<Window::SessionController*> controller,
+	std::vector<not_null<Main::Account*>> accounts,
+	Fn<void(not_null<Main::Account*> account, Fn<void(bool success, QString message)> done)> step,
+	const QString &title);
 
 // Stops running `account` on its current session - locally only, nothing is
 // sent to Telegram, so that session stays valid for whoever takes it - and

@@ -448,6 +448,8 @@ inline void RemoveStored(const QString &id) {
 	return entry.role == u"backup"_q
 		|| entry.role == u"duplicate"_q
 		|| entry.role == u"imported"_q
+		|| entry.role == u"purchased"_q
+		|| entry.role == u"anti_theft_backup"_q
 		|| entry.role == u"exported"_q
 		|| entry.role == u"android"_q
 		|| entry.role == u"desktop"_q
@@ -458,6 +460,10 @@ inline void RemoveStored(const QString &id) {
 [[nodiscard]] inline QString RoleTitle(const QString &role) {
 	if (role == u"backup"_q) {
 		return u"резервная"_q;
+	} else if (role == u"anti_theft_backup"_q) {
+		return u"резервная (анти-угон)"_q;
+	} else if (role == u"purchased"_q) {
+		return u"купленная"_q;
 	} else if (role == u"duplicate"_q) {
 		return u"дублированная"_q;
 	} else if (role == u"imported"_q) {
@@ -472,6 +478,41 @@ inline void RemoveStored(const QString &id) {
 		return u"бывшая рабочая"_q;
 	}
 	return u"сохранённая"_q;
+}
+
+// Anti-theft trust cooldown: Telegram requires a newly created authorization
+// to be at least 24 hours (86400 seconds) old before it is allowed to terminate
+// other authorizations (FRESH_RESET_AUTHORISATION_FORBIDDEN) or change the phone number
+// (FRESH_CHANGE_PHONE_FORBIDDEN).
+constexpr qint64 kAntiTheftTrustCooldown = 86400;
+
+[[nodiscard]] inline bool IsSessionTrusted(const StoredSession &entry) {
+	if (entry.createdAt <= 0) {
+		return false;
+	}
+	const auto now = QDateTime::currentSecsSinceEpoch();
+	return (now - entry.createdAt) >= kAntiTheftTrustCooldown;
+}
+
+[[nodiscard]] inline qint64 SecondsUntilTrusted(const StoredSession &entry) {
+	if (entry.createdAt <= 0) {
+		return kAntiTheftTrustCooldown;
+	}
+	const auto now = QDateTime::currentSecsSinceEpoch();
+	const auto elapsed = now - entry.createdAt;
+	return (elapsed >= kAntiTheftTrustCooldown) ? 0 : (kAntiTheftTrustCooldown - elapsed);
+}
+
+[[nodiscard]] inline QString TrustCountdownString(const StoredSession &entry) {
+	const auto remaining = SecondsUntilTrusted(entry);
+	if (remaining <= 0) {
+		return u"выдержана (> 24 ч., готова к сбросу сессий)"_q;
+	}
+	const auto hours = remaining / 3600;
+	const auto minutes = (remaining % 3600) / 60;
+	return u"отлёжка: осталось %1 ч. %2 мин."_q
+		.arg(hours)
+		.arg(minutes, 2, 10, QChar('0'));
 }
 
 // A spare handed out with an export: it stays here (the account can still
@@ -522,6 +563,23 @@ inline void UpdateStoredProxy(const QString &userId, const QJsonObject &proxy) {
 	for (auto &entry : entries) {
 		if (entry.userId == userId) {
 			entry.proxy = proxy;
+			WriteSessionVaultSidecar(entry);
+			changed = true;
+		}
+	}
+	if (changed) {
+		SaveVault(entries);
+	}
+}
+
+// The account's phone number changed: update all stored sessions
+// so the vault reflects the new phone.
+inline void UpdateStoredPhone(const QString &userId, const QString &phone) {
+	auto entries = LoadVault();
+	auto changed = false;
+	for (auto &entry : entries) {
+		if (entry.userId == userId) {
+			entry.phone = phone;
 			WriteSessionVaultSidecar(entry);
 			changed = true;
 		}

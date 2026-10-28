@@ -29,6 +29,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "main/main_session_settings.h"
 #include "main/session_duplicate.h"
 #include "mtproto/facade.h"
+#include "mtproto/mtproto_config.h"
 #include "mtproto/mtproto_proxy_data.h"
 #include "mtproto/proxy_pool.h"
 #include "mtproto/sender.h"
@@ -36,7 +37,9 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "settings/ggtg_android_profiles.h"
 #include "settings/ggtg_export.h"
 #include "storage/localstorage.h"
+#include "storage/serialize_common.h"
 #include "storage/storage_tdata_export.h"
+#include "storage/storage_tdata_import.h"
 #include "ui/boxes/confirm_box.h"
 #include "ui/layers/generic_box.h"
 #include "ui/layers/show.h"
@@ -498,28 +501,28 @@ inline SqliteFunctions LoadSqlite() {
 	static const SqliteFunctions funcs = [] {
 		SqliteFunctions f;
 #ifdef Q_OS_MAC
-		void *lib = dlopen("libsqlite3.dylib", RTLD_LAZY);
-		if (lib) {
-			f.open_v2 = (decltype(f.open_v2))dlsym(lib, "sqlite3_open_v2");
-			f.prepare_v2 = (decltype(f.prepare_v2))dlsym(lib, "sqlite3_prepare_v2");
-			f.step = (decltype(f.step))dlsym(lib, "sqlite3_step");
-			f.column_int = (decltype(f.column_int))dlsym(lib, "sqlite3_column_int");
-			f.column_text = (decltype(f.column_text))dlsym(lib, "sqlite3_column_text");
-			f.finalize = (decltype(f.finalize))dlsym(lib, "sqlite3_finalize");
-			f.close = (decltype(f.close))dlsym(lib, "sqlite3_close");
+		void *macLib = dlopen("libsqlite3.dylib", RTLD_LAZY);
+		if (macLib) {
+			f.open_v2 = (decltype(f.open_v2))dlsym(macLib, "sqlite3_open_v2");
+			f.prepare_v2 = (decltype(f.prepare_v2))dlsym(macLib, "sqlite3_prepare_v2");
+			f.step = (decltype(f.step))dlsym(macLib, "sqlite3_step");
+			f.column_int = (decltype(f.column_int))dlsym(macLib, "sqlite3_column_int");
+			f.column_text = (decltype(f.column_text))dlsym(macLib, "sqlite3_column_text");
+			f.finalize = (decltype(f.finalize))dlsym(macLib, "sqlite3_finalize");
+			f.close = (decltype(f.close))dlsym(macLib, "sqlite3_close");
 			if (f.valid()) return f;
 		}
 #endif
-		static QLibrary lib("sqlite3");
-		if (!lib.isLoaded()) lib.load();
-		if (lib.isLoaded()) {
-			f.open_v2 = (decltype(f.open_v2))lib.resolve("sqlite3_open_v2");
-			f.prepare_v2 = (decltype(f.prepare_v2))lib.resolve("sqlite3_prepare_v2");
-			f.step = (decltype(f.step))lib.resolve("sqlite3_step");
-			f.column_int = (decltype(f.column_int))lib.resolve("sqlite3_column_int");
-			f.column_text = (decltype(f.column_text))lib.resolve("sqlite3_column_text");
-			f.finalize = (decltype(f.finalize))lib.resolve("sqlite3_finalize");
-			f.close = (decltype(f.close))lib.resolve("sqlite3_close");
+		static QLibrary qlib("sqlite3");
+		if (!qlib.isLoaded()) qlib.load();
+		if (qlib.isLoaded()) {
+			f.open_v2 = (decltype(f.open_v2))qlib.resolve("sqlite3_open_v2");
+			f.prepare_v2 = (decltype(f.prepare_v2))qlib.resolve("sqlite3_prepare_v2");
+			f.step = (decltype(f.step))qlib.resolve("sqlite3_step");
+			f.column_int = (decltype(f.column_int))qlib.resolve("sqlite3_column_int");
+			f.column_text = (decltype(f.column_text))qlib.resolve("sqlite3_column_text");
+			f.finalize = (decltype(f.finalize))qlib.resolve("sqlite3_finalize");
+			f.close = (decltype(f.close))qlib.resolve("sqlite3_close");
 		}
 		return f;
 	}();
@@ -877,7 +880,9 @@ inline QString GenerateStrongPassword(int length = 18) {
 	}
 	for (int i = int(result.size()) - 1; i > 0; --i) {
 		const auto j = base::RandomIndex(i + 1);
-		std::swap(result[i], result[j]);
+		const auto tmp = result[i];
+		result[i] = result[j];
+		result[j] = tmp;
 	}
 	return result;
 }
@@ -1061,21 +1066,30 @@ inline void FetchBalance(
 
 // Countries the SMS service really has (action=getCountries), by service id.
 // Only the service's own current list is ever shown, never a built-in one.
+inline QMutex &LiveCountriesMutex() {
+	static auto mutex = QMutex();
+	return mutex;
+}
+
 [[nodiscard]] inline QMap<QString, std::vector<CountryItem>> &LiveCountries() {
 	static auto map = QMap<QString, std::vector<CountryItem>>();
 	return map;
 }
 
-[[nodiscard]] inline const std::vector<CountryItem> &CountriesFor(
+[[nodiscard]] inline std::vector<CountryItem> CountriesFor(
 		const QString &serviceId) {
+	const auto lock = QMutexLocker(&LiveCountriesMutex());
 	const auto &live = LiveCountries();
 	const auto it = live.constFind(serviceId);
-	static const auto none = std::vector<CountryItem>();
-	return (it != live.constEnd()) ? *it : none;
+	return (it != live.constEnd()) ? *it : std::vector<CountryItem>();
 }
 
 [[nodiscard]] inline QString CountryTitle(const CountryItem &c) {
-	auto result = c.flag.isEmpty() ? c.name : (c.flag + ' ' + c.name);
+	auto result = QString();
+	if (!c.flag.isEmpty()) {
+		result += c.flag + ' ';
+	}
+	result += c.name;
 	if (!c.phoneCode.isEmpty()) {
 		result += u" ("_q + c.phoneCode + u")"_q;
 	}
@@ -1321,7 +1335,10 @@ inline void FetchCountries(
 			done(u"Сервис не вернул список стран"_q);
 			return;
 		}
-		LiveCountries().insert(serviceId, std::move(list));
+		{
+			const auto lock = QMutexLocker(&LiveCountriesMutex());
+			LiveCountries().insert(serviceId, std::move(list));
+		}
 		done(QString());
 	});
 }
@@ -3354,7 +3371,7 @@ private:
 
 	void submitTelegramCode(const QString &code) {
 		if (_cancelled) return;
-		log(u"Авторизация в Telegram с кодом "_q + code + u"...");
+		log(u"Авторизация в Telegram с кодом "_q + code + u"..."_q);
 		status(u"Авторизация в Telegram..."_q, false);
 
 		const auto weak = std::weak_ptr<SingleRegistrationWorker>(shared_from_this());
@@ -4335,6 +4352,122 @@ private:
 // -----------------------------------------------------------------------------
 // Phone Migration (Change Phone Number) via Mobile Sessions
 // -----------------------------------------------------------------------------
+struct MobileMtpSessionRunner {
+	std::shared_ptr<MTP::Instance> instance;
+	std::shared_ptr<MTP::Sender> sender;
+};
+
+inline MTP::ProxyData ProxyFromJsonObject(const QJsonObject &object) {
+	auto result = MTP::ProxyData();
+	if (object.isEmpty()) {
+		return result;
+	}
+	result.type = MTP::ProxyData::Type(object["type"].toInt());
+	result.host = object["host"].toString();
+	result.port = uint32(object["port"].toInt());
+	result.user = object["user"].toString();
+	result.password = object["password"].toString();
+	return result;
+}
+
+inline std::shared_ptr<MobileMtpSessionRunner> CreateMobileMtpRunner(
+		not_null<Main::Account*> account,
+		const Core::GgtgSessions::StoredSession &entry,
+		QString *outError) {
+	namespace Sessions = Core::GgtgSessions;
+	const auto folder = Sessions::VaultFolder(entry) + u"/tdata"_q;
+	const auto auths = Storage::ReadForeignTdataAuthorizations(folder);
+	if (auths.empty() || auths[0].data.isEmpty()) {
+		if (outError) *outError = u"Не удалось прочитать tdata мобильной сессии"_q;
+		return nullptr;
+	}
+
+	QDataStream stream(auths[0].data);
+	stream.setVersion(QDataStream::Qt_5_1);
+
+	auto legacyUserId = Serialize::read<qint32>(stream);
+	auto legacyMainDcId = Serialize::read<qint32>(stream);
+	auto sessUserId = quint64();
+	auto mainDcId = qint32();
+	if (((uint64(legacyUserId) << 32) | uint64(legacyMainDcId)) == ~uint64(0)) {
+		sessUserId = Serialize::read<quint64>(stream);
+		mainDcId = Serialize::read<qint32>(stream);
+	} else {
+		sessUserId = legacyUserId;
+		mainDcId = legacyMainDcId;
+	}
+	(void)sessUserId;
+
+	if (stream.status() != QDataStream::Ok || mainDcId <= 0) {
+		if (outError) *outError = u"Повреждены данные сессии (mainDcId)"_q;
+		return nullptr;
+	}
+
+	std::vector<std::shared_ptr<MTP::AuthKey>> keys;
+	const auto count = Serialize::read<qint32>(stream);
+	if (stream.status() == QDataStream::Ok && count > 0) {
+		keys.reserve(count);
+		for (auto i = 0; i != count; ++i) {
+			const auto dcId = Serialize::read<qint32>(stream);
+			const auto keyData = Serialize::read<MTP::AuthKey::Data>(stream);
+			if (stream.status() != QDataStream::Ok) {
+				break;
+			}
+			keys.push_back(std::make_shared<MTP::AuthKey>(MTP::AuthKey::Type::ReadFromFile, dcId, keyData));
+		}
+	}
+
+	if (keys.empty()) {
+		if (outError) *outError = u"Ключи авторизации не найдены в tdata"_q;
+		return nullptr;
+	}
+
+	auto fields = MTP::Instance::Fields();
+	fields.mainDcId = mainDcId;
+	fields.keys = std::move(keys);
+	fields.config = std::make_unique<MTP::Config>(Core::App().fallbackProductionConfig());
+
+	MTP::DeviceOverride devOverride;
+	if (!entry.device.isEmpty()) {
+		devOverride = Settings::DeviceOverrideFromJson(entry.device);
+	} else {
+		devOverride = account->deviceOverride();
+	}
+
+	const auto officialApiId = Ggtg::AndroidProfiles::kAppId;
+	const auto officialApiHash = QString::fromLatin1(Ggtg::AndroidProfiles::kAppHash);
+	const auto officialLangPack = QString::fromLatin1(Ggtg::AndroidProfiles::kLangPack);
+	const auto randomProfile = Ggtg::AndroidProfiles::RandomProfile();
+
+	fields.deviceOverride = devOverride;
+	fields.deviceModel = !devOverride.deviceModel.isEmpty() ? devOverride.deviceModel : randomProfile.deviceModel;
+	fields.systemVersion = !devOverride.systemVersion.isEmpty() ? devOverride.systemVersion : randomProfile.systemVersion;
+	fields.appVersion = !devOverride.appVersion.isEmpty() ? devOverride.appVersion : Ggtg::AndroidProfiles::RandomBuild();
+	fields.apiId = (devOverride.apiId > 0) ? devOverride.apiId : officialApiId;
+	fields.apiHash = (!devOverride.apiHash.isEmpty()) ? devOverride.apiHash : officialApiHash;
+	fields.deviceOverride.apiId = fields.apiId;
+	fields.deviceOverride.apiHash = fields.apiHash;
+	fields.deviceOverride.langPackName = officialLangPack;
+
+	MTP::ProxyData proxyData;
+	if (!entry.proxy.isEmpty()) {
+		proxyData = ProxyFromJsonObject(entry.proxy);
+	}
+	if (!MTP::HasRealProxy(proxyData) && MTP::HasRealProxy(account->proxyOverride())) {
+		proxyData = account->proxyOverride();
+	}
+	if (MTP::HasRealProxy(proxyData)) {
+		fields.proxyOverride = proxyData;
+	}
+
+	auto runner = std::make_shared<MobileMtpSessionRunner>();
+	runner->instance = std::make_shared<MTP::Instance>(
+		MTP::Instance::Mode::Normal,
+		std::move(fields));
+	runner->sender = std::make_shared<MTP::Sender>(runner->instance.get());
+	return runner;
+}
+
 inline void PerformAccountPhoneChange(
 		not_null<Main::Account*> account,
 		const SettingsData &settings,
@@ -4348,10 +4481,11 @@ inline void PerformAccountPhoneChange(
 	const auto userId = QString::number(account->session().userId().bare);
 	const auto vault = Sessions::LoadVault();
 
-	auto mobileTrusted = (const Sessions::StoredSession*)nullptr;
-	auto mobileYoung = (const Sessions::StoredSession*)nullptr;
+	auto mobileTrusted = std::optional<Sessions::StoredSession>();
+	auto mobileYoung = std::optional<Sessions::StoredSession>();
 
-	for (const auto &entry : Sessions::StoredForUser(vault, userId)) {
+	const auto userSessions = Sessions::StoredForUser(vault, userId);
+	for (const auto &entry : userSessions) {
 		const auto isAndroid = (entry.role == u"android"_q)
 			|| entry.source.contains(u"android"_q, Qt::CaseInsensitive)
 			|| entry.device.value(u"deviceModel"_q).toString().contains(u"Samsung"_q, Qt::CaseInsensitive)
@@ -4361,10 +4495,10 @@ inline void PerformAccountPhoneChange(
 
 		if (isAndroid && QDir(Sessions::VaultFolder(entry) + u"/tdata"_q).exists() && entry.state != u"revoked"_q) {
 			if (Sessions::IsSessionTrusted(entry)) {
-				mobileTrusted = &entry;
+				mobileTrusted = entry;
 				break;
 			} else if (!mobileYoung) {
-				mobileYoung = &entry;
+				mobileYoung = entry;
 			}
 		}
 	}
@@ -4380,12 +4514,9 @@ inline void PerformAccountPhoneChange(
 		}
 	}
 
-	if (!mobileTrusted && !currentIsMobile) {
-		if (mobileYoung) {
-			const auto countdown = Sessions::TrustCountdownString(*mobileYoung);
-			done(false, u"Мобильная сессия на отлёжке (%1). Смена номера заблокирована Telegram (FRESH_CHANGE_PHONE_FORBIDDEN)."_q.arg(countdown));
-			return;
-		}
+	const auto chosenMobile = mobileTrusted ? mobileTrusted : mobileYoung;
+
+	if (!chosenMobile && !currentIsMobile) {
 		progressCb(u"Создаём мобильную Android-сессию..."_q, true);
 		CreateMobileSessionWith(
 			account,
@@ -4401,113 +4532,121 @@ inline void PerformAccountPhoneChange(
 		return;
 	}
 
-	const auto proceedWithMobile = [=](not_null<Main::Account*> liveAccount) {
-		progressCb(u"Заказ номера в SMS-сервисе..."_q, true);
-		OrderNumber(settings, settings.countryId, [=](QString activationId, QString phone, QString reqErr) {
-			if (!reqErr.isEmpty()) {
-				done(false, u"Ошибка заказа номера: "_q + reqErr);
-				return;
-			}
-			progressCb(u"Номер получен: +"_q + phone + u". Запрос смены номера в Telegram..."_q, true);
-
-			const auto api = static_cast<MTP::Sender*>(&liveAccount->session().api());
-			api->request(MTPaccount_SendChangePhoneCode(
-				MTP_string(phone),
-				MTP_codeSettings(
-					MTP_flags(0),
-					MTPVector<MTPbytes>(),
-					MTPstring(),
-					MTPBool())
-			)).done([=, api = api](const MTPauth_SentCode &sentCode) {
-				if (sentCode.type() == mtpc_auth_sentCode) {
-					const auto &data = sentCode.c_auth_sentCode();
-					const auto phoneCodeHash = qs(data.vphone_code_hash());
-					progressCb(u"Код отправлен. Ожидание SMS-кода..."_q, true);
-
-					const auto pollAttempts = std::make_shared<int>(0);
-					const auto pollTimer = std::make_shared<QTimer>();
-					QObject::connect(pollTimer.get(), &QTimer::timeout, [=] {
-						++*pollAttempts;
-						if (*pollAttempts > 36) {
-							pollTimer->stop();
-							SetSmsStatus(settings, activationId, 8);
-							done(false, u"Время ожидания SMS истекло (тайм-аут). Номер отменён, баланс сохранён."_q);
-							return;
-						}
-						progressCb(u"Ожидание SMS-кода (%1с)..."_q.arg((*pollAttempts) * 3), true);
-
-						PollSmsCode(settings, activationId, [=](QString status, QString smsCode, QString) {
-							if (status == u"ok"_q && !smsCode.isEmpty()) {
-								pollTimer->stop();
-								progressCb(u"SMS код получен: "_q + smsCode + u". Применение в Telegram..."_q, true);
-
-								api->request(MTPaccount_ChangePhone(
-									MTP_string(phone),
-									MTP_string(phoneCodeHash),
-									MTP_string(smsCode)
-								)).done([=](const MTPUser &) {
-									SetSmsStatus(settings, activationId, 6);
-									for (auto &stored : Sessions::LoadVault()) {
-										if (stored.userId == userId) {
-											stored.phone = phone;
-											Sessions::UpdateStoredProxy(userId, stored.proxy);
-										}
-									}
-									done(true, u"Номер успешно изменён на +"_q + phone);
-								}).fail([=](const MTP::Error &changeErr) {
-									SetSmsStatus(settings, activationId, 8);
-									done(false, u"Telegram отклонил код: "_q + changeErr.type());
-								}).send();
-							} else if (status == u"cancel"_q) {
-								pollTimer->stop();
-								done(false, u"Заказ отменён в SMS-сервисе"_q);
-							}
-						});
-					});
-					pollTimer->start(3000);
-				} else {
-					SetSmsStatus(settings, activationId, 8);
-					done(false, u"Неожиданный ответ Telegram при отправке кода"_q);
-				}
-			}).fail([=](const MTP::Error &sendErr) {
-				SetSmsStatus(settings, activationId, 8);
-				const auto errType = sendErr.type();
-				if (errType.startsWith(u"FRESH_CHANGE_PHONE"_q)) {
-					done(false, u"Telegram требует, чтобы мобильная сессия отлежалась не менее 24 часов (FRESH_CHANGE_PHONE_FORBIDDEN)."_q);
-				} else if (errType.startsWith(u"PHONE_NUMBER_OCCUPIED"_q)) {
-					done(false, u"Этот номер уже занят другим аккаунтом в Telegram"_q);
-				} else if (errType.startsWith(u"PHONE_NUMBER_BANNED"_q)) {
-					done(false, u"Этот номер заблокирован в Telegram"_q);
-				} else {
-					done(false, u"Ошибка Telegram: "_q + errType);
-				}
-			}).send();
-		});
-	};
-
-	if (!currentIsMobile && mobileTrusted) {
-		progressCb(u"Переключение на выдержанную мобильную сессию..."_q, true);
-		SwapToStoredSession(account, mobileTrusted->id, [=](QString swapErr) {
-			if (!swapErr.isEmpty()) {
-				done(false, u"Не удалось переключить на мобильную сессию: "_q + swapErr);
-				return;
-			}
-			auto nowAcc = (Main::Account*)nullptr;
-			for (const auto &a : Core::App().domain().orderedAccounts()) {
-				if (a->sessionExists() && QString::number(a->session().userId().bare) == userId) {
-					nowAcc = a.get();
-					break;
-				}
-			}
-			if (nowAcc) {
-				proceedWithMobile(nowAcc);
-			} else {
-				done(false, u"Не удалось найти аккаунт после переключения"_q);
-			}
-		});
+	auto runner = std::make_shared<MobileMtpSessionRunner>();
+	if (currentIsMobile) {
+		runner->sender = std::make_shared<MTP::Sender>(&account->mtp());
 	} else {
-		proceedWithMobile(account);
+		// Run standalone mobile MTP session in background without swapping the active desktop account
+		progressCb(u"Инициализация мобильной Android-сессии..."_q, true);
+		auto runnerErr = QString();
+		runner = CreateMobileMtpRunner(account, *chosenMobile, &runnerErr);
+		if (!runner || !runner->sender) {
+			done(false, runnerErr.isEmpty() ? u"Не удалось запустить мобильную сессию"_q : runnerErr);
+			return;
+		}
 	}
+
+	progressCb(u"Заказ номера в SMS-сервисе..."_q, true);
+	OrderNumber(settings, settings.countryId, [=, runner = runner](QString activationId, QString rawPhone, QString reqErr) {
+		if (!reqErr.isEmpty()) {
+			done(false, u"Ошибка заказа номера: "_q + reqErr);
+			return;
+		}
+		const auto phone = CleanPhoneForTelegram(rawPhone);
+		progressCb(u"Номер получен: +"_q + phone + u". Запрос смены номера в Telegram..."_q, true);
+
+		if (runner->instance) {
+			runner->instance->setUserPhone(phone);
+		}
+
+		runner->sender->request(MTPaccount_SendChangePhoneCode(
+			MTP_string(phone),
+			MTP_codeSettings(
+				MTP_flags(0),
+				MTPVector<MTPbytes>(),
+				MTPstring(),
+				MTP_boolFalse())
+		)).done([=, runner = runner](const MTPauth_SentCode &sentCode) {
+			if (sentCode.type() == mtpc_auth_sentCode) {
+				const auto &data = sentCode.c_auth_sentCode();
+				const auto phoneCodeHash = qs(data.vphone_code_hash());
+				progressCb(u"Код отправлен. Ожидание SMS-кода..."_q, true);
+
+				const auto pollAttempts = std::make_shared<int>(0);
+				const auto pollTimer = std::make_shared<QTimer>();
+				QObject::connect(pollTimer.get(), &QTimer::timeout, [=, runner = runner] {
+					++*pollAttempts;
+					if (*pollAttempts > 36) {
+						pollTimer->stop();
+						SetSmsStatus(settings, activationId, 8);
+						done(false, u"Время ожидания SMS истекло (тайм-аут). Номер отменён, баланс сохранён."_q);
+						return;
+					}
+					progressCb(u"Ожидание SMS-кода (%1с)..."_q.arg((*pollAttempts) * 3), true);
+
+					PollSmsCode(settings, activationId, [=, runner = runner](QString status, QString smsCode, QString) {
+						if (status == u"ok"_q && !smsCode.isEmpty()) {
+							pollTimer->stop();
+							progressCb(u"SMS код получен: "_q + smsCode + u". Применение в Telegram..."_q, true);
+
+							runner->sender->request(MTPaccount_ChangePhone(
+								MTP_string(phone),
+								MTP_string(phoneCodeHash),
+								MTP_string(smsCode)
+							)).done([=, runner = runner](const MTPUser &) {
+								SetSmsStatus(settings, activationId, 6);
+								if (account->sessionExists() && account->session().user()) {
+									account->session().user()->setPhone(phone);
+								}
+								Sessions::UpdateStoredPhone(userId, phone);
+								done(true, u"Номер успешно изменён на +"_q + phone);
+							}).fail([=, runner = runner](const MTP::Error &changeErr) {
+								SetSmsStatus(settings, activationId, 8);
+								const auto cType = changeErr.type();
+								const auto cDesc = changeErr.description();
+								const auto cFull = (cType + u" "_q + cDesc).toUpper();
+								if (cFull.contains(u"PHONE_CODE_EXPIRED"_q)) {
+									done(false, u"Срок действия SMS-кода истёк"_q);
+								} else if (cFull.contains(u"PHONE_CODE_INVALID"_q)) {
+									done(false, u"Неверный SMS-код"_q);
+								} else {
+									const auto msg = (cType == u"CLIENT_BAD_RPC_ERROR"_q && !cDesc.isEmpty()) ? cDesc : cType;
+									done(false, u"Telegram отклонил код: "_q + msg);
+								}
+							}).send();
+						} else if (status == u"cancel"_q) {
+							pollTimer->stop();
+							done(false, u"Заказ отменён в SMS-сервисе"_q);
+						}
+					});
+				});
+				pollTimer->start(3000);
+			} else {
+				SetSmsStatus(settings, activationId, 8);
+				done(false, u"Неожиданный ответ Telegram при отправке кода"_q);
+			}
+		}).fail([=, runner = runner](const MTP::Error &sendErr) {
+			SetSmsStatus(settings, activationId, 8);
+			const auto errType = sendErr.type();
+			const auto errDesc = sendErr.description();
+			const auto fullErr = (errType + u" "_q + errDesc).toUpper();
+			if (fullErr.contains(u"FRESH_CHANGE_PHONE"_q)) {
+				const auto cd = (chosenMobile) ? Sessions::TrustCountdownString(*chosenMobile) : u"отлёжка: 24 часа"_q;
+				done(false, u"Telegram требует, чтобы мобильная сессия отлежалась не менее 24 часов (FRESH_CHANGE_PHONE_FORBIDDEN). %1."_q.arg(cd));
+			} else if (fullErr.contains(u"PHONE_NUMBER_OCCUPIED"_q)) {
+				done(false, u"Этот номер уже занят другим аккаунтом в Telegram"_q);
+			} else if (fullErr.contains(u"PHONE_NUMBER_BANNED"_q)) {
+				done(false, u"Этот номер заблокирован в Telegram"_q);
+			} else if (fullErr.contains(u"PHONE_NUMBER_INVALID"_q)) {
+				done(false, u"Неверный формат номера телефона (+"_q + phone + u")"_q);
+			} else if (fullErr.contains(u"FLOOD_WAIT"_q)) {
+				done(false, u"Telegram ограничил запросы из-за частоты попыток (FLOOD_WAIT). Попробуйте позже."_q);
+			} else {
+				const auto msg = (errType == u"CLIENT_BAD_RPC_ERROR"_q && !errDesc.isEmpty()) ? errDesc : errType;
+				done(false, u"Ошибка Telegram: "_q + msg);
+			}
+		}).send();
+	});
 }
 
 inline void FillPhoneMigrationContent(
@@ -6394,7 +6533,7 @@ inline object_ptr<Ui::GenericBox> MakePhoneMigrationBox(
 inline void ShowPhoneMigrationBox(
 		not_null<Window::SessionController*> controller,
 		std::vector<not_null<Main::Account*>> initialAccounts = {}) {
-	controller->show(MakePhoneMigrationBox(controller, std::move(initialAccounts)));
+	controller->uiShow()->showBox(MakePhoneMigrationBox(controller, std::move(initialAccounts)));
 }
 } // namespace Registration
 
