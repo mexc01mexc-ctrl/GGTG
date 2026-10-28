@@ -1,0 +1,362 @@
+Choosing Qt 5.
+[1/35](Libraries/patches): SKIPPING
+[2/35](ThirdParty/msys64): 
+D:\TBuild\ThirdParty>set "NoDefaultCurrentDirectoryInExePath=" 
+
+D:\TBuild\ThirdParty>set "TARGET=" 
+
+D:\TBuild\ThirdParty>set "_CL_=" 
+
+D:\TBuild\ThirdParty>set "MSYS2_ARG_CONV_EXCL=*" 
+
+D:\TBuild\ThirdParty>if exist msys64 (attrib -r -s -h msys64 /s /d   2>nul  & rmdir /Q /S msys64   2>nul  || ver  1>nul ) 
+
+D:\TBuild\ThirdParty>if 0 NEQ 0 exit /b 0 
+
+D:\TBuild\ThirdParty>call SET PATH=D:\TBuild\ThirdParty\msys64\usr\bin;D:\TBuild\ThirdParty\msys64\ucrt64\bin;D:\TBuild\ThirdParty\jom;D:\TBuild\ThirdParty\gyp;C:\Program Files\PowerShell\7;C:\Program Files\Microsoft Visual Studio\18\Enterprise\MSBuild\Current\Bin;C:\msys64\usr\bin;C:\ProgramData\chocolatey\bin;C:\yasm;C:\Users\runneradmin\nasm;D:\a\GGTG\GGTG\ninja-build;C:\Users\runneradmin\AppData\Roaming\Python\Python310\Scripts;C:\hostedtoolcache\windows\Python\3.10.11\x64\Scripts;C:\hostedtoolcache\windows\Python\3.10.11\x64;C:\Program Files\Microsoft Visual Studio\18\Enterprise\VC\Tools\MSVC\14.44.35207\bin\HostX64\x64;C:\Program Files\Microsoft Visual Studio\18\Enterprise\Common7\IDE\VC\VCPackages;C:\Program Files\Microsoft Visual Studio\18\Enterprise\Common7\IDE\CommonExtensions\Microsoft\TestWindow;C:\Program Files\Microsoft Visual Studio\18\Enterprise\Common7\IDE\CommonExtensions\Microsoft\TeamFoundation\Team Explorer;C:\Program Files\Microsoft Visual Studio\18\Enterprise\MSBuild\Current\bin\Roslyn;C:\Program Files (x86)\Microsoft SDKs\Windows\v10.0A\bin\NETFX 4.8.1 Tools\x64\;C:\Program Files (x86)\HTML Help Workshop;C:\Program Files\Microsoft Visual Studio\18\Enterprise\Common7\IDE\CommonExtensions\Microsoft\FSharp\Tools;C:\Program Files\Microsoft Visual Studio\18\Enterprise\Team Tools\DiagnosticsHub\Collector;C:\Program Files\Microsoft Visual Studio\18\Enterprise\Common7\IDE\Extensions\Microsoft\CodeCoverage.Console;C:\Program Files (x86)\Windows Kits\10\bin\10.0.26100.0\\x64;C:\Program Files (x86)\Windows Kits\10\bin\\x64;C:\Program Files\Microsoft Visual Studio\18\Enterprise\\MSBuild\Current\Bin\amd64;C:\Windows\Microsoft.NET\Framework64\v4.0.30319;C:\Program Files\Microsoft Visual Studio\18\Enterprise\Common7\IDE\;C:\Program Files\Microsoft Visual Studio\18\Enterprise\Common7\Tools\;C:\Program Files\MongoDB\Server\7.0\bin;C:\vcpkg;C:\tools\zstd;C:\hostedtoolcache\windows\stack\3.11.1\x64;C:\cabal\bin;C:\\ghcup\bin;C:\mingw64\bin;C:\Program Files\dotnet;C:\Program Files\MySQL\MySQL Server 8.0\bin;C:\Program Files\R\R-4.6.1\bin\x64;C:\SeleniumWebDrivers\GeckoDriver;C:\SeleniumWebDrivers\EdgeDriver\;C:\SeleniumWebDrivers\ChromeDriver;C:\Program Files (x86)\sbt\bin;C:\Program Files (x86)\GitHub CLI;C:\Program Files\Git\bin;C:\Program Files (x86)\pipx_bin;C:\npm\prefix;C:\hostedtoolcache\windows\go\1.24.13\x64\bin;C:\hostedtoolcache\windows\Python\3.12.10\x64\Scripts;C:\hostedtoolcache\windows\Python\3.12.10\x64;C:\hostedtoolcache\windows\Ruby\3.3.12\x64\bin;C:\Program Files\OpenSSL\bin;C:\tools\kotlinc\bin;C:\hostedtoolcache\windows\Java_Temurin-Hotspot_jdk\17.0.20-101\x64\bin;C:\Program Files\ImageMagick-7.1.2-Q16-HDRI;C:\Program Files\Microsoft SDKs\Azure\CLI2\wbin;C:\ProgramData\kind;C:\ProgramData\Chocolatey\bin;C:\Windows\system32;C:\Windows;C:\Windows\System32\Wbem;C:\Windows\System32\WindowsPowerShell\v1.0\;C:\Windows\System32\OpenSSH\;C:\Program Files\WSL\;C:\Program Files\PowerShell\7\;C:\Program Files\Microsoft\Web Platform Installer\;C:\Program Files\Microsoft SQL Server\170\Tools\Binn\;C:\Program Files\Microsoft SQL Server\Client SDK\ODBC\170\Tools\Binn\;C:\Program Files\dotnet\;C:\Program Files (x86)\Windows Kits\10\Windows Performance Toolkit\;C:\Program Files (x86)\WiX Toolset v3.14\bin;C:\Program Files\Microsoft SQL Server\130\DTS\Binn\;C:\Program Files\Microsoft SQL Server\140\DTS\Binn\;C:\Program Files\Microsoft SQL Server\150\DTS\Binn\;C:\Program Files\Microsoft SQL Server\160\DTS\Binn\;C:\Program Files\Microsoft SQL Server\170\DTS\Binn\;C:\ProgramData\chocolatey\lib\pulumi\tools\Pulumi\bin;C:\Program Files\CMake\bin;C:\Strawberry\c\bin;C:\Strawberry\perl\site\bin;C:\Strawberry\perl\bin;C:\ProgramData\chocolatey\lib\maven\apache-maven-3.9.16\bin;C:\Program Files\Microsoft Service Fabric\bin\Fabric\Fabric.Code;C:\Program Files\Microsoft SDKs\Service Fabric\Tools\ServiceFabricLocalClusterManager;C:\Program Files\LLVM\bin;C:\Program Files (x86)\LLVM\bin;C:\Program Files\nodejs\;C:\Program Files\Git\cmd;C:\Program Files\Git\ucrt64\bin;C:\Program Files\Git\usr\bin;C:\Program Files\GitHub CLI\;c:\tools\php;C:\Program Files\Amazon\AWSCLIV2\;C:\Program Files\Amazon\SessionManagerPlugin\bin\;C:\Program Files\Amazon\AWSSAMCLI\bin\;C:\Program Files\Microsoft SQL Server\130\Tools\Binn\;C:\Program Files\mongosh\;C:\Users\runneradmin\.dotnet\tools;C:\Users\runneradmin\.cargo\bin;C:\Users\runneradmin\AppData\Local\Microsoft\WindowsApps;C:\Program Files (x86)\Microsoft Visual Studio\Installer;C:\Program Files\Microsoft Visual Studio\18\Enterprise\VC\Tools\Llvm\x64\bin;C:\Program Files\Microsoft Visual Studio\18\Enterprise\Common7\IDE\CommonExtensions\Microsoft\CMake\CMake\bin;C:\Program Files\Microsoft Visual Studio\18\Enterprise\Common7\IDE\CommonExtensions\Microsoft\CMake\Ninja;C:\Program Files\Microsoft Visual Studio\18\Enterprise\Common7\IDE\VC\Linux\bin\ConnectionManagerExe;C:\Program Files\Microsoft Visual Studio\18\Enterprise\VC\vcpkg 
+
+D:\TBuild\ThirdParty>if 0 NEQ 0 exit /b 0 
+
+D:\TBuild\ThirdParty>call SET CHERE_INVOKING=enabled_from_arguments 
+
+D:\TBuild\ThirdParty>if 0 NEQ 0 exit /b 0 
+
+D:\TBuild\ThirdParty>call SET MSYS2_PATH_TYPE=inherit 
+
+D:\TBuild\ThirdParty>if 0 NEQ 0 exit /b 0 
+
+D:\TBuild\ThirdParty>if exist C:\msys64 if not exist msys64 mklink /J msys64 C:\msys64 
+Junction created for msys64 <<===>> C:\msys64
+
+D:\TBuild\ThirdParty>if 0 NEQ 0 exit /b 0 
+
+D:\TBuild\ThirdParty>if not exist msys64 powershell -Command "iwr -OutFile ./msys64.exe https://github.com/msys2/msys2-installer/releases/download/2026-09-27/msys2-base-x86_64-20260927.sfx.exe" 
+
+D:\TBuild\ThirdParty>if 0 NEQ 0 exit /b 0 
+
+D:\TBuild\ThirdParty>if not exist msys64 .\msys64.exe -y 
+
+D:\TBuild\ThirdParty>if 0 NEQ 0 exit /b 0 
+
+D:\TBuild\ThirdParty>if exist msys64.exe del /f /q msys64.exe 
+
+D:\TBuild\ThirdParty>if 0 NEQ 0 exit /b 0 
+
+D:\TBuild\ThirdParty>if exist C:\msys64\usr\bin\link.exe del /f /q C:\msys64\usr\bin\link.exe 
+
+D:\TBuild\ThirdParty>if 0 NEQ 0 exit /b 0 
+
+D:\TBuild\ThirdParty>if exist D:\TBuild\ThirdParty\msys64\usr\bin\link.exe del /f /q D:\TBuild\ThirdParty\msys64\usr\bin\link.exe 
+
+D:\TBuild\ThirdParty>if 0 NEQ 0 exit /b 0 
+
+D:\TBuild\ThirdParty>call pacman -S --noconfirm --needed make pkgconf mingw-w64-ucrt-x86_64-diffutils mingw-w64-ucrt-x86_64-gperf mingw-w64-ucrt-x86_64-nasm mingw-w64-ucrt-x86_64-perl mingw-w64-ucrt-x86_64-pkgconf 
+warning: make-4.4.1-3 is up to date -- skipping
+warning: pkgconf-3.0.10-1 is up to date -- skipping
+resolving dependencies...
+looking for conflicting packages...
+
+Packages (16) mingw-w64-ucrt-x86_64-cc-libs-16.2.0-6  mingw-w64-ucrt-x86_64-gettext-libtextstyle-1.0-1  mingw-w64-ucrt-x86_64-gettext-runtime-1.0-1  mingw-w64-ucrt-x86_64-gettext-tools-1.0-1  mingw-w64-ucrt-x86_64-libgcc-16.2.0-6  mingw-w64-ucrt-x86_64-libiconv-1.19-1  mingw-w64-ucrt-x86_64-libsigsegv-2.13-2  mingw-w64-ucrt-x86_64-libstdc++-16.2.0-6  mingw-w64-ucrt-x86_64-libwinpthread-14.0.0.r495.g63ebe6cdb-2  mingw-w64-ucrt-x86_64-tzdata-2026e-1  mingw-w64-ucrt-x86_64-zlib-1.3.2-2  mingw-w64-ucrt-x86_64-diffutils-3.12-1  mingw-w64-ucrt-x86_64-gperf-3.3-1  mingw-w64-ucrt-x86_64-nasm-3.02-1  mingw-w64-ucrt-x86_64-perl-5.44.0-3  mingw-w64-ucrt-x86_64-pkgconf-1~3.0.10-1
+
+Total Download Size:   15.43 MiB
+Total Installed Size:  93.45 MiB
+
+:: Proceed with installation? [Y/n] 
+:: Retrieving packages...
+ mingw-w64-ucrt-x86_64-perl-5.44.0-3-any downloading...
+ mingw-w64-ucrt-x86_64-gettext-tools-1.0-1-any downloading...
+ mingw-w64-ucrt-x86_64-libstdc++-16.2.0-6-any downloading...
+ mingw-w64-ucrt-x86_64-libiconv-1.19-1-any downloading...
+ mingw-w64-ucrt-x86_64-gettext-libtextstyle-1.0-1-any downloading...
+ mingw-w64-ucrt-x86_64-diffutils-3.12-1-any downloading...
+ mingw-w64-ucrt-x86_64-nasm-3.02-1-any downloading...
+ mingw-w64-ucrt-x86_64-gettext-runtime-1.0-1-any downloading...
+ mingw-w64-ucrt-x86_64-tzdata-2026e-1-any downloading...
+ mingw-w64-ucrt-x86_64-pkgconf-1~3.0.10-1-any downloading...
+ mingw-w64-ucrt-x86_64-gperf-3.3-1-any downloading...
+ mingw-w64-ucrt-x86_64-zlib-1.3.2-2-any downloading...
+ mingw-w64-ucrt-x86_64-libgcc-16.2.0-6-any downloading...
+ mingw-w64-ucrt-x86_64-libwinpthread-14.0.0.r495.g63ebe6cdb-2-any downloading...
+ mingw-w64-ucrt-x86_64-libsigsegv-2.13-2-any downloading...
+ mingw-w64-ucrt-x86_64-cc-libs-16.2.0-6-any downloading...
+checking keyring...
+checking package integrity...
+loading package files...
+checking for file conflicts...
+checking available disk space...
+:: Processing package changes...
+installing mingw-w64-ucrt-x86_64-libsigsegv...
+installing mingw-w64-ucrt-x86_64-libwinpthread...
+installing mingw-w64-ucrt-x86_64-libgcc...
+installing mingw-w64-ucrt-x86_64-tzdata...
+installing mingw-w64-ucrt-x86_64-libstdc++...
+installing mingw-w64-ucrt-x86_64-cc-libs...
+installing mingw-w64-ucrt-x86_64-libiconv...
+installing mingw-w64-ucrt-x86_64-gettext-runtime...
+installing mingw-w64-ucrt-x86_64-gettext-libtextstyle...
+installing mingw-w64-ucrt-x86_64-gettext-tools...
+installing mingw-w64-ucrt-x86_64-diffutils...
+installing mingw-w64-ucrt-x86_64-gperf...
+installing mingw-w64-ucrt-x86_64-zlib...
+installing mingw-w64-ucrt-x86_64-nasm...
+installing mingw-w64-ucrt-x86_64-perl...
+-> Replacing perl relocation patterns
+Optional dependencies for mingw-w64-ucrt-x86_64-perl
+    mingw-w64-ucrt-x86_64-perl-doc: Extra manpages, perldocs and html documentation
+installing mingw-w64-ucrt-x86_64-pkgconf...
+
+D:\TBuild\ThirdParty>if 0 NEQ 0 exit /b 0 
+CHANGED, BUILDING:
+[WARN] Could not remove directory: D:\TBuild\ThirdParty\msys64 name 'shutil' is not defined
+---------------------------------COMMANDS-LIST----------------------------------
+if exist msys64 (attrib -r -s -h msys64 /s /d 2>nul & rmdir /Q /S msys64 2>nul || ver >nul)
+SET PATH=%THIRDPARTY_DIR%\msys64\usr\bin;%PATH%
+SET CHERE_INVOKING=enabled_from_arguments
+SET MSYS2_PATH_TYPE=inherit
+if exist C:\msys64 if not exist msys64 mklink /J msys64 C:\msys64
+if not exist msys64 powershell -Command "iwr -OutFile ./msys64.exe https://github.com/msys2/msys2-installer/releases/download/2026-09-27/msys2-base-x86_64-20260927.sfx.exe"
+if not exist msys64 .\msys64.exe -y
+if exist msys64.exe del /f /q msys64.exe
+if exist C:\msys64\usr\bin\link.exe del /f /q C:\msys64\usr\bin\link.exe
+if exist %THIRDPARTY_DIR%\msys64\usr\bin\link.exe del /f /q %THIRDPARTY_DIR%\msys64\usr\bin\link.exe
+pacman -S --noconfirm --needed ^
+make ^
+pkgconf ^
+mingw-w64-ucrt-x86_64-diffutils ^
+mingw-w64-ucrt-x86_64-gperf ^
+mingw-w64-ucrt-x86_64-nasm ^
+mingw-w64-ucrt-x86_64-perl ^
+mingw-w64-ucrt-x86_64-pkgconf
+--------------------------------------------------------------------------------
+[3/35](ThirdParty/python#0.3.10.11): 
+D:\TBuild\ThirdParty>set "NoDefaultCurrentDirectoryInExePath=" 
+
+D:\TBuild\ThirdParty>set "TARGET=" 
+
+D:\TBuild\ThirdParty>set "_CL_=" 
+
+D:\TBuild\ThirdParty>set "MSYS2_ARG_CONV_EXCL=*" 
+
+D:\TBuild\ThirdParty>if exist python (attrib -r -s -h python /s /d   2>nul  & rmdir /Q /S python   2>nul  || ver  1>nul ) 
+
+D:\TBuild\ThirdParty>if 0 NEQ 0 exit /b 0 
+
+D:\TBuild\ThirdParty>call python -m venv python 
+
+D:\TBuild\ThirdParty>if 0 NEQ 0 exit /b 0 
+
+D:\TBuild\ThirdParty>call python\Scripts\activate.bat 
+Collecting pywin32
+  Downloading pywin32-312-cp310-cp310-win_amd64.whl (6.9 MB)
+     ---------------------------------------- 6.9/6.9 MB 44.3 MB/s eta 0:00:00
+Collecting six
+  Downloading six-1.17.0-py2.py3-none-any.whl (11 kB)
+Collecting meson
+  Downloading meson-1.12.1-py3-none-any.whl (1.1 MB)
+     ---------------------------------------- 1.1/1.1 MB 34.3 MB/s eta 0:00:00
+Installing collected packages: six, pywin32, meson
+Successfully installed meson-1.12.1 pywin32-312 six-1.17.0
+
+[notice] A new release of pip is available: 23.0.1 -> 26.2.2
+[notice] To update, run: python.exe -m pip install --upgrade pip
+NOT FOUND, BUILDING:
+---------------------------------COMMANDS-LIST----------------------------------
+if exist python (attrib -r -s -h python /s /d 2>nul & rmdir /Q /S python 2>nul || ver >nul)
+python -m venv python
+python\Scripts\activate.bat
+pip install pywin32 six meson
+deactivate
+--------------------------------------------------------------------------------
+[4/35](ThirdParty/NuGet): 
+D:\TBuild\ThirdParty>set "NoDefaultCurrentDirectoryInExePath=" 
+
+D:\TBuild\ThirdParty>set "TARGET=" 
+
+D:\TBuild\ThirdParty>set "_CL_=" 
+
+D:\TBuild\ThirdParty>set "MSYS2_ARG_CONV_EXCL=*" 
+
+D:\TBuild\ThirdParty>if exist NuGet (attrib -r -s -h NuGet /s /d   2>nul  & rmdir /Q /S NuGet   2>nul  || ver  1>nul ) 
+
+D:\TBuild\ThirdParty>if 0 NEQ 0 exit /b 0 
+
+D:\TBuild\ThirdParty>call mkdir NuGet 
+
+D:\TBuild\ThirdParty>if 0 NEQ 0 exit /b 0 
+
+D:\TBuild\ThirdParty>call powershell -Command "iwr -OutFile ./NuGet/nuget.exe https://dist.nuget.org/win-x86-commandline/latest/nuget.exe" 
+
+D:\TBuild\ThirdParty>if 0 NEQ 0 exit /b 0 
+NOT FOUND, BUILDING:
+---------------------------------COMMANDS-LIST----------------------------------
+if exist NuGet (attrib -r -s -h NuGet /s /d 2>nul & rmdir /Q /S NuGet 2>nul || ver >nul)
+mkdir NuGet
+powershell -Command "iwr -OutFile ./NuGet/nuget.exe https://dist.nuget.org/win-x86-commandline/latest/nuget.exe"
+--------------------------------------------------------------------------------
+[5/35](ThirdParty/jom): 
+D:\TBuild\ThirdParty>set "NoDefaultCurrentDirectoryInExePath=" 
+
+D:\TBuild\ThirdParty>set "TARGET=" 
+
+D:\TBuild\ThirdParty>set "_CL_=" 
+
+D:\TBuild\ThirdParty>set "MSYS2_ARG_CONV_EXCL=*" 
+
+D:\TBuild\ThirdParty>if exist jom (attrib -r -s -h jom /s /d   2>nul  & rmdir /Q /S jom   2>nul  || ver  1>nul ) 
+
+D:\TBuild\ThirdParty>if 0 NEQ 0 exit /b 0 
+
+D:\TBuild\ThirdParty>call powershell -Command "iwr -OutFile ./jom.zip https://master.qt.io/official_releases/jom/jom_1_1_3.zip" 
+
+D:\TBuild\ThirdParty>if 0 NEQ 0 exit /b 0 
+
+D:\TBuild\ThirdParty>call powershell -Command "Expand-Archive ./jom.zip" 
+
+D:\TBuild\ThirdParty>if 0 NEQ 0 exit /b 0 
+
+D:\TBuild\ThirdParty>call del jom.zip 
+
+D:\TBuild\ThirdParty>if 0 NEQ 0 exit /b 0 
+NOT FOUND, BUILDING:
+---------------------------------COMMANDS-LIST----------------------------------
+if exist jom (attrib -r -s -h jom /s /d 2>nul & rmdir /Q /S jom 2>nul || ver >nul)
+powershell -Command "iwr -OutFile ./jom.zip https://master.qt.io/official_releases/jom/jom_1_1_3.zip"
+powershell -Command "Expand-Archive ./jom.zip"
+del jom.zip
+--------------------------------------------------------------------------------
+[6/35](ThirdParty/gyp): 
+D:\TBuild\ThirdParty>set "NoDefaultCurrentDirectoryInExePath=" 
+
+D:\TBuild\ThirdParty>set "TARGET=" 
+
+D:\TBuild\ThirdParty>set "_CL_=" 
+
+D:\TBuild\ThirdParty>set "MSYS2_ARG_CONV_EXCL=*" 
+
+D:\TBuild\ThirdParty>if exist gyp (attrib -r -s -h gyp /s /d   2>nul  & rmdir /Q /S gyp   2>nul  || ver  1>nul ) 
+
+D:\TBuild\ThirdParty>if 0 NEQ 0 exit /b 0 
+
+D:\TBuild\ThirdParty>call git clone https://github.com/desktop-app/gyp.git 
+Cloning into 'gyp'...
+
+D:\TBuild\ThirdParty>if 0 NEQ 0 exit /b 0 
+
+D:\TBuild\ThirdParty>call cd gyp 
+
+D:\TBuild\ThirdParty\gyp>if 0 NEQ 0 exit /b 0 
+
+D:\TBuild\ThirdParty\gyp>call git checkout 5e2425c47b 
+Note: switching to '5e2425c47b'.
+
+You are in 'detached HEAD' state. You can look around, make experimental
+changes and commit them, and you can discard any commits you make in this
+state without impacting any branches by switching back to a branch.
+
+If you want to create a new branch to retain commits you create, you may
+do so (now or later) by using -c with the switch command. Example:
+
+  git switch -c <new-branch-name>
+
+Or undo this operation with:
+
+  git switch -
+
+Turn off this advice by setting config variable advice.detachedHead to false
+
+HEAD is now at 5e2425c4 Downgrade toolset to v143 for now.
+
+D:\TBuild\ThirdParty\gyp>if 0 NEQ 0 exit /b 0 
+NOT FOUND, BUILDING:
+---------------------------------COMMANDS-LIST----------------------------------
+if exist gyp (attrib -r -s -h gyp /s /d 2>nul & rmdir /Q /S gyp 2>nul || ver >nul)
+git clone https://github.com/desktop-app/gyp.git
+cd gyp
+git checkout 5e2425c47b
+--------------------------------------------------------------------------------
+[7/35](ThirdParty/rust): 
+D:\TBuild\ThirdParty>set "NoDefaultCurrentDirectoryInExePath=" 
+
+D:\TBuild\ThirdParty>set "TARGET=" 
+
+D:\TBuild\ThirdParty>set "_CL_=" 
+
+D:\TBuild\ThirdParty>set "MSYS2_ARG_CONV_EXCL=*" 
+
+D:\TBuild\ThirdParty>if exist rust (attrib -r -s -h rust /s /d   2>nul  & rmdir /Q /S rust   2>nul  || ver  1>nul ) 
+
+D:\TBuild\ThirdParty>if 0 NEQ 0 exit /b 0 
+
+D:\TBuild\ThirdParty>call powershell -Command "iwr -OutFile ./rustup-init.exe https://static.rust-lang.org/rustup/dist/x86_64-pc-windows-msvc/rustup-init.exe" 
+
+D:\TBuild\ThirdParty>if 0 NEQ 0 exit /b 0 
+
+D:\TBuild\ThirdParty>call SET "RUSTUP_HOME=D:\TBuild\ThirdParty\rust\rustup" 
+
+D:\TBuild\ThirdParty>if 0 NEQ 0 exit /b 0 
+
+D:\TBuild\ThirdParty>call SET "CARGO_HOME=D:\TBuild\ThirdParty\rust\cargo" 
+
+D:\TBuild\ThirdParty>if 0 NEQ 0 exit /b 0 
+
+D:\TBuild\ThirdParty>call rustup-init.exe -y --no-modify-path --profile minimal --default-toolchain 1.96.1 --component rust-src 
+info: profile set to minimal
+info: default host tuple is x86_64-pc-windows-msvc
+info: syncing channel updates for 1.96.1-x86_64-pc-windows-msvc
+info: latest update on 2026-06-30 for version 1.96.1 (31fca3adb 2026-06-26)
+info: downloading 4 components
+info: default toolchain set to 1.96.1-x86_64-pc-windows-msvc
+
+  1.96.1-x86_64-pc-windows-msvc installed - rustc 1.96.1 (31fca3adb 2026-06-26)
+
+
+Rust is installed now. Great!
+
+To get started you need Cargo's bin directory (D:\TBuild\ThirdParty\rust\cargo
+\bin) in your PATH
+environment variable. This has not been done automatically.
+
+D:\TBuild\ThirdParty>if 0 NEQ 0 exit /b 0 
+
+D:\TBuild\ThirdParty>call del rustup-init.exe 
+
+D:\TBuild\ThirdParty>if 0 NEQ 0 exit /b 0 
+NOT FOUND, BUILDING:
+---------------------------------COMMANDS-LIST----------------------------------
+if exist rust (attrib -r -s -h rust /s /d 2>nul & rmdir /Q /S rust 2>nul || ver >nul)
+powershell -Command "iwr -OutFile ./rustup-init.exe https://static.rust-lang.org/rustup/dist/x86_64-pc-windows-msvc/rustup-init.exe"
+SET "RUSTUP_HOME=%THIRDPARTY_DIR%\rust\rustup"
+SET "CARGO_HOME=%THIRDPARTY_DIR%\rust\cargo"
+rustup-init.exe -y --no-modify-path --profile minimal ^
+--default-toolchain 1.96.1 ^
+--component rust-src
+del rustup-init.exe
+--------------------------------------------------------------------------------
+[8/35](Libraries/lzma): SKIPPING
+[9/35](Libraries/zlib): SKIPPING
+[10/35](Libraries/mozjpeg): SKIPPING
+[11/35](Libraries/openssl3): SKIPPING
+[12/35](Libraries/opus): SKIPPING
+[13/35](Libraries/rnnoise): SKIPPING
+[14/35](Libraries/gas-preprocessor): SKIPPING
+[15/35](Libraries/dav1d): SKIPPING
+[16/35](Libraries/openh264): SKIPPING
+[17/35](Libraries/libavif): SKIPPING
+[18/35](Libraries/libwebp): SKIPPING
+[19/35](Libraries/libjxl): SKIPPING
+[20/35](Libraries/libvpx): SKIPPING
+[21/35](Libraries/liblcms2): SKIPPING
+[22/35](Libraries/nv-codec-headers): SKIPPING
+[23/35](Libraries/regex): SKIPPING
+[24/35](Libraries/ffmpeg): SKIPPING
+[25/35](Libraries/libheif): SKIPPING
+[26/35](Libraries/openal-soft): SKIPPING
+[27/35](Libraries/breakpad): SKIPPING
+[28/35](Libraries/tg_angle): SKIPPING
+[29/35](Libraries/qt_5.15.19): SKIPPING
+[30/35](Libraries/tg_owt): SKIPPING
+[31/35](Libraries/ada): SKIPPING
+[32/35](Libraries/tde2e): SKIPPING
+[33/35](Libraries/tlottie#0.2): SKIPPING
+[34/35](Libraries/wallet-engine#0.2): SKIPPING
+[35/35](Libraries/tdesktop_rust#0.2.92df98dc20.e59e0d89d7ee90c388bf36e3334c5b276f396697): SKIPPING

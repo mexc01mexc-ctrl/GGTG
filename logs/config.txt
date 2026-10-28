@@ -1,0 +1,918 @@
+Command line: -prefix D:\TBuild\Libraries\win64/Qt-5.15.19 -debug-and-release -force-debug-info -opensource -confirm-license -static -static-runtime -opengl es2 -no-angle -I D:\TBuild\Libraries\win64/tg_angle/include -D "KHRONOS_STATIC=" -D "DESKTOP_APP_QT_STATIC_ANGLE=" "QMAKE_LIBS_OPENGL_ES2_DEBUG=D:\TBuild\Libraries\win64/tg_angle/out/Debug/tg_angle.lib D:\TBuild\Libraries\win64/zlib/Debug/libzsd.lib d3d9.lib dxgi.lib dxguid.lib" "QMAKE_LIBS_OPENGL_ES2_RELEASE=D:\TBuild\Libraries\win64/tg_angle/out/Release/tg_angle.lib D:\TBuild\Libraries\win64/zlib/Release/libzs.lib d3d9.lib dxgi.lib dxguid.lib" -egl "QMAKE_LIBS_EGL_DEBUG=D:\TBuild\Libraries\win64/tg_angle/out/Debug/tg_angle.lib D:\TBuild\Libraries\win64/zlib/Debug/libzsd.lib d3d9.lib dxgi.lib dxguid.lib Gdi32.lib User32.lib" "QMAKE_LIBS_EGL_RELEASE=D:\TBuild\Libraries\win64/tg_angle/out/Release/tg_angle.lib D:\TBuild\Libraries\win64/zlib/Release/libzs.lib d3d9.lib dxgi.lib dxguid.lib Gdi32.lib User32.lib" -openssl-linked -I D:\TBuild\Libraries\win64/openssl3/include "OPENSSL_LIBS_DEBUG=D:\TBuild\Libraries\win64/openssl3/out.dbg/libssl.lib D:\TBuild\Libraries\win64/openssl3/out.dbg/libcrypto.lib Ws2_32.lib Gdi32.lib Advapi32.lib Crypt32.lib User32.lib" "OPENSSL_LIBS_RELEASE=D:\TBuild\Libraries\win64/openssl3/out/libssl.lib D:\TBuild\Libraries\win64/openssl3/out/libcrypto.lib Ws2_32.lib Gdi32.lib Advapi32.lib Crypt32.lib User32.lib" -I D:\TBuild\Libraries\win64/mozjpeg "LIBJPEG_LIBS_DEBUG=D:\TBuild\Libraries\win64/mozjpeg/Debug/jpeg-static.lib" "LIBJPEG_LIBS_RELEASE=D:\TBuild\Libraries\win64/mozjpeg/Release/jpeg-static.lib" -system-webp -I D:\TBuild\Libraries\win64/libwebp/src -L D:\TBuild\Libraries\win64/libwebp/out/release-static/x64/lib -mp -no-feature-netlistmgr -nomake examples -nomake tests -platform win32-msvc
+executing config test verifyspec
++ cd /d D:\TBuild\Libraries\win64\qt_5.15.19\config.tests\verifyspec && D:\TBuild\Libraries\win64\qt_5.15.19\qtbase\bin\qmake.exe "CONFIG -= qt debug_and_release app_bundle lib_bundle" "CONFIG += static warn_off console single_arch" "DEFINES += KHRONOS_STATIC= DESKTOP_APP_QT_STATIC_ANGLE=" "QMAKE_LIBDIR += D:\\TBuild\\Libraries\\win64/libwebp/out/release-static/x64/lib" "INCLUDEPATH += D:\\TBuild\\Libraries\\win64/tg_angle/include D:\\TBuild\\Libraries\\win64/openssl3/include D:\\TBuild\\Libraries\\win64/mozjpeg D:\\TBuild\\Libraries\\win64/libwebp/src" "QMAKE_LIBS_OPENGL_ES2_DEBUG=D:\TBuild\Libraries\win64/tg_angle/out/Debug/tg_angle.lib D:\TBuild\Libraries\win64/zlib/Debug/libzsd.lib d3d9.lib dxgi.lib dxguid.lib" "QMAKE_LIBS_OPENGL_ES2_RELEASE=D:\TBuild\Libraries\win64/tg_angle/out/Release/tg_angle.lib D:\TBuild\Libraries\win64/zlib/Release/libzs.lib d3d9.lib dxgi.lib dxguid.lib" "QMAKE_LIBS_EGL_DEBUG=D:\TBuild\Libraries\win64/tg_angle/out/Debug/tg_angle.lib D:\TBuild\Libraries\win64/zlib/Debug/libzsd.lib d3d9.lib dxgi.lib dxguid.lib Gdi32.lib User32.lib" "QMAKE_LIBS_EGL_RELEASE=D:\TBuild\Libraries\win64/tg_angle/out/Release/tg_angle.lib D:\TBuild\Libraries\win64/zlib/Release/libzs.lib d3d9.lib dxgi.lib dxguid.lib Gdi32.lib User32.lib" D:/TBuild/Libraries/win64/qt_5.15.19/qtbase/config.tests/verifyspec
++ cd /d D:\TBuild\Libraries\win64\qt_5.15.19\config.tests\verifyspec && set MAKEFLAGS=& jom
+> jom 1.1.3 - empower your cores
+> 	cl -c -nologo -Zc:wchar_t -FS -Zc:rvalueCast -Zc:inline -Zc:strictStrings -Zc:throwingNew -Zc:referenceBinding -Zc:__cplusplus -O2 -MD -W0 -EHsc -DUNICODE -D_UNICODE -DWIN32 -D_ENABLE_EXTENDED_ALIGNED_STORAGE -DWIN64 -DKHRONOS_STATIC= -DDESKTOP_APP_QT_STATIC_ANGLE= -DNDEBUG -ID:\TBuild\Libraries\win64\qt_5.15.19\qtbase\config.tests\verifyspec -I. -ID:\TBuild\Libraries\win64\tg_angle\include -ID:\TBuild\Libraries\win64\openssl3\include -ID:\TBuild\Libraries\win64\mozjpeg -ID:\TBuild\Libraries\win64\libwebp\src -ID:\TBuild\Libraries\win64\qt_5.15.19\qtbase\mkspecs\win32-msvc -Fo @C:\Users\RUNNER~1\AppData\Local\Temp\verifyspec.obj.1836.15.jom
+> verifyspec.cpp
+> 	link /NOLOGO /DYNAMICBASE /NXCOMPAT /OPT:REF /INCREMENTAL:NO /SUBSYSTEM:CONSOLE "/MANIFESTDEPENDENCY:type='win32' name='Microsoft.Windows.Common-Controls' version='6.0.0.0' publicKeyToken='6595b64144ccf1df' language='*' processorArchitecture='*'" /MANIFEST:embed /OUT:verifyspec.exe @C:\Users\RUNNER~1\AppData\Local\Temp\verifyspec.exe.1836.46.jom
+test config.qtbase.tests.verifyspec succeeded
+executing config test architecture
++ cd /d D:\TBuild\Libraries\win64\qt_5.15.19\config.tests\arch && D:\TBuild\Libraries\win64\qt_5.15.19\qtbase\bin\qmake.exe "CONFIG -= qt debug_and_release app_bundle lib_bundle" "CONFIG += static warn_off console single_arch" "DEFINES += KHRONOS_STATIC= DESKTOP_APP_QT_STATIC_ANGLE=" "QMAKE_LIBDIR += D:\\TBuild\\Libraries\\win64/libwebp/out/release-static/x64/lib" "INCLUDEPATH += D:\\TBuild\\Libraries\\win64/tg_angle/include D:\\TBuild\\Libraries\\win64/openssl3/include D:\\TBuild\\Libraries\\win64/mozjpeg D:\\TBuild\\Libraries\\win64/libwebp/src" "QMAKE_LIBS_OPENGL_ES2_DEBUG=D:\TBuild\Libraries\win64/tg_angle/out/Debug/tg_angle.lib D:\TBuild\Libraries\win64/zlib/Debug/libzsd.lib d3d9.lib dxgi.lib dxguid.lib" "QMAKE_LIBS_OPENGL_ES2_RELEASE=D:\TBuild\Libraries\win64/tg_angle/out/Release/tg_angle.lib D:\TBuild\Libraries\win64/zlib/Release/libzs.lib d3d9.lib dxgi.lib dxguid.lib" "QMAKE_LIBS_EGL_DEBUG=D:\TBuild\Libraries\win64/tg_angle/out/Debug/tg_angle.lib D:\TBuild\Libraries\win64/zlib/Debug/libzsd.lib d3d9.lib dxgi.lib dxguid.lib Gdi32.lib User32.lib" "QMAKE_LIBS_EGL_RELEASE=D:\TBuild\Libraries\win64/tg_angle/out/Release/tg_angle.lib D:\TBuild\Libraries\win64/zlib/Release/libzs.lib d3d9.lib dxgi.lib dxguid.lib Gdi32.lib User32.lib" D:/TBuild/Libraries/win64/qt_5.15.19/qtbase/config.tests/arch
++ cd /d D:\TBuild\Libraries\win64\qt_5.15.19\config.tests\arch && set MAKEFLAGS=& jom
+> jom 1.1.3 - empower your cores
+> 	cl -c -nologo -Zc:wchar_t -FS -Zc:rvalueCast -Zc:inline -Zc:strictStrings -Zc:throwingNew -Zc:referenceBinding -Zc:__cplusplus -O2 -MD -W0 -EHsc -DUNICODE -D_UNICODE -DWIN32 -D_ENABLE_EXTENDED_ALIGNED_STORAGE -DWIN64 -DKHRONOS_STATIC= -DDESKTOP_APP_QT_STATIC_ANGLE= -DNDEBUG -ID:\TBuild\Libraries\win64\qt_5.15.19\qtbase\config.tests\arch -I. -ID:\TBuild\Libraries\win64\tg_angle\include -ID:\TBuild\Libraries\win64\openssl3\include -ID:\TBuild\Libraries\win64\mozjpeg -ID:\TBuild\Libraries\win64\libwebp\src -ID:\TBuild\Libraries\win64\qt_5.15.19\qtbase\mkspecs\win32-msvc -Fo @C:\Users\RUNNER~1\AppData\Local\Temp\arch.obj.7832.0.jom
+> arch.cpp
+> 	link /NOLOGO /DYNAMICBASE /NXCOMPAT /OPT:REF /INCREMENTAL:NO /SUBSYSTEM:CONSOLE "/MANIFESTDEPENDENCY:type='win32' name='Microsoft.Windows.Common-Controls' version='6.0.0.0' publicKeyToken='6595b64144ccf1df' language='*' processorArchitecture='*'" /MANIFEST:embed /OUT:arch.exe @C:\Users\RUNNER~1\AppData\Local\Temp\arch.exe.7832.62.jom
+Detected architecture: x86_64 (sse sse2)
+test config.qtbase.tests.architecture gave result x86_64
+executing config test sse2
++ cd /d D:\TBuild\Libraries\win64\qt_5.15.19\config.tests\x86_simd && D:\TBuild\Libraries\win64\qt_5.15.19\qtbase\bin\qmake.exe "CONFIG -= qt debug_and_release app_bundle lib_bundle" "CONFIG += static warn_off console single_arch" "DEFINES += KHRONOS_STATIC= DESKTOP_APP_QT_STATIC_ANGLE=" "QMAKE_LIBDIR += D:\\TBuild\\Libraries\\win64/libwebp/out/release-static/x64/lib" "INCLUDEPATH += D:\\TBuild\\Libraries\\win64/tg_angle/include D:\\TBuild\\Libraries\\win64/openssl3/include D:\\TBuild\\Libraries\\win64/mozjpeg D:\\TBuild\\Libraries\\win64/libwebp/src" "QMAKE_LIBS_OPENGL_ES2_DEBUG=D:\TBuild\Libraries\win64/tg_angle/out/Debug/tg_angle.lib D:\TBuild\Libraries\win64/zlib/Debug/libzsd.lib d3d9.lib dxgi.lib dxguid.lib" "QMAKE_LIBS_OPENGL_ES2_RELEASE=D:\TBuild\Libraries\win64/tg_angle/out/Release/tg_angle.lib D:\TBuild\Libraries\win64/zlib/Release/libzs.lib d3d9.lib dxgi.lib dxguid.lib" "QMAKE_LIBS_EGL_DEBUG=D:\TBuild\Libraries\win64/tg_angle/out/Debug/tg_angle.lib D:\TBuild\Libraries\win64/zlib/Debug/libzsd.lib d3d9.lib dxgi.lib dxguid.lib Gdi32.lib User32.lib" "QMAKE_LIBS_EGL_RELEASE=D:\TBuild\Libraries\win64/tg_angle/out/Release/tg_angle.lib D:\TBuild\Libraries\win64/zlib/Release/libzs.lib d3d9.lib dxgi.lib dxguid.lib Gdi32.lib User32.lib" "CONFIG+=add_cflags" "DEFINES+=NO_ATTRIBUTE" "SIMD=sse2" D:/TBuild/Libraries/win64/qt_5.15.19/qtbase/config.tests/x86_simd
++ cd /d D:\TBuild\Libraries\win64\qt_5.15.19\config.tests\x86_simd && set MAKEFLAGS=& jom
+> jom 1.1.3 - empower your cores
+> 	cl -c -nologo -Zc:wchar_t -FS -Zc:rvalueCast -Zc:inline -Zc:strictStrings -Zc:throwingNew -Zc:referenceBinding -Zc:__cplusplus -O2 -MD -W0 -EHsc -DUNICODE -D_UNICODE -DWIN32 -D_ENABLE_EXTENDED_ALIGNED_STORAGE -DWIN64 -DKHRONOS_STATIC= -DDESKTOP_APP_QT_STATIC_ANGLE= -DNO_ATTRIBUTE -DQT_COMPILER_SUPPORTS_SSE2 -DNDEBUG -ID:\TBuild\Libraries\win64\qt_5.15.19\qtbase\config.tests\x86_simd -I. -ID:\TBuild\Libraries\win64\tg_angle\include -ID:\TBuild\Libraries\win64\openssl3\include -ID:\TBuild\Libraries\win64\mozjpeg -ID:\TBuild\Libraries\win64\libwebp\src -ID:\TBuild\Libraries\win64\qt_5.15.19\qtbase\mkspecs\win32-msvc -Fo @C:\Users\RUNNER~1\AppData\Local\Temp\main.obj.1276.0.jom
+> main.cpp
+> 	link /NOLOGO /DYNAMICBASE /NXCOMPAT /OPT:REF /INCREMENTAL:NO /SUBSYSTEM:CONSOLE "/MANIFESTDEPENDENCY:type='win32' name='Microsoft.Windows.Common-Controls' version='6.0.0.0' publicKeyToken='6595b64144ccf1df' language='*' processorArchitecture='*'" /MANIFEST:embed /OUT:x86_simd.exe @C:\Users\RUNNER~1\AppData\Local\Temp\x86_simd.exe.1276.94.jom
+test config.qtbase.tests.sse2 succeeded
+executing config test aesni
++ cd /d D:\TBuild\Libraries\win64\qt_5.15.19\config.tests\x86_simd && D:\TBuild\Libraries\win64\qt_5.15.19\qtbase\bin\qmake.exe "CONFIG -= qt debug_and_release app_bundle lib_bundle" "CONFIG += static warn_off console single_arch" "DEFINES += KHRONOS_STATIC= DESKTOP_APP_QT_STATIC_ANGLE=" "QMAKE_LIBDIR += D:\\TBuild\\Libraries\\win64/libwebp/out/release-static/x64/lib" "INCLUDEPATH += D:\\TBuild\\Libraries\\win64/tg_angle/include D:\\TBuild\\Libraries\\win64/openssl3/include D:\\TBuild\\Libraries\\win64/mozjpeg D:\\TBuild\\Libraries\\win64/libwebp/src" "QMAKE_LIBS_OPENGL_ES2_DEBUG=D:\TBuild\Libraries\win64/tg_angle/out/Debug/tg_angle.lib D:\TBuild\Libraries\win64/zlib/Debug/libzsd.lib d3d9.lib dxgi.lib dxguid.lib" "QMAKE_LIBS_OPENGL_ES2_RELEASE=D:\TBuild\Libraries\win64/tg_angle/out/Release/tg_angle.lib D:\TBuild\Libraries\win64/zlib/Release/libzs.lib d3d9.lib dxgi.lib dxguid.lib" "QMAKE_LIBS_EGL_DEBUG=D:\TBuild\Libraries\win64/tg_angle/out/Debug/tg_angle.lib D:\TBuild\Libraries\win64/zlib/Debug/libzsd.lib d3d9.lib dxgi.lib dxguid.lib Gdi32.lib User32.lib" "QMAKE_LIBS_EGL_RELEASE=D:\TBuild\Libraries\win64/tg_angle/out/Release/tg_angle.lib D:\TBuild\Libraries\win64/zlib/Release/libzs.lib d3d9.lib dxgi.lib dxguid.lib Gdi32.lib User32.lib" "CONFIG+=add_cflags" "DEFINES+=NO_ATTRIBUTE" "SIMD=aesni" D:/TBuild/Libraries/win64/qt_5.15.19/qtbase/config.tests/x86_simd
++ cd /d D:\TBuild\Libraries\win64\qt_5.15.19\config.tests\x86_simd && set MAKEFLAGS=& jom clean && set MAKEFLAGS=& jom
+> jom 1.1.3 - empower your cores
+> 	del main.obj
+> jom 1.1.3 - empower your cores
+> 	cl -c -nologo -Zc:wchar_t -FS -Zc:rvalueCast -Zc:inline -Zc:strictStrings -Zc:throwingNew -Zc:referenceBinding -Zc:__cplusplus -O2 -MD -W0 -EHsc -DUNICODE -D_UNICODE -DWIN32 -D_ENABLE_EXTENDED_ALIGNED_STORAGE -DWIN64 -DKHRONOS_STATIC= -DDESKTOP_APP_QT_STATIC_ANGLE= -DNO_ATTRIBUTE -DQT_COMPILER_SUPPORTS_AESNI -DNDEBUG -ID:\TBuild\Libraries\win64\qt_5.15.19\qtbase\config.tests\x86_simd -I. -ID:\TBuild\Libraries\win64\tg_angle\include -ID:\TBuild\Libraries\win64\openssl3\include -ID:\TBuild\Libraries\win64\mozjpeg -ID:\TBuild\Libraries\win64\libwebp\src -ID:\TBuild\Libraries\win64\qt_5.15.19\qtbase\mkspecs\win32-msvc -Fo @C:\Users\RUNNER~1\AppData\Local\Temp\main.obj.1632.0.jom
+> main.cpp
+> 	link /NOLOGO /DYNAMICBASE /NXCOMPAT /OPT:REF /INCREMENTAL:NO /SUBSYSTEM:CONSOLE "/MANIFESTDEPENDENCY:type='win32' name='Microsoft.Windows.Common-Controls' version='6.0.0.0' publicKeyToken='6595b64144ccf1df' language='*' processorArchitecture='*'" /MANIFEST:embed /OUT:x86_simd.exe @C:\Users\RUNNER~1\AppData\Local\Temp\x86_simd.exe.1632.78.jom
+test config.qtbase.tests.aesni succeeded
+executing config test alloca_h
++ cd /d D:\TBuild\Libraries\win64\qt_5.15.19\config.tests\alloca_h && D:\TBuild\Libraries\win64\qt_5.15.19\qtbase\bin\qmake.exe "CONFIG -= qt debug_and_release app_bundle lib_bundle" "CONFIG += static warn_off console single_arch" "DEFINES += KHRONOS_STATIC= DESKTOP_APP_QT_STATIC_ANGLE=" "QMAKE_LIBDIR += D:\\TBuild\\Libraries\\win64/libwebp/out/release-static/x64/lib" "INCLUDEPATH += D:\\TBuild\\Libraries\\win64/tg_angle/include D:\\TBuild\\Libraries\\win64/openssl3/include D:\\TBuild\\Libraries\\win64/mozjpeg D:\\TBuild\\Libraries\\win64/libwebp/src" "QMAKE_LIBS_OPENGL_ES2_DEBUG=D:\TBuild\Libraries\win64/tg_angle/out/Debug/tg_angle.lib D:\TBuild\Libraries\win64/zlib/Debug/libzsd.lib d3d9.lib dxgi.lib dxguid.lib" "QMAKE_LIBS_OPENGL_ES2_RELEASE=D:\TBuild\Libraries\win64/tg_angle/out/Release/tg_angle.lib D:\TBuild\Libraries\win64/zlib/Release/libzs.lib d3d9.lib dxgi.lib dxguid.lib" "QMAKE_LIBS_EGL_DEBUG=D:\TBuild\Libraries\win64/tg_angle/out/Debug/tg_angle.lib D:\TBuild\Libraries\win64/zlib/Debug/libzsd.lib d3d9.lib dxgi.lib dxguid.lib Gdi32.lib User32.lib" "QMAKE_LIBS_EGL_RELEASE=D:\TBuild\Libraries\win64/tg_angle/out/Release/tg_angle.lib D:\TBuild\Libraries\win64/zlib/Release/libzs.lib d3d9.lib dxgi.lib dxguid.lib Gdi32.lib User32.lib" D:/TBuild/Libraries/win64/qt_5.15.19/config.tests/alloca_h
++ cd /d D:\TBuild\Libraries\win64\qt_5.15.19\config.tests\alloca_h && set MAKEFLAGS=& jom
+> jom 1.1.3 - empower your cores
+> 	cl -c -nologo -Zc:wchar_t -FS -Zc:rvalueCast -Zc:inline -Zc:strictStrings -Zc:throwingNew -Zc:referenceBinding -Zc:__cplusplus -O2 -MD -W0 -EHsc -DUNICODE -D_UNICODE -DWIN32 -D_ENABLE_EXTENDED_ALIGNED_STORAGE -DWIN64 -DKHRONOS_STATIC= -DDESKTOP_APP_QT_STATIC_ANGLE= -DNDEBUG -I. -ID:\TBuild\Libraries\win64\tg_angle\include -ID:\TBuild\Libraries\win64\openssl3\include -ID:\TBuild\Libraries\win64\mozjpeg -ID:\TBuild\Libraries\win64\libwebp\src -ID:\TBuild\Libraries\win64\qt_5.15.19\qtbase\mkspecs\win32-msvc -Fo @C:\Users\RUNNER~1\AppData\Local\Temp\main.obj.7208.0.jom
+> main.cpp
+> main.cpp(2): fatal error C1083: Cannot open include file: 'alloca.h': No such file or directory
+> jom: D:\TBuild\Libraries\win64\qt_5.15.19\config.tests\alloca_h\Makefile [main.obj] Error 2
+test config.qtbase.tests.alloca_h FAILED
+executing config test alloca_malloc_h
++ cd /d D:\TBuild\Libraries\win64\qt_5.15.19\config.tests\alloca_malloc_h && D:\TBuild\Libraries\win64\qt_5.15.19\qtbase\bin\qmake.exe "CONFIG -= qt debug_and_release app_bundle lib_bundle" "CONFIG += static warn_off console single_arch" "DEFINES += KHRONOS_STATIC= DESKTOP_APP_QT_STATIC_ANGLE=" "QMAKE_LIBDIR += D:\\TBuild\\Libraries\\win64/libwebp/out/release-static/x64/lib" "INCLUDEPATH += D:\\TBuild\\Libraries\\win64/tg_angle/include D:\\TBuild\\Libraries\\win64/openssl3/include D:\\TBuild\\Libraries\\win64/mozjpeg D:\\TBuild\\Libraries\\win64/libwebp/src" "QMAKE_LIBS_OPENGL_ES2_DEBUG=D:\TBuild\Libraries\win64/tg_angle/out/Debug/tg_angle.lib D:\TBuild\Libraries\win64/zlib/Debug/libzsd.lib d3d9.lib dxgi.lib dxguid.lib" "QMAKE_LIBS_OPENGL_ES2_RELEASE=D:\TBuild\Libraries\win64/tg_angle/out/Release/tg_angle.lib D:\TBuild\Libraries\win64/zlib/Release/libzs.lib d3d9.lib dxgi.lib dxguid.lib" "QMAKE_LIBS_EGL_DEBUG=D:\TBuild\Libraries\win64/tg_angle/out/Debug/tg_angle.lib D:\TBuild\Libraries\win64/zlib/Debug/libzsd.lib d3d9.lib dxgi.lib dxguid.lib Gdi32.lib User32.lib" "QMAKE_LIBS_EGL_RELEASE=D:\TBuild\Libraries\win64/tg_angle/out/Release/tg_angle.lib D:\TBuild\Libraries\win64/zlib/Release/libzs.lib d3d9.lib dxgi.lib dxguid.lib Gdi32.lib User32.lib" D:/TBuild/Libraries/win64/qt_5.15.19/config.tests/alloca_malloc_h
++ cd /d D:\TBuild\Libraries\win64\qt_5.15.19\config.tests\alloca_malloc_h && set MAKEFLAGS=& jom
+> jom 1.1.3 - empower your cores
+> 	cl -c -nologo -Zc:wchar_t -FS -Zc:rvalueCast -Zc:inline -Zc:strictStrings -Zc:throwingNew -Zc:referenceBinding -Zc:__cplusplus -O2 -MD -W0 -EHsc -DUNICODE -D_UNICODE -DWIN32 -D_ENABLE_EXTENDED_ALIGNED_STORAGE -DWIN64 -DKHRONOS_STATIC= -DDESKTOP_APP_QT_STATIC_ANGLE= -DNDEBUG -I. -ID:\TBuild\Libraries\win64\tg_angle\include -ID:\TBuild\Libraries\win64\openssl3\include -ID:\TBuild\Libraries\win64\mozjpeg -ID:\TBuild\Libraries\win64\libwebp\src -ID:\TBuild\Libraries\win64\qt_5.15.19\qtbase\mkspecs\win32-msvc -Fo @C:\Users\RUNNER~1\AppData\Local\Temp\main.obj.7596.0.jom
+> main.cpp
+> 	link /NOLOGO /DYNAMICBASE /NXCOMPAT /OPT:REF /INCREMENTAL:NO /SUBSYSTEM:CONSOLE "/MANIFESTDEPENDENCY:type='win32' name='Microsoft.Windows.Common-Controls' version='6.0.0.0' publicKeyToken='6595b64144ccf1df' language='*' processorArchitecture='*'" /MANIFEST:embed /OUT:alloca_malloc_h.exe @C:\Users\RUNNER~1\AppData\Local\Temp\alloca_malloc_h.exe.7596.47.jom
+test config.qtbase.tests.alloca_malloc_h succeeded
+executing config test sse3
++ cd /d D:\TBuild\Libraries\win64\qt_5.15.19\config.tests\x86_simd && D:\TBuild\Libraries\win64\qt_5.15.19\qtbase\bin\qmake.exe "CONFIG -= qt debug_and_release app_bundle lib_bundle" "CONFIG += static warn_off console single_arch" "DEFINES += KHRONOS_STATIC= DESKTOP_APP_QT_STATIC_ANGLE=" "QMAKE_LIBDIR += D:\\TBuild\\Libraries\\win64/libwebp/out/release-static/x64/lib" "INCLUDEPATH += D:\\TBuild\\Libraries\\win64/tg_angle/include D:\\TBuild\\Libraries\\win64/openssl3/include D:\\TBuild\\Libraries\\win64/mozjpeg D:\\TBuild\\Libraries\\win64/libwebp/src" "QMAKE_LIBS_OPENGL_ES2_DEBUG=D:\TBuild\Libraries\win64/tg_angle/out/Debug/tg_angle.lib D:\TBuild\Libraries\win64/zlib/Debug/libzsd.lib d3d9.lib dxgi.lib dxguid.lib" "QMAKE_LIBS_OPENGL_ES2_RELEASE=D:\TBuild\Libraries\win64/tg_angle/out/Release/tg_angle.lib D:\TBuild\Libraries\win64/zlib/Release/libzs.lib d3d9.lib dxgi.lib dxguid.lib" "QMAKE_LIBS_EGL_DEBUG=D:\TBuild\Libraries\win64/tg_angle/out/Debug/tg_angle.lib D:\TBuild\Libraries\win64/zlib/Debug/libzsd.lib d3d9.lib dxgi.lib dxguid.lib Gdi32.lib User32.lib" "QMAKE_LIBS_EGL_RELEASE=D:\TBuild\Libraries\win64/tg_angle/out/Release/tg_angle.lib D:\TBuild\Libraries\win64/zlib/Release/libzs.lib d3d9.lib dxgi.lib dxguid.lib Gdi32.lib User32.lib" "CONFIG+=add_cflags" "DEFINES+=NO_ATTRIBUTE" "SIMD=sse3" D:/TBuild/Libraries/win64/qt_5.15.19/qtbase/config.tests/x86_simd
++ cd /d D:\TBuild\Libraries\win64\qt_5.15.19\config.tests\x86_simd && set MAKEFLAGS=& jom clean && set MAKEFLAGS=& jom
+> jom 1.1.3 - empower your cores
+> 	del main.obj
+> jom 1.1.3 - empower your cores
+> 	cl -c -nologo -Zc:wchar_t -FS -Zc:rvalueCast -Zc:inline -Zc:strictStrings -Zc:throwingNew -Zc:referenceBinding -Zc:__cplusplus -O2 -MD -W0 -EHsc -DUNICODE -D_UNICODE -DWIN32 -D_ENABLE_EXTENDED_ALIGNED_STORAGE -DWIN64 -DKHRONOS_STATIC= -DDESKTOP_APP_QT_STATIC_ANGLE= -DNO_ATTRIBUTE -DQT_COMPILER_SUPPORTS_SSE3 -DNDEBUG -ID:\TBuild\Libraries\win64\qt_5.15.19\qtbase\config.tests\x86_simd -I. -ID:\TBuild\Libraries\win64\tg_angle\include -ID:\TBuild\Libraries\win64\openssl3\include -ID:\TBuild\Libraries\win64\mozjpeg -ID:\TBuild\Libraries\win64\libwebp\src -ID:\TBuild\Libraries\win64\qt_5.15.19\qtbase\mkspecs\win32-msvc -Fo @C:\Users\RUNNER~1\AppData\Local\Temp\main.obj.5312.0.jom
+> main.cpp
+> 	link /NOLOGO /DYNAMICBASE /NXCOMPAT /OPT:REF /INCREMENTAL:NO /SUBSYSTEM:CONSOLE "/MANIFESTDEPENDENCY:type='win32' name='Microsoft.Windows.Common-Controls' version='6.0.0.0' publicKeyToken='6595b64144ccf1df' language='*' processorArchitecture='*'" /MANIFEST:embed /OUT:x86_simd.exe @C:\Users\RUNNER~1\AppData\Local\Temp\x86_simd.exe.5312.78.jom
+test config.qtbase.tests.sse3 succeeded
+executing config test ssse3
++ cd /d D:\TBuild\Libraries\win64\qt_5.15.19\config.tests\x86_simd && D:\TBuild\Libraries\win64\qt_5.15.19\qtbase\bin\qmake.exe "CONFIG -= qt debug_and_release app_bundle lib_bundle" "CONFIG += static warn_off console single_arch" "DEFINES += KHRONOS_STATIC= DESKTOP_APP_QT_STATIC_ANGLE=" "QMAKE_LIBDIR += D:\\TBuild\\Libraries\\win64/libwebp/out/release-static/x64/lib" "INCLUDEPATH += D:\\TBuild\\Libraries\\win64/tg_angle/include D:\\TBuild\\Libraries\\win64/openssl3/include D:\\TBuild\\Libraries\\win64/mozjpeg D:\\TBuild\\Libraries\\win64/libwebp/src" "QMAKE_LIBS_OPENGL_ES2_DEBUG=D:\TBuild\Libraries\win64/tg_angle/out/Debug/tg_angle.lib D:\TBuild\Libraries\win64/zlib/Debug/libzsd.lib d3d9.lib dxgi.lib dxguid.lib" "QMAKE_LIBS_OPENGL_ES2_RELEASE=D:\TBuild\Libraries\win64/tg_angle/out/Release/tg_angle.lib D:\TBuild\Libraries\win64/zlib/Release/libzs.lib d3d9.lib dxgi.lib dxguid.lib" "QMAKE_LIBS_EGL_DEBUG=D:\TBuild\Libraries\win64/tg_angle/out/Debug/tg_angle.lib D:\TBuild\Libraries\win64/zlib/Debug/libzsd.lib d3d9.lib dxgi.lib dxguid.lib Gdi32.lib User32.lib" "QMAKE_LIBS_EGL_RELEASE=D:\TBuild\Libraries\win64/tg_angle/out/Release/tg_angle.lib D:\TBuild\Libraries\win64/zlib/Release/libzs.lib d3d9.lib dxgi.lib dxguid.lib Gdi32.lib User32.lib" "CONFIG+=add_cflags" "DEFINES+=NO_ATTRIBUTE" "SIMD=ssse3" D:/TBuild/Libraries/win64/qt_5.15.19/qtbase/config.tests/x86_simd
++ cd /d D:\TBuild\Libraries\win64\qt_5.15.19\config.tests\x86_simd && set MAKEFLAGS=& jom clean && set MAKEFLAGS=& jom
+> jom 1.1.3 - empower your cores
+> 	del main.obj
+> jom 1.1.3 - empower your cores
+> 	cl -c -nologo -Zc:wchar_t -FS -Zc:rvalueCast -Zc:inline -Zc:strictStrings -Zc:throwingNew -Zc:referenceBinding -Zc:__cplusplus -O2 -MD -W0 -EHsc -DUNICODE -D_UNICODE -DWIN32 -D_ENABLE_EXTENDED_ALIGNED_STORAGE -DWIN64 -DKHRONOS_STATIC= -DDESKTOP_APP_QT_STATIC_ANGLE= -DNO_ATTRIBUTE -DQT_COMPILER_SUPPORTS_SSSE3 -DNDEBUG -ID:\TBuild\Libraries\win64\qt_5.15.19\qtbase\config.tests\x86_simd -I. -ID:\TBuild\Libraries\win64\tg_angle\include -ID:\TBuild\Libraries\win64\openssl3\include -ID:\TBuild\Libraries\win64\mozjpeg -ID:\TBuild\Libraries\win64\libwebp\src -ID:\TBuild\Libraries\win64\qt_5.15.19\qtbase\mkspecs\win32-msvc -Fo @C:\Users\RUNNER~1\AppData\Local\Temp\main.obj.5744.16.jom
+> main.cpp
+> 	link /NOLOGO /DYNAMICBASE /NXCOMPAT /OPT:REF /INCREMENTAL:NO /SUBSYSTEM:CONSOLE "/MANIFESTDEPENDENCY:type='win32' name='Microsoft.Windows.Common-Controls' version='6.0.0.0' publicKeyToken='6595b64144ccf1df' language='*' processorArchitecture='*'" /MANIFEST:embed /OUT:x86_simd.exe @C:\Users\RUNNER~1\AppData\Local\Temp\x86_simd.exe.5744.94.jom
+test config.qtbase.tests.ssse3 succeeded
+executing config test sse4_1
++ cd /d D:\TBuild\Libraries\win64\qt_5.15.19\config.tests\x86_simd && D:\TBuild\Libraries\win64\qt_5.15.19\qtbase\bin\qmake.exe "CONFIG -= qt debug_and_release app_bundle lib_bundle" "CONFIG += static warn_off console single_arch" "DEFINES += KHRONOS_STATIC= DESKTOP_APP_QT_STATIC_ANGLE=" "QMAKE_LIBDIR += D:\\TBuild\\Libraries\\win64/libwebp/out/release-static/x64/lib" "INCLUDEPATH += D:\\TBuild\\Libraries\\win64/tg_angle/include D:\\TBuild\\Libraries\\win64/openssl3/include D:\\TBuild\\Libraries\\win64/mozjpeg D:\\TBuild\\Libraries\\win64/libwebp/src" "QMAKE_LIBS_OPENGL_ES2_DEBUG=D:\TBuild\Libraries\win64/tg_angle/out/Debug/tg_angle.lib D:\TBuild\Libraries\win64/zlib/Debug/libzsd.lib d3d9.lib dxgi.lib dxguid.lib" "QMAKE_LIBS_OPENGL_ES2_RELEASE=D:\TBuild\Libraries\win64/tg_angle/out/Release/tg_angle.lib D:\TBuild\Libraries\win64/zlib/Release/libzs.lib d3d9.lib dxgi.lib dxguid.lib" "QMAKE_LIBS_EGL_DEBUG=D:\TBuild\Libraries\win64/tg_angle/out/Debug/tg_angle.lib D:\TBuild\Libraries\win64/zlib/Debug/libzsd.lib d3d9.lib dxgi.lib dxguid.lib Gdi32.lib User32.lib" "QMAKE_LIBS_EGL_RELEASE=D:\TBuild\Libraries\win64/tg_angle/out/Release/tg_angle.lib D:\TBuild\Libraries\win64/zlib/Release/libzs.lib d3d9.lib dxgi.lib dxguid.lib Gdi32.lib User32.lib" "CONFIG+=add_cflags" "DEFINES+=NO_ATTRIBUTE" "SIMD=sse4_1" D:/TBuild/Libraries/win64/qt_5.15.19/qtbase/config.tests/x86_simd
++ cd /d D:\TBuild\Libraries\win64\qt_5.15.19\config.tests\x86_simd && set MAKEFLAGS=& jom clean && set MAKEFLAGS=& jom
+> jom 1.1.3 - empower your cores
+> 	del main.obj
+> jom 1.1.3 - empower your cores
+> 	cl -c -nologo -Zc:wchar_t -FS -Zc:rvalueCast -Zc:inline -Zc:strictStrings -Zc:throwingNew -Zc:referenceBinding -Zc:__cplusplus -O2 -MD -W0 -EHsc -DUNICODE -D_UNICODE -DWIN32 -D_ENABLE_EXTENDED_ALIGNED_STORAGE -DWIN64 -DKHRONOS_STATIC= -DDESKTOP_APP_QT_STATIC_ANGLE= -DNO_ATTRIBUTE -DQT_COMPILER_SUPPORTS_SSE4_1 -DNDEBUG -ID:\TBuild\Libraries\win64\qt_5.15.19\qtbase\config.tests\x86_simd -I. -ID:\TBuild\Libraries\win64\tg_angle\include -ID:\TBuild\Libraries\win64\openssl3\include -ID:\TBuild\Libraries\win64\mozjpeg -ID:\TBuild\Libraries\win64\libwebp\src -ID:\TBuild\Libraries\win64\qt_5.15.19\qtbase\mkspecs\win32-msvc -Fo @C:\Users\RUNNER~1\AppData\Local\Temp\main.obj.4144.0.jom
+> main.cpp
+> 	link /NOLOGO /DYNAMICBASE /NXCOMPAT /OPT:REF /INCREMENTAL:NO /SUBSYSTEM:CONSOLE "/MANIFESTDEPENDENCY:type='win32' name='Microsoft.Windows.Common-Controls' version='6.0.0.0' publicKeyToken='6595b64144ccf1df' language='*' processorArchitecture='*'" /MANIFEST:embed /OUT:x86_simd.exe @C:\Users\RUNNER~1\AppData\Local\Temp\x86_simd.exe.4144.79.jom
+test config.qtbase.tests.sse4_1 succeeded
+executing config test sse4_2
++ cd /d D:\TBuild\Libraries\win64\qt_5.15.19\config.tests\x86_simd && D:\TBuild\Libraries\win64\qt_5.15.19\qtbase\bin\qmake.exe "CONFIG -= qt debug_and_release app_bundle lib_bundle" "CONFIG += static warn_off console single_arch" "DEFINES += KHRONOS_STATIC= DESKTOP_APP_QT_STATIC_ANGLE=" "QMAKE_LIBDIR += D:\\TBuild\\Libraries\\win64/libwebp/out/release-static/x64/lib" "INCLUDEPATH += D:\\TBuild\\Libraries\\win64/tg_angle/include D:\\TBuild\\Libraries\\win64/openssl3/include D:\\TBuild\\Libraries\\win64/mozjpeg D:\\TBuild\\Libraries\\win64/libwebp/src" "QMAKE_LIBS_OPENGL_ES2_DEBUG=D:\TBuild\Libraries\win64/tg_angle/out/Debug/tg_angle.lib D:\TBuild\Libraries\win64/zlib/Debug/libzsd.lib d3d9.lib dxgi.lib dxguid.lib" "QMAKE_LIBS_OPENGL_ES2_RELEASE=D:\TBuild\Libraries\win64/tg_angle/out/Release/tg_angle.lib D:\TBuild\Libraries\win64/zlib/Release/libzs.lib d3d9.lib dxgi.lib dxguid.lib" "QMAKE_LIBS_EGL_DEBUG=D:\TBuild\Libraries\win64/tg_angle/out/Debug/tg_angle.lib D:\TBuild\Libraries\win64/zlib/Debug/libzsd.lib d3d9.lib dxgi.lib dxguid.lib Gdi32.lib User32.lib" "QMAKE_LIBS_EGL_RELEASE=D:\TBuild\Libraries\win64/tg_angle/out/Release/tg_angle.lib D:\TBuild\Libraries\win64/zlib/Release/libzs.lib d3d9.lib dxgi.lib dxguid.lib Gdi32.lib User32.lib" "CONFIG+=add_cflags" "DEFINES+=NO_ATTRIBUTE" "SIMD=sse4_2" D:/TBuild/Libraries/win64/qt_5.15.19/qtbase/config.tests/x86_simd
++ cd /d D:\TBuild\Libraries\win64\qt_5.15.19\config.tests\x86_simd && set MAKEFLAGS=& jom clean && set MAKEFLAGS=& jom
+> jom 1.1.3 - empower your cores
+> 	del main.obj
+> jom 1.1.3 - empower your cores
+> 	cl -c -nologo -Zc:wchar_t -FS -Zc:rvalueCast -Zc:inline -Zc:strictStrings -Zc:throwingNew -Zc:referenceBinding -Zc:__cplusplus -O2 -MD -W0 -EHsc -DUNICODE -D_UNICODE -DWIN32 -D_ENABLE_EXTENDED_ALIGNED_STORAGE -DWIN64 -DKHRONOS_STATIC= -DDESKTOP_APP_QT_STATIC_ANGLE= -DNO_ATTRIBUTE -DQT_COMPILER_SUPPORTS_SSE4_2 -DNDEBUG -ID:\TBuild\Libraries\win64\qt_5.15.19\qtbase\config.tests\x86_simd -I. -ID:\TBuild\Libraries\win64\tg_angle\include -ID:\TBuild\Libraries\win64\openssl3\include -ID:\TBuild\Libraries\win64\mozjpeg -ID:\TBuild\Libraries\win64\libwebp\src -ID:\TBuild\Libraries\win64\qt_5.15.19\qtbase\mkspecs\win32-msvc -Fo @C:\Users\RUNNER~1\AppData\Local\Temp\main.obj.4280.0.jom
+> main.cpp
+> 	link /NOLOGO /DYNAMICBASE /NXCOMPAT /OPT:REF /INCREMENTAL:NO /SUBSYSTEM:CONSOLE "/MANIFESTDEPENDENCY:type='win32' name='Microsoft.Windows.Common-Controls' version='6.0.0.0' publicKeyToken='6595b64144ccf1df' language='*' processorArchitecture='*'" /MANIFEST:embed /OUT:x86_simd.exe @C:\Users\RUNNER~1\AppData\Local\Temp\x86_simd.exe.4280.78.jom
+test config.qtbase.tests.sse4_2 succeeded
+executing config test avx
++ cd /d D:\TBuild\Libraries\win64\qt_5.15.19\config.tests\x86_simd && D:\TBuild\Libraries\win64\qt_5.15.19\qtbase\bin\qmake.exe "CONFIG -= qt debug_and_release app_bundle lib_bundle" "CONFIG += static warn_off console single_arch" "DEFINES += KHRONOS_STATIC= DESKTOP_APP_QT_STATIC_ANGLE=" "QMAKE_LIBDIR += D:\\TBuild\\Libraries\\win64/libwebp/out/release-static/x64/lib" "INCLUDEPATH += D:\\TBuild\\Libraries\\win64/tg_angle/include D:\\TBuild\\Libraries\\win64/openssl3/include D:\\TBuild\\Libraries\\win64/mozjpeg D:\\TBuild\\Libraries\\win64/libwebp/src" "QMAKE_LIBS_OPENGL_ES2_DEBUG=D:\TBuild\Libraries\win64/tg_angle/out/Debug/tg_angle.lib D:\TBuild\Libraries\win64/zlib/Debug/libzsd.lib d3d9.lib dxgi.lib dxguid.lib" "QMAKE_LIBS_OPENGL_ES2_RELEASE=D:\TBuild\Libraries\win64/tg_angle/out/Release/tg_angle.lib D:\TBuild\Libraries\win64/zlib/Release/libzs.lib d3d9.lib dxgi.lib dxguid.lib" "QMAKE_LIBS_EGL_DEBUG=D:\TBuild\Libraries\win64/tg_angle/out/Debug/tg_angle.lib D:\TBuild\Libraries\win64/zlib/Debug/libzsd.lib d3d9.lib dxgi.lib dxguid.lib Gdi32.lib User32.lib" "QMAKE_LIBS_EGL_RELEASE=D:\TBuild\Libraries\win64/tg_angle/out/Release/tg_angle.lib D:\TBuild\Libraries\win64/zlib/Release/libzs.lib d3d9.lib dxgi.lib dxguid.lib Gdi32.lib User32.lib" "CONFIG+=add_cflags" "DEFINES+=NO_ATTRIBUTE" "SIMD=avx" D:/TBuild/Libraries/win64/qt_5.15.19/qtbase/config.tests/x86_simd
++ cd /d D:\TBuild\Libraries\win64\qt_5.15.19\config.tests\x86_simd && set MAKEFLAGS=& jom clean && set MAKEFLAGS=& jom
+> jom 1.1.3 - empower your cores
+> 	del main.obj
+> jom 1.1.3 - empower your cores
+> 	cl -c -nologo -Zc:wchar_t -FS -Zc:rvalueCast -Zc:inline -Zc:strictStrings -Zc:throwingNew -Zc:referenceBinding -Zc:__cplusplus -arch:AVX -O2 -MD -W0 -EHsc -DUNICODE -D_UNICODE -DWIN32 -D_ENABLE_EXTENDED_ALIGNED_STORAGE -DWIN64 -DKHRONOS_STATIC= -DDESKTOP_APP_QT_STATIC_ANGLE= -DNO_ATTRIBUTE -DQT_COMPILER_SUPPORTS_AVX -DNDEBUG -ID:\TBuild\Libraries\win64\qt_5.15.19\qtbase\config.tests\x86_simd -I. -ID:\TBuild\Libraries\win64\tg_angle\include -ID:\TBuild\Libraries\win64\openssl3\include -ID:\TBuild\Libraries\win64\mozjpeg -ID:\TBuild\Libraries\win64\libwebp\src -ID:\TBuild\Libraries\win64\qt_5.15.19\qtbase\mkspecs\win32-msvc -Fo @C:\Users\RUNNER~1\AppData\Local\Temp\main.obj.6060.0.jom
+> main.cpp
+> 	link /NOLOGO /DYNAMICBASE /NXCOMPAT /OPT:REF /INCREMENTAL:NO /SUBSYSTEM:CONSOLE "/MANIFESTDEPENDENCY:type='win32' name='Microsoft.Windows.Common-Controls' version='6.0.0.0' publicKeyToken='6595b64144ccf1df' language='*' processorArchitecture='*'" /MANIFEST:embed /OUT:x86_simd.exe @C:\Users\RUNNER~1\AppData\Local\Temp\x86_simd.exe.6060.78.jom
+test config.qtbase.tests.avx succeeded
+executing config test avx2
++ cd /d D:\TBuild\Libraries\win64\qt_5.15.19\config.tests\x86_simd && D:\TBuild\Libraries\win64\qt_5.15.19\qtbase\bin\qmake.exe "CONFIG -= qt debug_and_release app_bundle lib_bundle" "CONFIG += static warn_off console single_arch" "DEFINES += KHRONOS_STATIC= DESKTOP_APP_QT_STATIC_ANGLE=" "QMAKE_LIBDIR += D:\\TBuild\\Libraries\\win64/libwebp/out/release-static/x64/lib" "INCLUDEPATH += D:\\TBuild\\Libraries\\win64/tg_angle/include D:\\TBuild\\Libraries\\win64/openssl3/include D:\\TBuild\\Libraries\\win64/mozjpeg D:\\TBuild\\Libraries\\win64/libwebp/src" "QMAKE_LIBS_OPENGL_ES2_DEBUG=D:\TBuild\Libraries\win64/tg_angle/out/Debug/tg_angle.lib D:\TBuild\Libraries\win64/zlib/Debug/libzsd.lib d3d9.lib dxgi.lib dxguid.lib" "QMAKE_LIBS_OPENGL_ES2_RELEASE=D:\TBuild\Libraries\win64/tg_angle/out/Release/tg_angle.lib D:\TBuild\Libraries\win64/zlib/Release/libzs.lib d3d9.lib dxgi.lib dxguid.lib" "QMAKE_LIBS_EGL_DEBUG=D:\TBuild\Libraries\win64/tg_angle/out/Debug/tg_angle.lib D:\TBuild\Libraries\win64/zlib/Debug/libzsd.lib d3d9.lib dxgi.lib dxguid.lib Gdi32.lib User32.lib" "QMAKE_LIBS_EGL_RELEASE=D:\TBuild\Libraries\win64/tg_angle/out/Release/tg_angle.lib D:\TBuild\Libraries\win64/zlib/Release/libzs.lib d3d9.lib dxgi.lib dxguid.lib Gdi32.lib User32.lib" "CONFIG+=add_cflags" "DEFINES+=NO_ATTRIBUTE" "SIMD=avx2" D:/TBuild/Libraries/win64/qt_5.15.19/qtbase/config.tests/x86_simd
++ cd /d D:\TBuild\Libraries\win64\qt_5.15.19\config.tests\x86_simd && set MAKEFLAGS=& jom clean && set MAKEFLAGS=& jom
+> jom 1.1.3 - empower your cores
+> 	del main.obj
+> jom 1.1.3 - empower your cores
+> 	cl -c -nologo -Zc:wchar_t -FS -Zc:rvalueCast -Zc:inline -Zc:strictStrings -Zc:throwingNew -Zc:referenceBinding -Zc:__cplusplus -arch:AVX2 -O2 -MD -W0 -EHsc -DUNICODE -D_UNICODE -DWIN32 -D_ENABLE_EXTENDED_ALIGNED_STORAGE -DWIN64 -DKHRONOS_STATIC= -DDESKTOP_APP_QT_STATIC_ANGLE= -DNO_ATTRIBUTE -DQT_COMPILER_SUPPORTS_AVX2 -DNDEBUG -ID:\TBuild\Libraries\win64\qt_5.15.19\qtbase\config.tests\x86_simd -I. -ID:\TBuild\Libraries\win64\tg_angle\include -ID:\TBuild\Libraries\win64\openssl3\include -ID:\TBuild\Libraries\win64\mozjpeg -ID:\TBuild\Libraries\win64\libwebp\src -ID:\TBuild\Libraries\win64\qt_5.15.19\qtbase\mkspecs\win32-msvc -Fo @C:\Users\RUNNER~1\AppData\Local\Temp\main.obj.1600.0.jom
+> main.cpp
+> 	link /NOLOGO /DYNAMICBASE /NXCOMPAT /OPT:REF /INCREMENTAL:NO /SUBSYSTEM:CONSOLE "/MANIFESTDEPENDENCY:type='win32' name='Microsoft.Windows.Common-Controls' version='6.0.0.0' publicKeyToken='6595b64144ccf1df' language='*' processorArchitecture='*'" /MANIFEST:embed /OUT:x86_simd.exe @C:\Users\RUNNER~1\AppData\Local\Temp\x86_simd.exe.1600.78.jom
+test config.qtbase.tests.avx2 succeeded
+executing config test avx512f
++ cd /d D:\TBuild\Libraries\win64\qt_5.15.19\config.tests\x86_simd && D:\TBuild\Libraries\win64\qt_5.15.19\qtbase\bin\qmake.exe "CONFIG -= qt debug_and_release app_bundle lib_bundle" "CONFIG += static warn_off console single_arch" "DEFINES += KHRONOS_STATIC= DESKTOP_APP_QT_STATIC_ANGLE=" "QMAKE_LIBDIR += D:\\TBuild\\Libraries\\win64/libwebp/out/release-static/x64/lib" "INCLUDEPATH += D:\\TBuild\\Libraries\\win64/tg_angle/include D:\\TBuild\\Libraries\\win64/openssl3/include D:\\TBuild\\Libraries\\win64/mozjpeg D:\\TBuild\\Libraries\\win64/libwebp/src" "QMAKE_LIBS_OPENGL_ES2_DEBUG=D:\TBuild\Libraries\win64/tg_angle/out/Debug/tg_angle.lib D:\TBuild\Libraries\win64/zlib/Debug/libzsd.lib d3d9.lib dxgi.lib dxguid.lib" "QMAKE_LIBS_OPENGL_ES2_RELEASE=D:\TBuild\Libraries\win64/tg_angle/out/Release/tg_angle.lib D:\TBuild\Libraries\win64/zlib/Release/libzs.lib d3d9.lib dxgi.lib dxguid.lib" "QMAKE_LIBS_EGL_DEBUG=D:\TBuild\Libraries\win64/tg_angle/out/Debug/tg_angle.lib D:\TBuild\Libraries\win64/zlib/Debug/libzsd.lib d3d9.lib dxgi.lib dxguid.lib Gdi32.lib User32.lib" "QMAKE_LIBS_EGL_RELEASE=D:\TBuild\Libraries\win64/tg_angle/out/Release/tg_angle.lib D:\TBuild\Libraries\win64/zlib/Release/libzs.lib d3d9.lib dxgi.lib dxguid.lib Gdi32.lib User32.lib" "CONFIG+=add_cflags" "DEFINES+=NO_ATTRIBUTE" "SIMD=avx512f" D:/TBuild/Libraries/win64/qt_5.15.19/qtbase/config.tests/x86_simd
++ cd /d D:\TBuild\Libraries\win64\qt_5.15.19\config.tests\x86_simd && set MAKEFLAGS=& jom clean && set MAKEFLAGS=& jom
+> jom 1.1.3 - empower your cores
+> 	del main.obj
+> jom 1.1.3 - empower your cores
+> 	cl -c -nologo -Zc:wchar_t -FS -Zc:rvalueCast -Zc:inline -Zc:strictStrings -Zc:throwingNew -Zc:referenceBinding -Zc:__cplusplus -arch:AVX512 -O2 -MD -W0 -EHsc -DUNICODE -D_UNICODE -DWIN32 -D_ENABLE_EXTENDED_ALIGNED_STORAGE -DWIN64 -DKHRONOS_STATIC= -DDESKTOP_APP_QT_STATIC_ANGLE= -DNO_ATTRIBUTE -DQT_COMPILER_SUPPORTS_AVX512F -DNDEBUG -ID:\TBuild\Libraries\win64\qt_5.15.19\qtbase\config.tests\x86_simd -I. -ID:\TBuild\Libraries\win64\tg_angle\include -ID:\TBuild\Libraries\win64\openssl3\include -ID:\TBuild\Libraries\win64\mozjpeg -ID:\TBuild\Libraries\win64\libwebp\src -ID:\TBuild\Libraries\win64\qt_5.15.19\qtbase\mkspecs\win32-msvc -Fo @C:\Users\RUNNER~1\AppData\Local\Temp\main.obj.1456.0.jom
+> main.cpp
+> 	link /NOLOGO /DYNAMICBASE /NXCOMPAT /OPT:REF /INCREMENTAL:NO /SUBSYSTEM:CONSOLE "/MANIFESTDEPENDENCY:type='win32' name='Microsoft.Windows.Common-Controls' version='6.0.0.0' publicKeyToken='6595b64144ccf1df' language='*' processorArchitecture='*'" /MANIFEST:embed /OUT:x86_simd.exe @C:\Users\RUNNER~1\AppData\Local\Temp\x86_simd.exe.1456.94.jom
+test config.qtbase.tests.avx512f succeeded
+executing config test avx512bw
++ cd /d D:\TBuild\Libraries\win64\qt_5.15.19\config.tests\x86_simd && D:\TBuild\Libraries\win64\qt_5.15.19\qtbase\bin\qmake.exe "CONFIG -= qt debug_and_release app_bundle lib_bundle" "CONFIG += static warn_off console single_arch" "DEFINES += KHRONOS_STATIC= DESKTOP_APP_QT_STATIC_ANGLE=" "QMAKE_LIBDIR += D:\\TBuild\\Libraries\\win64/libwebp/out/release-static/x64/lib" "INCLUDEPATH += D:\\TBuild\\Libraries\\win64/tg_angle/include D:\\TBuild\\Libraries\\win64/openssl3/include D:\\TBuild\\Libraries\\win64/mozjpeg D:\\TBuild\\Libraries\\win64/libwebp/src" "QMAKE_LIBS_OPENGL_ES2_DEBUG=D:\TBuild\Libraries\win64/tg_angle/out/Debug/tg_angle.lib D:\TBuild\Libraries\win64/zlib/Debug/libzsd.lib d3d9.lib dxgi.lib dxguid.lib" "QMAKE_LIBS_OPENGL_ES2_RELEASE=D:\TBuild\Libraries\win64/tg_angle/out/Release/tg_angle.lib D:\TBuild\Libraries\win64/zlib/Release/libzs.lib d3d9.lib dxgi.lib dxguid.lib" "QMAKE_LIBS_EGL_DEBUG=D:\TBuild\Libraries\win64/tg_angle/out/Debug/tg_angle.lib D:\TBuild\Libraries\win64/zlib/Debug/libzsd.lib d3d9.lib dxgi.lib dxguid.lib Gdi32.lib User32.lib" "QMAKE_LIBS_EGL_RELEASE=D:\TBuild\Libraries\win64/tg_angle/out/Release/tg_angle.lib D:\TBuild\Libraries\win64/zlib/Release/libzs.lib d3d9.lib dxgi.lib dxguid.lib Gdi32.lib User32.lib" "CONFIG+=add_cflags" "DEFINES+=NO_ATTRIBUTE" "SIMD=avx512bw" D:/TBuild/Libraries/win64/qt_5.15.19/qtbase/config.tests/x86_simd
++ cd /d D:\TBuild\Libraries\win64\qt_5.15.19\config.tests\x86_simd && set MAKEFLAGS=& jom clean && set MAKEFLAGS=& jom
+> jom 1.1.3 - empower your cores
+> 	del main.obj
+> jom 1.1.3 - empower your cores
+> 	cl -c -nologo -Zc:wchar_t -FS -Zc:rvalueCast -Zc:inline -Zc:strictStrings -Zc:throwingNew -Zc:referenceBinding -Zc:__cplusplus -arch:AVX512 -O2 -MD -W0 -EHsc -DUNICODE -D_UNICODE -DWIN32 -D_ENABLE_EXTENDED_ALIGNED_STORAGE -DWIN64 -DKHRONOS_STATIC= -DDESKTOP_APP_QT_STATIC_ANGLE= -DNO_ATTRIBUTE -DQT_COMPILER_SUPPORTS_AVX512BW -DNDEBUG -ID:\TBuild\Libraries\win64\qt_5.15.19\qtbase\config.tests\x86_simd -I. -ID:\TBuild\Libraries\win64\tg_angle\include -ID:\TBuild\Libraries\win64\openssl3\include -ID:\TBuild\Libraries\win64\mozjpeg -ID:\TBuild\Libraries\win64\libwebp\src -ID:\TBuild\Libraries\win64\qt_5.15.19\qtbase\mkspecs\win32-msvc -Fo @C:\Users\RUNNER~1\AppData\Local\Temp\main.obj.5928.0.jom
+> main.cpp
+> 	link /NOLOGO /DYNAMICBASE /NXCOMPAT /OPT:REF /INCREMENTAL:NO /SUBSYSTEM:CONSOLE "/MANIFESTDEPENDENCY:type='win32' name='Microsoft.Windows.Common-Controls' version='6.0.0.0' publicKeyToken='6595b64144ccf1df' language='*' processorArchitecture='*'" /MANIFEST:embed /OUT:x86_simd.exe @C:\Users\RUNNER~1\AppData\Local\Temp\x86_simd.exe.5928.93.jom
+test config.qtbase.tests.avx512bw succeeded
+executing config test avx512cd
++ cd /d D:\TBuild\Libraries\win64\qt_5.15.19\config.tests\x86_simd && D:\TBuild\Libraries\win64\qt_5.15.19\qtbase\bin\qmake.exe "CONFIG -= qt debug_and_release app_bundle lib_bundle" "CONFIG += static warn_off console single_arch" "DEFINES += KHRONOS_STATIC= DESKTOP_APP_QT_STATIC_ANGLE=" "QMAKE_LIBDIR += D:\\TBuild\\Libraries\\win64/libwebp/out/release-static/x64/lib" "INCLUDEPATH += D:\\TBuild\\Libraries\\win64/tg_angle/include D:\\TBuild\\Libraries\\win64/openssl3/include D:\\TBuild\\Libraries\\win64/mozjpeg D:\\TBuild\\Libraries\\win64/libwebp/src" "QMAKE_LIBS_OPENGL_ES2_DEBUG=D:\TBuild\Libraries\win64/tg_angle/out/Debug/tg_angle.lib D:\TBuild\Libraries\win64/zlib/Debug/libzsd.lib d3d9.lib dxgi.lib dxguid.lib" "QMAKE_LIBS_OPENGL_ES2_RELEASE=D:\TBuild\Libraries\win64/tg_angle/out/Release/tg_angle.lib D:\TBuild\Libraries\win64/zlib/Release/libzs.lib d3d9.lib dxgi.lib dxguid.lib" "QMAKE_LIBS_EGL_DEBUG=D:\TBuild\Libraries\win64/tg_angle/out/Debug/tg_angle.lib D:\TBuild\Libraries\win64/zlib/Debug/libzsd.lib d3d9.lib dxgi.lib dxguid.lib Gdi32.lib User32.lib" "QMAKE_LIBS_EGL_RELEASE=D:\TBuild\Libraries\win64/tg_angle/out/Release/tg_angle.lib D:\TBuild\Libraries\win64/zlib/Release/libzs.lib d3d9.lib dxgi.lib dxguid.lib Gdi32.lib User32.lib" "CONFIG+=add_cflags" "DEFINES+=NO_ATTRIBUTE" "SIMD=avx512cd" D:/TBuild/Libraries/win64/qt_5.15.19/qtbase/config.tests/x86_simd
++ cd /d D:\TBuild\Libraries\win64\qt_5.15.19\config.tests\x86_simd && set MAKEFLAGS=& jom clean && set MAKEFLAGS=& jom
+> jom 1.1.3 - empower your cores
+> 	del main.obj
+> jom 1.1.3 - empower your cores
+> 	cl -c -nologo -Zc:wchar_t -FS -Zc:rvalueCast -Zc:inline -Zc:strictStrings -Zc:throwingNew -Zc:referenceBinding -Zc:__cplusplus -arch:AVX512 -O2 -MD -W0 -EHsc -DUNICODE -D_UNICODE -DWIN32 -D_ENABLE_EXTENDED_ALIGNED_STORAGE -DWIN64 -DKHRONOS_STATIC= -DDESKTOP_APP_QT_STATIC_ANGLE= -DNO_ATTRIBUTE -DQT_COMPILER_SUPPORTS_AVX512CD -DNDEBUG -ID:\TBuild\Libraries\win64\qt_5.15.19\qtbase\config.tests\x86_simd -I. -ID:\TBuild\Libraries\win64\tg_angle\include -ID:\TBuild\Libraries\win64\openssl3\include -ID:\TBuild\Libraries\win64\mozjpeg -ID:\TBuild\Libraries\win64\libwebp\src -ID:\TBuild\Libraries\win64\qt_5.15.19\qtbase\mkspecs\win32-msvc -Fo @C:\Users\RUNNER~1\AppData\Local\Temp\main.obj.5340.0.jom
+> main.cpp
+> 	link /NOLOGO /DYNAMICBASE /NXCOMPAT /OPT:REF /INCREMENTAL:NO /SUBSYSTEM:CONSOLE "/MANIFESTDEPENDENCY:type='win32' name='Microsoft.Windows.Common-Controls' version='6.0.0.0' publicKeyToken='6595b64144ccf1df' language='*' processorArchitecture='*'" /MANIFEST:embed /OUT:x86_simd.exe @C:\Users\RUNNER~1\AppData\Local\Temp\x86_simd.exe.5340.141.jom
+test config.qtbase.tests.avx512cd succeeded
+executing config test avx512dq
++ cd /d D:\TBuild\Libraries\win64\qt_5.15.19\config.tests\x86_simd && D:\TBuild\Libraries\win64\qt_5.15.19\qtbase\bin\qmake.exe "CONFIG -= qt debug_and_release app_bundle lib_bundle" "CONFIG += static warn_off console single_arch" "DEFINES += KHRONOS_STATIC= DESKTOP_APP_QT_STATIC_ANGLE=" "QMAKE_LIBDIR += D:\\TBuild\\Libraries\\win64/libwebp/out/release-static/x64/lib" "INCLUDEPATH += D:\\TBuild\\Libraries\\win64/tg_angle/include D:\\TBuild\\Libraries\\win64/openssl3/include D:\\TBuild\\Libraries\\win64/mozjpeg D:\\TBuild\\Libraries\\win64/libwebp/src" "QMAKE_LIBS_OPENGL_ES2_DEBUG=D:\TBuild\Libraries\win64/tg_angle/out/Debug/tg_angle.lib D:\TBuild\Libraries\win64/zlib/Debug/libzsd.lib d3d9.lib dxgi.lib dxguid.lib" "QMAKE_LIBS_OPENGL_ES2_RELEASE=D:\TBuild\Libraries\win64/tg_angle/out/Release/tg_angle.lib D:\TBuild\Libraries\win64/zlib/Release/libzs.lib d3d9.lib dxgi.lib dxguid.lib" "QMAKE_LIBS_EGL_DEBUG=D:\TBuild\Libraries\win64/tg_angle/out/Debug/tg_angle.lib D:\TBuild\Libraries\win64/zlib/Debug/libzsd.lib d3d9.lib dxgi.lib dxguid.lib Gdi32.lib User32.lib" "QMAKE_LIBS_EGL_RELEASE=D:\TBuild\Libraries\win64/tg_angle/out/Release/tg_angle.lib D:\TBuild\Libraries\win64/zlib/Release/libzs.lib d3d9.lib dxgi.lib dxguid.lib Gdi32.lib User32.lib" "CONFIG+=add_cflags" "DEFINES+=NO_ATTRIBUTE" "SIMD=avx512dq" D:/TBuild/Libraries/win64/qt_5.15.19/qtbase/config.tests/x86_simd
++ cd /d D:\TBuild\Libraries\win64\qt_5.15.19\config.tests\x86_simd && set MAKEFLAGS=& jom clean && set MAKEFLAGS=& jom
+> jom 1.1.3 - empower your cores
+> 	del main.obj
+> jom 1.1.3 - empower your cores
+> 	cl -c -nologo -Zc:wchar_t -FS -Zc:rvalueCast -Zc:inline -Zc:strictStrings -Zc:throwingNew -Zc:referenceBinding -Zc:__cplusplus -arch:AVX512 -O2 -MD -W0 -EHsc -DUNICODE -D_UNICODE -DWIN32 -D_ENABLE_EXTENDED_ALIGNED_STORAGE -DWIN64 -DKHRONOS_STATIC= -DDESKTOP_APP_QT_STATIC_ANGLE= -DNO_ATTRIBUTE -DQT_COMPILER_SUPPORTS_AVX512DQ -DNDEBUG -ID:\TBuild\Libraries\win64\qt_5.15.19\qtbase\config.tests\x86_simd -I. -ID:\TBuild\Libraries\win64\tg_angle\include -ID:\TBuild\Libraries\win64\openssl3\include -ID:\TBuild\Libraries\win64\mozjpeg -ID:\TBuild\Libraries\win64\libwebp\src -ID:\TBuild\Libraries\win64\qt_5.15.19\qtbase\mkspecs\win32-msvc -Fo @C:\Users\RUNNER~1\AppData\Local\Temp\main.obj.7724.0.jom
+> main.cpp
+> 	link /NOLOGO /DYNAMICBASE /NXCOMPAT /OPT:REF /INCREMENTAL:NO /SUBSYSTEM:CONSOLE "/MANIFESTDEPENDENCY:type='win32' name='Microsoft.Windows.Common-Controls' version='6.0.0.0' publicKeyToken='6595b64144ccf1df' language='*' processorArchitecture='*'" /MANIFEST:embed /OUT:x86_simd.exe @C:\Users\RUNNER~1\AppData\Local\Temp\x86_simd.exe.7724.78.jom
+test config.qtbase.tests.avx512dq succeeded
+executing config test avx512er
++ cd /d D:\TBuild\Libraries\win64\qt_5.15.19\config.tests\x86_simd && D:\TBuild\Libraries\win64\qt_5.15.19\qtbase\bin\qmake.exe "CONFIG -= qt debug_and_release app_bundle lib_bundle" "CONFIG += static warn_off console single_arch" "DEFINES += KHRONOS_STATIC= DESKTOP_APP_QT_STATIC_ANGLE=" "QMAKE_LIBDIR += D:\\TBuild\\Libraries\\win64/libwebp/out/release-static/x64/lib" "INCLUDEPATH += D:\\TBuild\\Libraries\\win64/tg_angle/include D:\\TBuild\\Libraries\\win64/openssl3/include D:\\TBuild\\Libraries\\win64/mozjpeg D:\\TBuild\\Libraries\\win64/libwebp/src" "QMAKE_LIBS_OPENGL_ES2_DEBUG=D:\TBuild\Libraries\win64/tg_angle/out/Debug/tg_angle.lib D:\TBuild\Libraries\win64/zlib/Debug/libzsd.lib d3d9.lib dxgi.lib dxguid.lib" "QMAKE_LIBS_OPENGL_ES2_RELEASE=D:\TBuild\Libraries\win64/tg_angle/out/Release/tg_angle.lib D:\TBuild\Libraries\win64/zlib/Release/libzs.lib d3d9.lib dxgi.lib dxguid.lib" "QMAKE_LIBS_EGL_DEBUG=D:\TBuild\Libraries\win64/tg_angle/out/Debug/tg_angle.lib D:\TBuild\Libraries\win64/zlib/Debug/libzsd.lib d3d9.lib dxgi.lib dxguid.lib Gdi32.lib User32.lib" "QMAKE_LIBS_EGL_RELEASE=D:\TBuild\Libraries\win64/tg_angle/out/Release/tg_angle.lib D:\TBuild\Libraries\win64/zlib/Release/libzs.lib d3d9.lib dxgi.lib dxguid.lib Gdi32.lib User32.lib" "CONFIG+=add_cflags" "DEFINES+=NO_ATTRIBUTE" "SIMD=avx512er" D:/TBuild/Libraries/win64/qt_5.15.19/qtbase/config.tests/x86_simd
++ cd /d D:\TBuild\Libraries\win64\qt_5.15.19\config.tests\x86_simd && set MAKEFLAGS=& jom clean && set MAKEFLAGS=& jom
+> jom 1.1.3 - empower your cores
+> 	del main.obj
+> jom 1.1.3 - empower your cores
+> 	cl -c -nologo -Zc:wchar_t -FS -Zc:rvalueCast -Zc:inline -Zc:strictStrings -Zc:throwingNew -Zc:referenceBinding -Zc:__cplusplus -arch:AVX512 -O2 -MD -W0 -EHsc -DUNICODE -D_UNICODE -DWIN32 -D_ENABLE_EXTENDED_ALIGNED_STORAGE -DWIN64 -DKHRONOS_STATIC= -DDESKTOP_APP_QT_STATIC_ANGLE= -DNO_ATTRIBUTE -DQT_COMPILER_SUPPORTS_AVX512ER -DNDEBUG -ID:\TBuild\Libraries\win64\qt_5.15.19\qtbase\config.tests\x86_simd -I. -ID:\TBuild\Libraries\win64\tg_angle\include -ID:\TBuild\Libraries\win64\openssl3\include -ID:\TBuild\Libraries\win64\mozjpeg -ID:\TBuild\Libraries\win64\libwebp\src -ID:\TBuild\Libraries\win64\qt_5.15.19\qtbase\mkspecs\win32-msvc -Fo @C:\Users\RUNNER~1\AppData\Local\Temp\main.obj.4208.15.jom
+> main.cpp
+> 	link /NOLOGO /DYNAMICBASE /NXCOMPAT /OPT:REF /INCREMENTAL:NO /SUBSYSTEM:CONSOLE "/MANIFESTDEPENDENCY:type='win32' name='Microsoft.Windows.Common-Controls' version='6.0.0.0' publicKeyToken='6595b64144ccf1df' language='*' processorArchitecture='*'" /MANIFEST:embed /OUT:x86_simd.exe @C:\Users\RUNNER~1\AppData\Local\Temp\x86_simd.exe.4208.93.jom
+test config.qtbase.tests.avx512er succeeded
+executing config test avx512ifma
++ cd /d D:\TBuild\Libraries\win64\qt_5.15.19\config.tests\x86_simd && D:\TBuild\Libraries\win64\qt_5.15.19\qtbase\bin\qmake.exe "CONFIG -= qt debug_and_release app_bundle lib_bundle" "CONFIG += static warn_off console single_arch" "DEFINES += KHRONOS_STATIC= DESKTOP_APP_QT_STATIC_ANGLE=" "QMAKE_LIBDIR += D:\\TBuild\\Libraries\\win64/libwebp/out/release-static/x64/lib" "INCLUDEPATH += D:\\TBuild\\Libraries\\win64/tg_angle/include D:\\TBuild\\Libraries\\win64/openssl3/include D:\\TBuild\\Libraries\\win64/mozjpeg D:\\TBuild\\Libraries\\win64/libwebp/src" "QMAKE_LIBS_OPENGL_ES2_DEBUG=D:\TBuild\Libraries\win64/tg_angle/out/Debug/tg_angle.lib D:\TBuild\Libraries\win64/zlib/Debug/libzsd.lib d3d9.lib dxgi.lib dxguid.lib" "QMAKE_LIBS_OPENGL_ES2_RELEASE=D:\TBuild\Libraries\win64/tg_angle/out/Release/tg_angle.lib D:\TBuild\Libraries\win64/zlib/Release/libzs.lib d3d9.lib dxgi.lib dxguid.lib" "QMAKE_LIBS_EGL_DEBUG=D:\TBuild\Libraries\win64/tg_angle/out/Debug/tg_angle.lib D:\TBuild\Libraries\win64/zlib/Debug/libzsd.lib d3d9.lib dxgi.lib dxguid.lib Gdi32.lib User32.lib" "QMAKE_LIBS_EGL_RELEASE=D:\TBuild\Libraries\win64/tg_angle/out/Release/tg_angle.lib D:\TBuild\Libraries\win64/zlib/Release/libzs.lib d3d9.lib dxgi.lib dxguid.lib Gdi32.lib User32.lib" "CONFIG+=add_cflags" "DEFINES+=NO_ATTRIBUTE" "SIMD=avx512ifma" D:/TBuild/Libraries/win64/qt_5.15.19/qtbase/config.tests/x86_simd
++ cd /d D:\TBuild\Libraries\win64\qt_5.15.19\config.tests\x86_simd && set MAKEFLAGS=& jom clean && set MAKEFLAGS=& jom
+> jom 1.1.3 - empower your cores
+> 	del main.obj
+> jom 1.1.3 - empower your cores
+> 	cl -c -nologo -Zc:wchar_t -FS -Zc:rvalueCast -Zc:inline -Zc:strictStrings -Zc:throwingNew -Zc:referenceBinding -Zc:__cplusplus -arch:AVX512 -O2 -MD -W0 -EHsc -DUNICODE -D_UNICODE -DWIN32 -D_ENABLE_EXTENDED_ALIGNED_STORAGE -DWIN64 -DKHRONOS_STATIC= -DDESKTOP_APP_QT_STATIC_ANGLE= -DNO_ATTRIBUTE -DQT_COMPILER_SUPPORTS_AVX512IFMA -DNDEBUG -ID:\TBuild\Libraries\win64\qt_5.15.19\qtbase\config.tests\x86_simd -I. -ID:\TBuild\Libraries\win64\tg_angle\include -ID:\TBuild\Libraries\win64\openssl3\include -ID:\TBuild\Libraries\win64\mozjpeg -ID:\TBuild\Libraries\win64\libwebp\src -ID:\TBuild\Libraries\win64\qt_5.15.19\qtbase\mkspecs\win32-msvc -Fo @C:\Users\RUNNER~1\AppData\Local\Temp\main.obj.6564.0.jom
+> main.cpp
+> 	link /NOLOGO /DYNAMICBASE /NXCOMPAT /OPT:REF /INCREMENTAL:NO /SUBSYSTEM:CONSOLE "/MANIFESTDEPENDENCY:type='win32' name='Microsoft.Windows.Common-Controls' version='6.0.0.0' publicKeyToken='6595b64144ccf1df' language='*' processorArchitecture='*'" /MANIFEST:embed /OUT:x86_simd.exe @C:\Users\RUNNER~1\AppData\Local\Temp\x86_simd.exe.6564.78.jom
+test config.qtbase.tests.avx512ifma succeeded
+executing config test avx512pf
++ cd /d D:\TBuild\Libraries\win64\qt_5.15.19\config.tests\x86_simd && D:\TBuild\Libraries\win64\qt_5.15.19\qtbase\bin\qmake.exe "CONFIG -= qt debug_and_release app_bundle lib_bundle" "CONFIG += static warn_off console single_arch" "DEFINES += KHRONOS_STATIC= DESKTOP_APP_QT_STATIC_ANGLE=" "QMAKE_LIBDIR += D:\\TBuild\\Libraries\\win64/libwebp/out/release-static/x64/lib" "INCLUDEPATH += D:\\TBuild\\Libraries\\win64/tg_angle/include D:\\TBuild\\Libraries\\win64/openssl3/include D:\\TBuild\\Libraries\\win64/mozjpeg D:\\TBuild\\Libraries\\win64/libwebp/src" "QMAKE_LIBS_OPENGL_ES2_DEBUG=D:\TBuild\Libraries\win64/tg_angle/out/Debug/tg_angle.lib D:\TBuild\Libraries\win64/zlib/Debug/libzsd.lib d3d9.lib dxgi.lib dxguid.lib" "QMAKE_LIBS_OPENGL_ES2_RELEASE=D:\TBuild\Libraries\win64/tg_angle/out/Release/tg_angle.lib D:\TBuild\Libraries\win64/zlib/Release/libzs.lib d3d9.lib dxgi.lib dxguid.lib" "QMAKE_LIBS_EGL_DEBUG=D:\TBuild\Libraries\win64/tg_angle/out/Debug/tg_angle.lib D:\TBuild\Libraries\win64/zlib/Debug/libzsd.lib d3d9.lib dxgi.lib dxguid.lib Gdi32.lib User32.lib" "QMAKE_LIBS_EGL_RELEASE=D:\TBuild\Libraries\win64/tg_angle/out/Release/tg_angle.lib D:\TBuild\Libraries\win64/zlib/Release/libzs.lib d3d9.lib dxgi.lib dxguid.lib Gdi32.lib User32.lib" "CONFIG+=add_cflags" "DEFINES+=NO_ATTRIBUTE" "SIMD=avx512pf" D:/TBuild/Libraries/win64/qt_5.15.19/qtbase/config.tests/x86_simd
++ cd /d D:\TBuild\Libraries\win64\qt_5.15.19\config.tests\x86_simd && set MAKEFLAGS=& jom clean && set MAKEFLAGS=& jom
+> jom 1.1.3 - empower your cores
+> 	del main.obj
+> jom 1.1.3 - empower your cores
+> 	cl -c -nologo -Zc:wchar_t -FS -Zc:rvalueCast -Zc:inline -Zc:strictStrings -Zc:throwingNew -Zc:referenceBinding -Zc:__cplusplus -arch:AVX512 -O2 -MD -W0 -EHsc -DUNICODE -D_UNICODE -DWIN32 -D_ENABLE_EXTENDED_ALIGNED_STORAGE -DWIN64 -DKHRONOS_STATIC= -DDESKTOP_APP_QT_STATIC_ANGLE= -DNO_ATTRIBUTE -DQT_COMPILER_SUPPORTS_AVX512PF -DNDEBUG -ID:\TBuild\Libraries\win64\qt_5.15.19\qtbase\config.tests\x86_simd -I. -ID:\TBuild\Libraries\win64\tg_angle\include -ID:\TBuild\Libraries\win64\openssl3\include -ID:\TBuild\Libraries\win64\mozjpeg -ID:\TBuild\Libraries\win64\libwebp\src -ID:\TBuild\Libraries\win64\qt_5.15.19\qtbase\mkspecs\win32-msvc -Fo @C:\Users\RUNNER~1\AppData\Local\Temp\main.obj.7340.0.jom
+> main.cpp
+> 	link /NOLOGO /DYNAMICBASE /NXCOMPAT /OPT:REF /INCREMENTAL:NO /SUBSYSTEM:CONSOLE "/MANIFESTDEPENDENCY:type='win32' name='Microsoft.Windows.Common-Controls' version='6.0.0.0' publicKeyToken='6595b64144ccf1df' language='*' processorArchitecture='*'" /MANIFEST:embed /OUT:x86_simd.exe @C:\Users\RUNNER~1\AppData\Local\Temp\x86_simd.exe.7340.79.jom
+test config.qtbase.tests.avx512pf succeeded
+executing config test avx512vbmi
++ cd /d D:\TBuild\Libraries\win64\qt_5.15.19\config.tests\x86_simd && D:\TBuild\Libraries\win64\qt_5.15.19\qtbase\bin\qmake.exe "CONFIG -= qt debug_and_release app_bundle lib_bundle" "CONFIG += static warn_off console single_arch" "DEFINES += KHRONOS_STATIC= DESKTOP_APP_QT_STATIC_ANGLE=" "QMAKE_LIBDIR += D:\\TBuild\\Libraries\\win64/libwebp/out/release-static/x64/lib" "INCLUDEPATH += D:\\TBuild\\Libraries\\win64/tg_angle/include D:\\TBuild\\Libraries\\win64/openssl3/include D:\\TBuild\\Libraries\\win64/mozjpeg D:\\TBuild\\Libraries\\win64/libwebp/src" "QMAKE_LIBS_OPENGL_ES2_DEBUG=D:\TBuild\Libraries\win64/tg_angle/out/Debug/tg_angle.lib D:\TBuild\Libraries\win64/zlib/Debug/libzsd.lib d3d9.lib dxgi.lib dxguid.lib" "QMAKE_LIBS_OPENGL_ES2_RELEASE=D:\TBuild\Libraries\win64/tg_angle/out/Release/tg_angle.lib D:\TBuild\Libraries\win64/zlib/Release/libzs.lib d3d9.lib dxgi.lib dxguid.lib" "QMAKE_LIBS_EGL_DEBUG=D:\TBuild\Libraries\win64/tg_angle/out/Debug/tg_angle.lib D:\TBuild\Libraries\win64/zlib/Debug/libzsd.lib d3d9.lib dxgi.lib dxguid.lib Gdi32.lib User32.lib" "QMAKE_LIBS_EGL_RELEASE=D:\TBuild\Libraries\win64/tg_angle/out/Release/tg_angle.lib D:\TBuild\Libraries\win64/zlib/Release/libzs.lib d3d9.lib dxgi.lib dxguid.lib Gdi32.lib User32.lib" "CONFIG+=add_cflags" "DEFINES+=NO_ATTRIBUTE" "SIMD=avx512vbmi" D:/TBuild/Libraries/win64/qt_5.15.19/qtbase/config.tests/x86_simd
++ cd /d D:\TBuild\Libraries\win64\qt_5.15.19\config.tests\x86_simd && set MAKEFLAGS=& jom clean && set MAKEFLAGS=& jom
+> jom 1.1.3 - empower your cores
+> 	del main.obj
+> jom 1.1.3 - empower your cores
+> 	cl -c -nologo -Zc:wchar_t -FS -Zc:rvalueCast -Zc:inline -Zc:strictStrings -Zc:throwingNew -Zc:referenceBinding -Zc:__cplusplus -arch:AVX512 -O2 -MD -W0 -EHsc -DUNICODE -D_UNICODE -DWIN32 -D_ENABLE_EXTENDED_ALIGNED_STORAGE -DWIN64 -DKHRONOS_STATIC= -DDESKTOP_APP_QT_STATIC_ANGLE= -DNO_ATTRIBUTE -DQT_COMPILER_SUPPORTS_AVX512VBMI -DNDEBUG -ID:\TBuild\Libraries\win64\qt_5.15.19\qtbase\config.tests\x86_simd -I. -ID:\TBuild\Libraries\win64\tg_angle\include -ID:\TBuild\Libraries\win64\openssl3\include -ID:\TBuild\Libraries\win64\mozjpeg -ID:\TBuild\Libraries\win64\libwebp\src -ID:\TBuild\Libraries\win64\qt_5.15.19\qtbase\mkspecs\win32-msvc -Fo @C:\Users\RUNNER~1\AppData\Local\Temp\main.obj.1112.0.jom
+> main.cpp
+> 	link /NOLOGO /DYNAMICBASE /NXCOMPAT /OPT:REF /INCREMENTAL:NO /SUBSYSTEM:CONSOLE "/MANIFESTDEPENDENCY:type='win32' name='Microsoft.Windows.Common-Controls' version='6.0.0.0' publicKeyToken='6595b64144ccf1df' language='*' processorArchitecture='*'" /MANIFEST:embed /OUT:x86_simd.exe @C:\Users\RUNNER~1\AppData\Local\Temp\x86_simd.exe.1112.78.jom
+test config.qtbase.tests.avx512vbmi succeeded
+executing config test avx512vl
++ cd /d D:\TBuild\Libraries\win64\qt_5.15.19\config.tests\x86_simd && D:\TBuild\Libraries\win64\qt_5.15.19\qtbase\bin\qmake.exe "CONFIG -= qt debug_and_release app_bundle lib_bundle" "CONFIG += static warn_off console single_arch" "DEFINES += KHRONOS_STATIC= DESKTOP_APP_QT_STATIC_ANGLE=" "QMAKE_LIBDIR += D:\\TBuild\\Libraries\\win64/libwebp/out/release-static/x64/lib" "INCLUDEPATH += D:\\TBuild\\Libraries\\win64/tg_angle/include D:\\TBuild\\Libraries\\win64/openssl3/include D:\\TBuild\\Libraries\\win64/mozjpeg D:\\TBuild\\Libraries\\win64/libwebp/src" "QMAKE_LIBS_OPENGL_ES2_DEBUG=D:\TBuild\Libraries\win64/tg_angle/out/Debug/tg_angle.lib D:\TBuild\Libraries\win64/zlib/Debug/libzsd.lib d3d9.lib dxgi.lib dxguid.lib" "QMAKE_LIBS_OPENGL_ES2_RELEASE=D:\TBuild\Libraries\win64/tg_angle/out/Release/tg_angle.lib D:\TBuild\Libraries\win64/zlib/Release/libzs.lib d3d9.lib dxgi.lib dxguid.lib" "QMAKE_LIBS_EGL_DEBUG=D:\TBuild\Libraries\win64/tg_angle/out/Debug/tg_angle.lib D:\TBuild\Libraries\win64/zlib/Debug/libzsd.lib d3d9.lib dxgi.lib dxguid.lib Gdi32.lib User32.lib" "QMAKE_LIBS_EGL_RELEASE=D:\TBuild\Libraries\win64/tg_angle/out/Release/tg_angle.lib D:\TBuild\Libraries\win64/zlib/Release/libzs.lib d3d9.lib dxgi.lib dxguid.lib Gdi32.lib User32.lib" "CONFIG+=add_cflags" "DEFINES+=NO_ATTRIBUTE" "SIMD=avx512vl" D:/TBuild/Libraries/win64/qt_5.15.19/qtbase/config.tests/x86_simd
++ cd /d D:\TBuild\Libraries\win64\qt_5.15.19\config.tests\x86_simd && set MAKEFLAGS=& jom clean && set MAKEFLAGS=& jom
+> jom 1.1.3 - empower your cores
+> 	del main.obj
+> jom 1.1.3 - empower your cores
+> 	cl -c -nologo -Zc:wchar_t -FS -Zc:rvalueCast -Zc:inline -Zc:strictStrings -Zc:throwingNew -Zc:referenceBinding -Zc:__cplusplus -arch:AVX512 -O2 -MD -W0 -EHsc -DUNICODE -D_UNICODE -DWIN32 -D_ENABLE_EXTENDED_ALIGNED_STORAGE -DWIN64 -DKHRONOS_STATIC= -DDESKTOP_APP_QT_STATIC_ANGLE= -DNO_ATTRIBUTE -DQT_COMPILER_SUPPORTS_AVX512VL -DNDEBUG -ID:\TBuild\Libraries\win64\qt_5.15.19\qtbase\config.tests\x86_simd -I. -ID:\TBuild\Libraries\win64\tg_angle\include -ID:\TBuild\Libraries\win64\openssl3\include -ID:\TBuild\Libraries\win64\mozjpeg -ID:\TBuild\Libraries\win64\libwebp\src -ID:\TBuild\Libraries\win64\qt_5.15.19\qtbase\mkspecs\win32-msvc -Fo @C:\Users\RUNNER~1\AppData\Local\Temp\main.obj.5108.0.jom
+> main.cpp
+> 	link /NOLOGO /DYNAMICBASE /NXCOMPAT /OPT:REF /INCREMENTAL:NO /SUBSYSTEM:CONSOLE "/MANIFESTDEPENDENCY:type='win32' name='Microsoft.Windows.Common-Controls' version='6.0.0.0' publicKeyToken='6595b64144ccf1df' language='*' processorArchitecture='*'" /MANIFEST:embed /OUT:x86_simd.exe @C:\Users\RUNNER~1\AppData\Local\Temp\x86_simd.exe.5108.94.jom
+test config.qtbase.tests.avx512vl succeeded
+executing config test cxx14
++ cd /d D:\TBuild\Libraries\win64\qt_5.15.19\config.tests\cxx14 && D:\TBuild\Libraries\win64\qt_5.15.19\qtbase\bin\qmake.exe "CONFIG -= qt debug_and_release app_bundle lib_bundle" "CONFIG += static warn_off console single_arch" "DEFINES += KHRONOS_STATIC= DESKTOP_APP_QT_STATIC_ANGLE=" "QMAKE_LIBDIR += D:\\TBuild\\Libraries\\win64/libwebp/out/release-static/x64/lib" "INCLUDEPATH += D:\\TBuild\\Libraries\\win64/tg_angle/include D:\\TBuild\\Libraries\\win64/openssl3/include D:\\TBuild\\Libraries\\win64/mozjpeg D:\\TBuild\\Libraries\\win64/libwebp/src" "QMAKE_LIBS_OPENGL_ES2_DEBUG=D:\TBuild\Libraries\win64/tg_angle/out/Debug/tg_angle.lib D:\TBuild\Libraries\win64/zlib/Debug/libzsd.lib d3d9.lib dxgi.lib dxguid.lib" "QMAKE_LIBS_OPENGL_ES2_RELEASE=D:\TBuild\Libraries\win64/tg_angle/out/Release/tg_angle.lib D:\TBuild\Libraries\win64/zlib/Release/libzs.lib d3d9.lib dxgi.lib dxguid.lib" "QMAKE_LIBS_EGL_DEBUG=D:\TBuild\Libraries\win64/tg_angle/out/Debug/tg_angle.lib D:\TBuild\Libraries\win64/zlib/Debug/libzsd.lib d3d9.lib dxgi.lib dxguid.lib Gdi32.lib User32.lib" "QMAKE_LIBS_EGL_RELEASE=D:\TBuild\Libraries\win64/tg_angle/out/Release/tg_angle.lib D:\TBuild\Libraries\win64/zlib/Release/libzs.lib d3d9.lib dxgi.lib dxguid.lib Gdi32.lib User32.lib" D:/TBuild/Libraries/win64/qt_5.15.19/config.tests/cxx14
++ cd /d D:\TBuild\Libraries\win64\qt_5.15.19\config.tests\cxx14 && set MAKEFLAGS=& jom
+> jom 1.1.3 - empower your cores
+> 	cl -c -nologo -Zc:wchar_t -FS -Zc:rvalueCast -Zc:inline -Zc:strictStrings -Zc:throwingNew -Zc:referenceBinding -Zc:__cplusplus -O2 -MD -std:c++14 -W0 -EHsc -DUNICODE -D_UNICODE -DWIN32 -D_ENABLE_EXTENDED_ALIGNED_STORAGE -DWIN64 -DKHRONOS_STATIC= -DDESKTOP_APP_QT_STATIC_ANGLE= -DNDEBUG -I. -ID:\TBuild\Libraries\win64\tg_angle\include -ID:\TBuild\Libraries\win64\openssl3\include -ID:\TBuild\Libraries\win64\mozjpeg -ID:\TBuild\Libraries\win64\libwebp\src -ID:\TBuild\Libraries\win64\qt_5.15.19\qtbase\mkspecs\win32-msvc -Fo @C:\Users\RUNNER~1\AppData\Local\Temp\main.obj.7888.0.jom
+> main.cpp
+> 	link /NOLOGO /DYNAMICBASE /NXCOMPAT /OPT:REF /INCREMENTAL:NO /SUBSYSTEM:CONSOLE "/MANIFESTDEPENDENCY:type='win32' name='Microsoft.Windows.Common-Controls' version='6.0.0.0' publicKeyToken='6595b64144ccf1df' language='*' processorArchitecture='*'" /MANIFEST:embed /OUT:cxx14.exe @C:\Users\RUNNER~1\AppData\Local\Temp\cxx14.exe.7888.47.jom
+test config.qtbase.tests.cxx14 succeeded
+executing config test cxx17
++ cd /d D:\TBuild\Libraries\win64\qt_5.15.19\config.tests\cxx17 && D:\TBuild\Libraries\win64\qt_5.15.19\qtbase\bin\qmake.exe "CONFIG -= qt debug_and_release app_bundle lib_bundle" "CONFIG += static warn_off console single_arch" "DEFINES += KHRONOS_STATIC= DESKTOP_APP_QT_STATIC_ANGLE=" "QMAKE_LIBDIR += D:\\TBuild\\Libraries\\win64/libwebp/out/release-static/x64/lib" "INCLUDEPATH += D:\\TBuild\\Libraries\\win64/tg_angle/include D:\\TBuild\\Libraries\\win64/openssl3/include D:\\TBuild\\Libraries\\win64/mozjpeg D:\\TBuild\\Libraries\\win64/libwebp/src" "QMAKE_LIBS_OPENGL_ES2_DEBUG=D:\TBuild\Libraries\win64/tg_angle/out/Debug/tg_angle.lib D:\TBuild\Libraries\win64/zlib/Debug/libzsd.lib d3d9.lib dxgi.lib dxguid.lib" "QMAKE_LIBS_OPENGL_ES2_RELEASE=D:\TBuild\Libraries\win64/tg_angle/out/Release/tg_angle.lib D:\TBuild\Libraries\win64/zlib/Release/libzs.lib d3d9.lib dxgi.lib dxguid.lib" "QMAKE_LIBS_EGL_DEBUG=D:\TBuild\Libraries\win64/tg_angle/out/Debug/tg_angle.lib D:\TBuild\Libraries\win64/zlib/Debug/libzsd.lib d3d9.lib dxgi.lib dxguid.lib Gdi32.lib User32.lib" "QMAKE_LIBS_EGL_RELEASE=D:\TBuild\Libraries\win64/tg_angle/out/Release/tg_angle.lib D:\TBuild\Libraries\win64/zlib/Release/libzs.lib d3d9.lib dxgi.lib dxguid.lib Gdi32.lib User32.lib" D:/TBuild/Libraries/win64/qt_5.15.19/config.tests/cxx17
++ cd /d D:\TBuild\Libraries\win64\qt_5.15.19\config.tests\cxx17 && set MAKEFLAGS=& jom
+> jom 1.1.3 - empower your cores
+> 	cl -c -nologo -Zc:wchar_t -FS -Zc:rvalueCast -Zc:inline -Zc:strictStrings -Zc:throwingNew -Zc:referenceBinding -Zc:__cplusplus -O2 -MD -std:c++17 -W0 -EHsc -DUNICODE -D_UNICODE -DWIN32 -D_ENABLE_EXTENDED_ALIGNED_STORAGE -DWIN64 -DKHRONOS_STATIC= -DDESKTOP_APP_QT_STATIC_ANGLE= -DNDEBUG -I. -ID:\TBuild\Libraries\win64\tg_angle\include -ID:\TBuild\Libraries\win64\openssl3\include -ID:\TBuild\Libraries\win64\mozjpeg -ID:\TBuild\Libraries\win64\libwebp\src -ID:\TBuild\Libraries\win64\qt_5.15.19\qtbase\mkspecs\win32-msvc -Fo @C:\Users\RUNNER~1\AppData\Local\Temp\main.obj.5748.15.jom
+> main.cpp
+> 	link /NOLOGO /DYNAMICBASE /NXCOMPAT /OPT:REF /INCREMENTAL:NO /SUBSYSTEM:CONSOLE "/MANIFESTDEPENDENCY:type='win32' name='Microsoft.Windows.Common-Controls' version='6.0.0.0' publicKeyToken='6595b64144ccf1df' language='*' processorArchitecture='*'" /MANIFEST:embed /OUT:cxx17.exe @C:\Users\RUNNER~1\AppData\Local\Temp\cxx17.exe.5748.359.jom
+test config.qtbase.tests.cxx17 succeeded
+executing config test c99
++ cd /d D:\TBuild\Libraries\win64\qt_5.15.19\config.tests\c99 && D:\TBuild\Libraries\win64\qt_5.15.19\qtbase\bin\qmake.exe "CONFIG -= qt debug_and_release app_bundle lib_bundle" "CONFIG += static warn_off console single_arch" "DEFINES += KHRONOS_STATIC= DESKTOP_APP_QT_STATIC_ANGLE=" "QMAKE_LIBDIR += D:\\TBuild\\Libraries\\win64/libwebp/out/release-static/x64/lib" "INCLUDEPATH += D:\\TBuild\\Libraries\\win64/tg_angle/include D:\\TBuild\\Libraries\\win64/openssl3/include D:\\TBuild\\Libraries\\win64/mozjpeg D:\\TBuild\\Libraries\\win64/libwebp/src" "QMAKE_LIBS_OPENGL_ES2_DEBUG=D:\TBuild\Libraries\win64/tg_angle/out/Debug/tg_angle.lib D:\TBuild\Libraries\win64/zlib/Debug/libzsd.lib d3d9.lib dxgi.lib dxguid.lib" "QMAKE_LIBS_OPENGL_ES2_RELEASE=D:\TBuild\Libraries\win64/tg_angle/out/Release/tg_angle.lib D:\TBuild\Libraries\win64/zlib/Release/libzs.lib d3d9.lib dxgi.lib dxguid.lib" "QMAKE_LIBS_EGL_DEBUG=D:\TBuild\Libraries\win64/tg_angle/out/Debug/tg_angle.lib D:\TBuild\Libraries\win64/zlib/Debug/libzsd.lib d3d9.lib dxgi.lib dxguid.lib Gdi32.lib User32.lib" "QMAKE_LIBS_EGL_RELEASE=D:\TBuild\Libraries\win64/tg_angle/out/Release/tg_angle.lib D:\TBuild\Libraries\win64/zlib/Release/libzs.lib d3d9.lib dxgi.lib dxguid.lib Gdi32.lib User32.lib" D:/TBuild/Libraries/win64/qt_5.15.19/config.tests/c99
++ cd /d D:\TBuild\Libraries\win64\qt_5.15.19\config.tests\c99 && set MAKEFLAGS=& jom
+> jom 1.1.3 - empower your cores
+> 	cl -c -nologo -Zc:wchar_t -FS -Zc:strictStrings -O2 -MD -W0 -DUNICODE -D_UNICODE -DWIN32 -D_ENABLE_EXTENDED_ALIGNED_STORAGE -DWIN64 -DKHRONOS_STATIC= -DDESKTOP_APP_QT_STATIC_ANGLE= -DNDEBUG -I. -ID:\TBuild\Libraries\win64\tg_angle\include -ID:\TBuild\Libraries\win64\openssl3\include -ID:\TBuild\Libraries\win64\mozjpeg -ID:\TBuild\Libraries\win64\libwebp\src -ID:\TBuild\Libraries\win64\qt_5.15.19\qtbase\mkspecs\win32-msvc -Fo @C:\Users\RUNNER~1\AppData\Local\Temp\main.obj.6220.0.jom
+> main.c
+> main.c(5): fatal error C1189: #error:  __STDC_VERSION__ must be >= 199901L
+> jom: D:\TBuild\Libraries\win64\qt_5.15.19\config.tests\c99\Makefile [main.obj] Error 2
+test config.qtbase.tests.c99 FAILED
+Global lib dirs: [D:\\TBuild\\Libraries\\win64/libwebp/out/release-static/x64/lib] ["C:\\Program Files\\Microsoft Visual Studio\\18\\Enterprise\\VC\\Tools\\MSVC\\14.44.35207\\ATLMFC\\lib\\x64" "C:\\Program Files\\Microsoft Visual Studio\\18\\Enterprise\\VC\\Tools\\MSVC\\14.44.35207\\lib\\x64" "C:\\Program Files (x86)\\Windows Kits\\NETFXSDK\\4.8.1\\lib\\um\\x64" "C:\\Program Files (x86)\\Windows Kits\\10\\lib\\10.0.26100.0\\ucrt\\x64" "C:\\Program Files (x86)\\Windows Kits\\10\\\\lib\\10.0.26100.0\\\\um\\x64"]
+Global inc dirs: [D:\\TBuild\\Libraries\\win64/tg_angle/include D:\\TBuild\\Libraries\\win64/openssl3/include D:\\TBuild\\Libraries\\win64/mozjpeg D:\\TBuild\\Libraries\\win64/libwebp/src] ["C:\\Program Files\\Microsoft Visual Studio\\18\\Enterprise\\VC\\Tools\\MSVC\\14.44.35207\\include" "C:\\Program Files\\Microsoft Visual Studio\\18\\Enterprise\\VC\\Tools\\MSVC\\14.44.35207\\ATLMFC\\include" "C:\\Program Files\\Microsoft Visual Studio\\18\\Enterprise\\VC\\Auxiliary\\VS\\include" "C:\\Program Files (x86)\\Windows Kits\\10\\include\\10.0.26100.0\\ucrt" "C:\\Program Files (x86)\\Windows Kits\\10\\\\include\\10.0.26100.0\\\\um" "C:\\Program Files (x86)\\Windows Kits\\10\\\\include\\10.0.26100.0\\\\shared" "C:\\Program Files (x86)\\Windows Kits\\10\\\\include\\10.0.26100.0\\\\winrt" "C:\\Program Files (x86)\\Windows Kits\\10\\\\include\\10.0.26100.0\\\\cppwinrt" "C:\\Program Files (x86)\\Windows Kits\\NETFXSDK\\4.8.1\\include\\um"]
+looking for library dbus
+Trying source 0 (type pkgConfig) of library dbus ...
+pkg-config use disabled globally.
+  => source produced no result.
+Trying source 1 (type inline) of library dbus ...
+dbus/dbus.h not found in [] and global paths.
+  => source produced no result.
+Trying source 2 (type inline) of library dbus ...
+  => source failed condition '!config.win32'.
+test config.qtbase.libraries.dbus FAILED
+executing config test f16c
++ cd /d D:\TBuild\Libraries\win64\qt_5.15.19\config.tests\x86_simd && D:\TBuild\Libraries\win64\qt_5.15.19\qtbase\bin\qmake.exe "CONFIG -= qt debug_and_release app_bundle lib_bundle" "CONFIG += static warn_off console single_arch" "DEFINES += KHRONOS_STATIC= DESKTOP_APP_QT_STATIC_ANGLE=" "QMAKE_LIBDIR += D:\\TBuild\\Libraries\\win64/libwebp/out/release-static/x64/lib" "INCLUDEPATH += D:\\TBuild\\Libraries\\win64/tg_angle/include D:\\TBuild\\Libraries\\win64/openssl3/include D:\\TBuild\\Libraries\\win64/mozjpeg D:\\TBuild\\Libraries\\win64/libwebp/src" "QMAKE_LIBS_OPENGL_ES2_DEBUG=D:\TBuild\Libraries\win64/tg_angle/out/Debug/tg_angle.lib D:\TBuild\Libraries\win64/zlib/Debug/libzsd.lib d3d9.lib dxgi.lib dxguid.lib" "QMAKE_LIBS_OPENGL_ES2_RELEASE=D:\TBuild\Libraries\win64/tg_angle/out/Release/tg_angle.lib D:\TBuild\Libraries\win64/zlib/Release/libzs.lib d3d9.lib dxgi.lib dxguid.lib" "QMAKE_LIBS_EGL_DEBUG=D:\TBuild\Libraries\win64/tg_angle/out/Debug/tg_angle.lib D:\TBuild\Libraries\win64/zlib/Debug/libzsd.lib d3d9.lib dxgi.lib dxguid.lib Gdi32.lib User32.lib" "QMAKE_LIBS_EGL_RELEASE=D:\TBuild\Libraries\win64/tg_angle/out/Release/tg_angle.lib D:\TBuild\Libraries\win64/zlib/Release/libzs.lib d3d9.lib dxgi.lib dxguid.lib Gdi32.lib User32.lib" "CONFIG+=add_cflags" "DEFINES+=NO_ATTRIBUTE" "SIMD=f16c" D:/TBuild/Libraries/win64/qt_5.15.19/qtbase/config.tests/x86_simd
++ cd /d D:\TBuild\Libraries\win64\qt_5.15.19\config.tests\x86_simd && set MAKEFLAGS=& jom clean && set MAKEFLAGS=& jom
+> jom 1.1.3 - empower your cores
+> 	del main.obj
+> jom 1.1.3 - empower your cores
+> 	cl -c -nologo -Zc:wchar_t -FS -Zc:rvalueCast -Zc:inline -Zc:strictStrings -Zc:throwingNew -Zc:referenceBinding -Zc:__cplusplus -arch:AVX -O2 -MD -W0 -EHsc -DUNICODE -D_UNICODE -DWIN32 -D_ENABLE_EXTENDED_ALIGNED_STORAGE -DWIN64 -DKHRONOS_STATIC= -DDESKTOP_APP_QT_STATIC_ANGLE= -DNO_ATTRIBUTE -DQT_COMPILER_SUPPORTS_F16C -DNDEBUG -ID:\TBuild\Libraries\win64\qt_5.15.19\qtbase\config.tests\x86_simd -I. -ID:\TBuild\Libraries\win64\tg_angle\include -ID:\TBuild\Libraries\win64\openssl3\include -ID:\TBuild\Libraries\win64\mozjpeg -ID:\TBuild\Libraries\win64\libwebp\src -ID:\TBuild\Libraries\win64\qt_5.15.19\qtbase\mkspecs\win32-msvc -Fo @C:\Users\RUNNER~1\AppData\Local\Temp\main.obj.1316.0.jom
+> main.cpp
+> 	link /NOLOGO /DYNAMICBASE /NXCOMPAT /OPT:REF /INCREMENTAL:NO /SUBSYSTEM:CONSOLE "/MANIFESTDEPENDENCY:type='win32' name='Microsoft.Windows.Common-Controls' version='6.0.0.0' publicKeyToken='6595b64144ccf1df' language='*' processorArchitecture='*'" /MANIFEST:embed /OUT:x86_simd.exe @C:\Users\RUNNER~1\AppData\Local\Temp\x86_simd.exe.1316.94.jom
+test config.qtbase.tests.f16c succeeded
+executing config test gc_binaries
++ cd /d D:\TBuild\Libraries\win64\qt_5.15.19\config.tests\gc_binaries && D:\TBuild\Libraries\win64\qt_5.15.19\qtbase\bin\qmake.exe "CONFIG -= qt debug_and_release app_bundle lib_bundle" "CONFIG += static warn_off console single_arch" "DEFINES += KHRONOS_STATIC= DESKTOP_APP_QT_STATIC_ANGLE=" "QMAKE_LIBDIR += D:\\TBuild\\Libraries\\win64/libwebp/out/release-static/x64/lib" "INCLUDEPATH += D:\\TBuild\\Libraries\\win64/tg_angle/include D:\\TBuild\\Libraries\\win64/openssl3/include D:\\TBuild\\Libraries\\win64/mozjpeg D:\\TBuild\\Libraries\\win64/libwebp/src" "QMAKE_LIBS_OPENGL_ES2_DEBUG=D:\TBuild\Libraries\win64/tg_angle/out/Debug/tg_angle.lib D:\TBuild\Libraries\win64/zlib/Debug/libzsd.lib d3d9.lib dxgi.lib dxguid.lib" "QMAKE_LIBS_OPENGL_ES2_RELEASE=D:\TBuild\Libraries\win64/tg_angle/out/Release/tg_angle.lib D:\TBuild\Libraries\win64/zlib/Release/libzs.lib d3d9.lib dxgi.lib dxguid.lib" "QMAKE_LIBS_EGL_DEBUG=D:\TBuild\Libraries\win64/tg_angle/out/Debug/tg_angle.lib D:\TBuild\Libraries\win64/zlib/Debug/libzsd.lib d3d9.lib dxgi.lib dxguid.lib Gdi32.lib User32.lib" "QMAKE_LIBS_EGL_RELEASE=D:\TBuild\Libraries\win64/tg_angle/out/Release/tg_angle.lib D:\TBuild\Libraries\win64/zlib/Release/libzs.lib d3d9.lib dxgi.lib dxguid.lib Gdi32.lib User32.lib" D:/TBuild/Libraries/win64/qt_5.15.19/config.tests/gc_binaries
+> Project ERROR: Nope
+test config.qtbase.tests.gc_binaries FAILED
+looking for library host_dbus
+Trying source 0 (type pkgConfig) of library host_dbus ...
++ C:\msys64\usr\bin/pkg-config.exe --exists --silence-errors dbus-1 ">=" 1.2
+pkg-config did not find package.
+  => source produced no result.
+Trying source 1 (type inline) of library host_dbus ...
+ => source accepted.
+test config.qtbase.libraries.host_dbus succeeded
+executing config test incredibuild_xge
+Searching for file BuildConsole.exe.
+    Not found.
+test config.qtbase.tests.incredibuild_xge FAILED
+executing config test intelcet
++ cd /d D:\TBuild\Libraries\win64\qt_5.15.19\config.tests\intelcet && D:\TBuild\Libraries\win64\qt_5.15.19\qtbase\bin\qmake.exe "CONFIG -= qt debug_and_release app_bundle lib_bundle" "CONFIG += static warn_off console single_arch" "DEFINES += KHRONOS_STATIC= DESKTOP_APP_QT_STATIC_ANGLE=" "QMAKE_LIBDIR += D:\\TBuild\\Libraries\\win64/libwebp/out/release-static/x64/lib" "INCLUDEPATH += D:\\TBuild\\Libraries\\win64/tg_angle/include D:\\TBuild\\Libraries\\win64/openssl3/include D:\\TBuild\\Libraries\\win64/mozjpeg D:\\TBuild\\Libraries\\win64/libwebp/src" "QMAKE_LIBS_OPENGL_ES2_DEBUG=D:\TBuild\Libraries\win64/tg_angle/out/Debug/tg_angle.lib D:\TBuild\Libraries\win64/zlib/Debug/libzsd.lib d3d9.lib dxgi.lib dxguid.lib" "QMAKE_LIBS_OPENGL_ES2_RELEASE=D:\TBuild\Libraries\win64/tg_angle/out/Release/tg_angle.lib D:\TBuild\Libraries\win64/zlib/Release/libzs.lib d3d9.lib dxgi.lib dxguid.lib" "QMAKE_LIBS_EGL_DEBUG=D:\TBuild\Libraries\win64/tg_angle/out/Debug/tg_angle.lib D:\TBuild\Libraries\win64/zlib/Debug/libzsd.lib d3d9.lib dxgi.lib dxguid.lib Gdi32.lib User32.lib" "QMAKE_LIBS_EGL_RELEASE=D:\TBuild\Libraries\win64/tg_angle/out/Release/tg_angle.lib D:\TBuild\Libraries\win64/zlib/Release/libzs.lib d3d9.lib dxgi.lib dxguid.lib Gdi32.lib User32.lib" D:/TBuild/Libraries/win64/qt_5.15.19/config.tests/intelcet
++ cd /d D:\TBuild\Libraries\win64\qt_5.15.19\config.tests\intelcet && set MAKEFLAGS=& jom
+> jom 1.1.3 - empower your cores
+> 	cl -c -nologo -Zc:wchar_t -FS -Zc:rvalueCast -Zc:inline -Zc:strictStrings -Zc:throwingNew -Zc:referenceBinding -Zc:__cplusplus -O2 -MD -W0 -EHsc -DUNICODE -D_UNICODE -DWIN32 -D_ENABLE_EXTENDED_ALIGNED_STORAGE -DWIN64 -DKHRONOS_STATIC= -DDESKTOP_APP_QT_STATIC_ANGLE= -DNDEBUG -I. -ID:\TBuild\Libraries\win64\tg_angle\include -ID:\TBuild\Libraries\win64\openssl3\include -ID:\TBuild\Libraries\win64\mozjpeg -ID:\TBuild\Libraries\win64\libwebp\src -ID:\TBuild\Libraries\win64\qt_5.15.19\qtbase\mkspecs\win32-msvc -Fo @C:\Users\RUNNER~1\AppData\Local\Temp\main.obj.1456.0.jom
+> main.cpp
+> main.cpp(7): fatal error C1189: #error:  Intel CET not available
+> jom: D:\TBuild\Libraries\win64\qt_5.15.19\config.tests\intelcet\Makefile [main.obj] Error 2
+test config.qtbase.tests.intelcet FAILED
+looking for library libudev
+Trying source 0 (type pkgConfig) of library libudev ...
+pkg-config use disabled globally.
+  => source produced no result.
+Trying source 1 (type inline) of library libudev ...
+libudev.h not found in [] and global paths.
+  => source produced no result.
+test config.qtbase.libraries.libudev FAILED
+executing config test posix_fallocate
++ cd /d D:\TBuild\Libraries\win64\qt_5.15.19\config.tests\posix_fallocate && D:\TBuild\Libraries\win64\qt_5.15.19\qtbase\bin\qmake.exe "CONFIG -= qt debug_and_release app_bundle lib_bundle" "CONFIG += static warn_off console single_arch" "DEFINES += KHRONOS_STATIC= DESKTOP_APP_QT_STATIC_ANGLE=" "QMAKE_LIBDIR += D:\\TBuild\\Libraries\\win64/libwebp/out/release-static/x64/lib" "INCLUDEPATH += D:\\TBuild\\Libraries\\win64/tg_angle/include D:\\TBuild\\Libraries\\win64/openssl3/include D:\\TBuild\\Libraries\\win64/mozjpeg D:\\TBuild\\Libraries\\win64/libwebp/src" "QMAKE_LIBS_OPENGL_ES2_DEBUG=D:\TBuild\Libraries\win64/tg_angle/out/Debug/tg_angle.lib D:\TBuild\Libraries\win64/zlib/Debug/libzsd.lib d3d9.lib dxgi.lib dxguid.lib" "QMAKE_LIBS_OPENGL_ES2_RELEASE=D:\TBuild\Libraries\win64/tg_angle/out/Release/tg_angle.lib D:\TBuild\Libraries\win64/zlib/Release/libzs.lib d3d9.lib dxgi.lib dxguid.lib" "QMAKE_LIBS_EGL_DEBUG=D:\TBuild\Libraries\win64/tg_angle/out/Debug/tg_angle.lib D:\TBuild\Libraries\win64/zlib/Debug/libzsd.lib d3d9.lib dxgi.lib dxguid.lib Gdi32.lib User32.lib" "QMAKE_LIBS_EGL_RELEASE=D:\TBuild\Libraries\win64/tg_angle/out/Release/tg_angle.lib D:\TBuild\Libraries\win64/zlib/Release/libzs.lib d3d9.lib dxgi.lib dxguid.lib Gdi32.lib User32.lib" D:/TBuild/Libraries/win64/qt_5.15.19/config.tests/posix_fallocate
++ cd /d D:\TBuild\Libraries\win64\qt_5.15.19\config.tests\posix_fallocate && set MAKEFLAGS=& jom
+> jom 1.1.3 - empower your cores
+> 	cl -c -nologo -Zc:wchar_t -FS -Zc:rvalueCast -Zc:inline -Zc:strictStrings -Zc:throwingNew -Zc:referenceBinding -Zc:__cplusplus -O2 -MD -W0 -EHsc -DUNICODE -D_UNICODE -DWIN32 -D_ENABLE_EXTENDED_ALIGNED_STORAGE -DWIN64 -DKHRONOS_STATIC= -DDESKTOP_APP_QT_STATIC_ANGLE= -DNDEBUG -I. -ID:\TBuild\Libraries\win64\tg_angle\include -ID:\TBuild\Libraries\win64\openssl3\include -ID:\TBuild\Libraries\win64\mozjpeg -ID:\TBuild\Libraries\win64\libwebp\src -ID:\TBuild\Libraries\win64\qt_5.15.19\qtbase\mkspecs\win32-msvc -Fo @C:\Users\RUNNER~1\AppData\Local\Temp\main.obj.6244.0.jom
+> main.cpp
+> main.cpp(3): fatal error C1083: Cannot open include file: 'unistd.h': No such file or directory
+> jom: D:\TBuild\Libraries\win64\qt_5.15.19\config.tests\posix_fallocate\Makefile [main.obj] Error 2
+test config.qtbase.tests.posix_fallocate FAILED
+executing config test precompile_header
++ cd /d D:\TBuild\Libraries\win64\qt_5.15.19\config.tests\precompile_header && D:\TBuild\Libraries\win64\qt_5.15.19\qtbase\bin\qmake.exe "CONFIG -= qt debug_and_release app_bundle lib_bundle" "CONFIG += static warn_off console single_arch" "DEFINES += KHRONOS_STATIC= DESKTOP_APP_QT_STATIC_ANGLE=" "QMAKE_LIBDIR += D:\\TBuild\\Libraries\\win64/libwebp/out/release-static/x64/lib" "INCLUDEPATH += D:\\TBuild\\Libraries\\win64/tg_angle/include D:\\TBuild\\Libraries\\win64/openssl3/include D:\\TBuild\\Libraries\\win64/mozjpeg D:\\TBuild\\Libraries\\win64/libwebp/src" "QMAKE_LIBS_OPENGL_ES2_DEBUG=D:\TBuild\Libraries\win64/tg_angle/out/Debug/tg_angle.lib D:\TBuild\Libraries\win64/zlib/Debug/libzsd.lib d3d9.lib dxgi.lib dxguid.lib" "QMAKE_LIBS_OPENGL_ES2_RELEASE=D:\TBuild\Libraries\win64/tg_angle/out/Release/tg_angle.lib D:\TBuild\Libraries\win64/zlib/Release/libzs.lib d3d9.lib dxgi.lib dxguid.lib" "QMAKE_LIBS_EGL_DEBUG=D:\TBuild\Libraries\win64/tg_angle/out/Debug/tg_angle.lib D:\TBuild\Libraries\win64/zlib/Debug/libzsd.lib d3d9.lib dxgi.lib dxguid.lib Gdi32.lib User32.lib" "QMAKE_LIBS_EGL_RELEASE=D:\TBuild\Libraries\win64/tg_angle/out/Release/tg_angle.lib D:\TBuild\Libraries\win64/zlib/Release/libzs.lib d3d9.lib dxgi.lib dxguid.lib Gdi32.lib User32.lib" D:/TBuild/Libraries/win64/qt_5.15.19/config.tests/precompile_header
++ cd /d D:\TBuild\Libraries\win64\qt_5.15.19\config.tests\precompile_header && set MAKEFLAGS=& jom
+> jom 1.1.3 - empower your cores
+> 	cl -c -Yc -Fp.pch\precompile_header_pch.pch -Fo.pch\precompile_header_pch.obj -nologo -Zc:wchar_t -FS -Zc:rvalueCast -Zc:inline -Zc:strictStrings -Zc:throwingNew -Zc:referenceBinding -Zc:__cplusplus -O2 -MD -W0 -EHsc -DUNICODE -D_UNICODE -DWIN32 -D_ENABLE_EXTENDED_ALIGNED_STORAGE -DWIN64 -DKHRONOS_STATIC= -DDESKTOP_APP_QT_STATIC_ANGLE= -DNDEBUG -I. -ID:\TBuild\Libraries\win64\tg_angle\include -ID:\TBuild\Libraries\win64\openssl3\include -ID:\TBuild\Libraries\win64\mozjpeg -ID:\TBuild\Libraries\win64\libwebp\src -ID:\TBuild\Libraries\win64\qt_5.15.19\qtbase\mkspecs\win32-msvc -TP header.h
+> header.h
+> 	cl -c -FIheader.h -Yuheader.h -Fp.pch\precompile_header_pch.pch -nologo -Zc:wchar_t -FS -Zc:rvalueCast -Zc:inline -Zc:strictStrings -Zc:throwingNew -Zc:referenceBinding -Zc:__cplusplus -O2 -MD -W0 -EHsc -DUNICODE -D_UNICODE -DWIN32 -D_ENABLE_EXTENDED_ALIGNED_STORAGE -DWIN64 -DKHRONOS_STATIC= -DDESKTOP_APP_QT_STATIC_ANGLE= -DNDEBUG -I. -ID:\TBuild\Libraries\win64\tg_angle\include -ID:\TBuild\Libraries\win64\openssl3\include -ID:\TBuild\Libraries\win64\mozjpeg -ID:\TBuild\Libraries\win64\libwebp\src -ID:\TBuild\Libraries\win64\qt_5.15.19\qtbase\mkspecs\win32-msvc -Fo @C:\Users\RUNNER~1\AppData\Local\Temp\main.obj.5944.47.jom
+> main.cpp
+> 	link /NOLOGO /DYNAMICBASE /NXCOMPAT /OPT:REF /INCREMENTAL:NO /SUBSYSTEM:CONSOLE "/MANIFESTDEPENDENCY:type='win32' name='Microsoft.Windows.Common-Controls' version='6.0.0.0' publicKeyToken='6595b64144ccf1df' language='*' processorArchitecture='*'" /MANIFEST:embed /OUT:precompile_header.exe @C:\Users\RUNNER~1\AppData\Local\Temp\precompile_header.exe.5944.78.jom
+test config.qtbase.tests.precompile_header succeeded
+executing config test rdrnd
++ cd /d D:\TBuild\Libraries\win64\qt_5.15.19\config.tests\x86_simd && D:\TBuild\Libraries\win64\qt_5.15.19\qtbase\bin\qmake.exe "CONFIG -= qt debug_and_release app_bundle lib_bundle" "CONFIG += static warn_off console single_arch" "DEFINES += KHRONOS_STATIC= DESKTOP_APP_QT_STATIC_ANGLE=" "QMAKE_LIBDIR += D:\\TBuild\\Libraries\\win64/libwebp/out/release-static/x64/lib" "INCLUDEPATH += D:\\TBuild\\Libraries\\win64/tg_angle/include D:\\TBuild\\Libraries\\win64/openssl3/include D:\\TBuild\\Libraries\\win64/mozjpeg D:\\TBuild\\Libraries\\win64/libwebp/src" "QMAKE_LIBS_OPENGL_ES2_DEBUG=D:\TBuild\Libraries\win64/tg_angle/out/Debug/tg_angle.lib D:\TBuild\Libraries\win64/zlib/Debug/libzsd.lib d3d9.lib dxgi.lib dxguid.lib" "QMAKE_LIBS_OPENGL_ES2_RELEASE=D:\TBuild\Libraries\win64/tg_angle/out/Release/tg_angle.lib D:\TBuild\Libraries\win64/zlib/Release/libzs.lib d3d9.lib dxgi.lib dxguid.lib" "QMAKE_LIBS_EGL_DEBUG=D:\TBuild\Libraries\win64/tg_angle/out/Debug/tg_angle.lib D:\TBuild\Libraries\win64/zlib/Debug/libzsd.lib d3d9.lib dxgi.lib dxguid.lib Gdi32.lib User32.lib" "QMAKE_LIBS_EGL_RELEASE=D:\TBuild\Libraries\win64/tg_angle/out/Release/tg_angle.lib D:\TBuild\Libraries\win64/zlib/Release/libzs.lib d3d9.lib dxgi.lib dxguid.lib Gdi32.lib User32.lib" "CONFIG+=add_cflags" "DEFINES+=NO_ATTRIBUTE" "SIMD=rdrnd" D:/TBuild/Libraries/win64/qt_5.15.19/qtbase/config.tests/x86_simd
++ cd /d D:\TBuild\Libraries\win64\qt_5.15.19\config.tests\x86_simd && set MAKEFLAGS=& jom clean && set MAKEFLAGS=& jom
+> jom 1.1.3 - empower your cores
+> 	del main.obj
+> jom 1.1.3 - empower your cores
+> 	cl -c -nologo -Zc:wchar_t -FS -Zc:rvalueCast -Zc:inline -Zc:strictStrings -Zc:throwingNew -Zc:referenceBinding -Zc:__cplusplus -O2 -MD -W0 -EHsc -DUNICODE -D_UNICODE -DWIN32 -D_ENABLE_EXTENDED_ALIGNED_STORAGE -DWIN64 -DKHRONOS_STATIC= -DDESKTOP_APP_QT_STATIC_ANGLE= -DNO_ATTRIBUTE -DQT_COMPILER_SUPPORTS_RDRND -DNDEBUG -ID:\TBuild\Libraries\win64\qt_5.15.19\qtbase\config.tests\x86_simd -I. -ID:\TBuild\Libraries\win64\tg_angle\include -ID:\TBuild\Libraries\win64\openssl3\include -ID:\TBuild\Libraries\win64\mozjpeg -ID:\TBuild\Libraries\win64\libwebp\src -ID:\TBuild\Libraries\win64\qt_5.15.19\qtbase\mkspecs\win32-msvc -Fo @C:\Users\RUNNER~1\AppData\Local\Temp\main.obj.2316.0.jom
+> main.cpp
+> 	link /NOLOGO /DYNAMICBASE /NXCOMPAT /OPT:REF /INCREMENTAL:NO /SUBSYSTEM:CONSOLE "/MANIFESTDEPENDENCY:type='win32' name='Microsoft.Windows.Common-Controls' version='6.0.0.0' publicKeyToken='6595b64144ccf1df' language='*' processorArchitecture='*'" /MANIFEST:embed /OUT:x86_simd.exe @C:\Users\RUNNER~1\AppData\Local\Temp\x86_simd.exe.2316.93.jom
+test config.qtbase.tests.rdrnd succeeded
+executing config test rdseed
++ cd /d D:\TBuild\Libraries\win64\qt_5.15.19\config.tests\x86_simd && D:\TBuild\Libraries\win64\qt_5.15.19\qtbase\bin\qmake.exe "CONFIG -= qt debug_and_release app_bundle lib_bundle" "CONFIG += static warn_off console single_arch" "DEFINES += KHRONOS_STATIC= DESKTOP_APP_QT_STATIC_ANGLE=" "QMAKE_LIBDIR += D:\\TBuild\\Libraries\\win64/libwebp/out/release-static/x64/lib" "INCLUDEPATH += D:\\TBuild\\Libraries\\win64/tg_angle/include D:\\TBuild\\Libraries\\win64/openssl3/include D:\\TBuild\\Libraries\\win64/mozjpeg D:\\TBuild\\Libraries\\win64/libwebp/src" "QMAKE_LIBS_OPENGL_ES2_DEBUG=D:\TBuild\Libraries\win64/tg_angle/out/Debug/tg_angle.lib D:\TBuild\Libraries\win64/zlib/Debug/libzsd.lib d3d9.lib dxgi.lib dxguid.lib" "QMAKE_LIBS_OPENGL_ES2_RELEASE=D:\TBuild\Libraries\win64/tg_angle/out/Release/tg_angle.lib D:\TBuild\Libraries\win64/zlib/Release/libzs.lib d3d9.lib dxgi.lib dxguid.lib" "QMAKE_LIBS_EGL_DEBUG=D:\TBuild\Libraries\win64/tg_angle/out/Debug/tg_angle.lib D:\TBuild\Libraries\win64/zlib/Debug/libzsd.lib d3d9.lib dxgi.lib dxguid.lib Gdi32.lib User32.lib" "QMAKE_LIBS_EGL_RELEASE=D:\TBuild\Libraries\win64/tg_angle/out/Release/tg_angle.lib D:\TBuild\Libraries\win64/zlib/Release/libzs.lib d3d9.lib dxgi.lib dxguid.lib Gdi32.lib User32.lib" "CONFIG+=add_cflags" "DEFINES+=NO_ATTRIBUTE" "SIMD=rdseed" D:/TBuild/Libraries/win64/qt_5.15.19/qtbase/config.tests/x86_simd
++ cd /d D:\TBuild\Libraries\win64\qt_5.15.19\config.tests\x86_simd && set MAKEFLAGS=& jom clean && set MAKEFLAGS=& jom
+> jom 1.1.3 - empower your cores
+> 	del main.obj
+> jom 1.1.3 - empower your cores
+> 	cl -c -nologo -Zc:wchar_t -FS -Zc:rvalueCast -Zc:inline -Zc:strictStrings -Zc:throwingNew -Zc:referenceBinding -Zc:__cplusplus -O2 -MD -W0 -EHsc -DUNICODE -D_UNICODE -DWIN32 -D_ENABLE_EXTENDED_ALIGNED_STORAGE -DWIN64 -DKHRONOS_STATIC= -DDESKTOP_APP_QT_STATIC_ANGLE= -DNO_ATTRIBUTE -DQT_COMPILER_SUPPORTS_RDSEED -DNDEBUG -ID:\TBuild\Libraries\win64\qt_5.15.19\qtbase\config.tests\x86_simd -I. -ID:\TBuild\Libraries\win64\tg_angle\include -ID:\TBuild\Libraries\win64\openssl3\include -ID:\TBuild\Libraries\win64\mozjpeg -ID:\TBuild\Libraries\win64\libwebp\src -ID:\TBuild\Libraries\win64\qt_5.15.19\qtbase\mkspecs\win32-msvc -Fo @C:\Users\RUNNER~1\AppData\Local\Temp\main.obj.5076.16.jom
+> main.cpp
+> 	link /NOLOGO /DYNAMICBASE /NXCOMPAT /OPT:REF /INCREMENTAL:NO /SUBSYSTEM:CONSOLE "/MANIFESTDEPENDENCY:type='win32' name='Microsoft.Windows.Common-Controls' version='6.0.0.0' publicKeyToken='6595b64144ccf1df' language='*' processorArchitecture='*'" /MANIFEST:embed /OUT:x86_simd.exe @C:\Users\RUNNER~1\AppData\Local\Temp\x86_simd.exe.5076.94.jom
+test config.qtbase.tests.rdseed succeeded
+executing config test shani
++ cd /d D:\TBuild\Libraries\win64\qt_5.15.19\config.tests\x86_simd && D:\TBuild\Libraries\win64\qt_5.15.19\qtbase\bin\qmake.exe "CONFIG -= qt debug_and_release app_bundle lib_bundle" "CONFIG += static warn_off console single_arch" "DEFINES += KHRONOS_STATIC= DESKTOP_APP_QT_STATIC_ANGLE=" "QMAKE_LIBDIR += D:\\TBuild\\Libraries\\win64/libwebp/out/release-static/x64/lib" "INCLUDEPATH += D:\\TBuild\\Libraries\\win64/tg_angle/include D:\\TBuild\\Libraries\\win64/openssl3/include D:\\TBuild\\Libraries\\win64/mozjpeg D:\\TBuild\\Libraries\\win64/libwebp/src" "QMAKE_LIBS_OPENGL_ES2_DEBUG=D:\TBuild\Libraries\win64/tg_angle/out/Debug/tg_angle.lib D:\TBuild\Libraries\win64/zlib/Debug/libzsd.lib d3d9.lib dxgi.lib dxguid.lib" "QMAKE_LIBS_OPENGL_ES2_RELEASE=D:\TBuild\Libraries\win64/tg_angle/out/Release/tg_angle.lib D:\TBuild\Libraries\win64/zlib/Release/libzs.lib d3d9.lib dxgi.lib dxguid.lib" "QMAKE_LIBS_EGL_DEBUG=D:\TBuild\Libraries\win64/tg_angle/out/Debug/tg_angle.lib D:\TBuild\Libraries\win64/zlib/Debug/libzsd.lib d3d9.lib dxgi.lib dxguid.lib Gdi32.lib User32.lib" "QMAKE_LIBS_EGL_RELEASE=D:\TBuild\Libraries\win64/tg_angle/out/Release/tg_angle.lib D:\TBuild\Libraries\win64/zlib/Release/libzs.lib d3d9.lib dxgi.lib dxguid.lib Gdi32.lib User32.lib" "CONFIG+=add_cflags" "DEFINES+=NO_ATTRIBUTE" "SIMD=shani" D:/TBuild/Libraries/win64/qt_5.15.19/qtbase/config.tests/x86_simd
++ cd /d D:\TBuild\Libraries\win64\qt_5.15.19\config.tests\x86_simd && set MAKEFLAGS=& jom clean && set MAKEFLAGS=& jom
+> jom 1.1.3 - empower your cores
+> 	del main.obj
+> jom 1.1.3 - empower your cores
+> 	cl -c -nologo -Zc:wchar_t -FS -Zc:rvalueCast -Zc:inline -Zc:strictStrings -Zc:throwingNew -Zc:referenceBinding -Zc:__cplusplus -O2 -MD -W0 -EHsc -DUNICODE -D_UNICODE -DWIN32 -D_ENABLE_EXTENDED_ALIGNED_STORAGE -DWIN64 -DKHRONOS_STATIC= -DDESKTOP_APP_QT_STATIC_ANGLE= -DNO_ATTRIBUTE -DQT_COMPILER_SUPPORTS_SHANI -DNDEBUG -ID:\TBuild\Libraries\win64\qt_5.15.19\qtbase\config.tests\x86_simd -I. -ID:\TBuild\Libraries\win64\tg_angle\include -ID:\TBuild\Libraries\win64\openssl3\include -ID:\TBuild\Libraries\win64\mozjpeg -ID:\TBuild\Libraries\win64\libwebp\src -ID:\TBuild\Libraries\win64\qt_5.15.19\qtbase\mkspecs\win32-msvc -Fo @C:\Users\RUNNER~1\AppData\Local\Temp\main.obj.1900.0.jom
+> main.cpp
+> 	link /NOLOGO /DYNAMICBASE /NXCOMPAT /OPT:REF /INCREMENTAL:NO /SUBSYSTEM:CONSOLE "/MANIFESTDEPENDENCY:type='win32' name='Microsoft.Windows.Common-Controls' version='6.0.0.0' publicKeyToken='6595b64144ccf1df' language='*' processorArchitecture='*'" /MANIFEST:embed /OUT:x86_simd.exe @C:\Users\RUNNER~1\AppData\Local\Temp\x86_simd.exe.1900.78.jom
+test config.qtbase.tests.shani succeeded
+executing config test signaling_nan
++ cd /d D:\TBuild\Libraries\win64\qt_5.15.19\config.tests\signaling_nan && D:\TBuild\Libraries\win64\qt_5.15.19\qtbase\bin\qmake.exe "CONFIG -= qt debug_and_release app_bundle lib_bundle" "CONFIG += static warn_off console single_arch" "DEFINES += KHRONOS_STATIC= DESKTOP_APP_QT_STATIC_ANGLE=" "QMAKE_LIBDIR += D:\\TBuild\\Libraries\\win64/libwebp/out/release-static/x64/lib" "INCLUDEPATH += D:\\TBuild\\Libraries\\win64/tg_angle/include D:\\TBuild\\Libraries\\win64/openssl3/include D:\\TBuild\\Libraries\\win64/mozjpeg D:\\TBuild\\Libraries\\win64/libwebp/src" "QMAKE_LIBS_OPENGL_ES2_DEBUG=D:\TBuild\Libraries\win64/tg_angle/out/Debug/tg_angle.lib D:\TBuild\Libraries\win64/zlib/Debug/libzsd.lib d3d9.lib dxgi.lib dxguid.lib" "QMAKE_LIBS_OPENGL_ES2_RELEASE=D:\TBuild\Libraries\win64/tg_angle/out/Release/tg_angle.lib D:\TBuild\Libraries\win64/zlib/Release/libzs.lib d3d9.lib dxgi.lib dxguid.lib" "QMAKE_LIBS_EGL_DEBUG=D:\TBuild\Libraries\win64/tg_angle/out/Debug/tg_angle.lib D:\TBuild\Libraries\win64/zlib/Debug/libzsd.lib d3d9.lib dxgi.lib dxguid.lib Gdi32.lib User32.lib" "QMAKE_LIBS_EGL_RELEASE=D:\TBuild\Libraries\win64/tg_angle/out/Release/tg_angle.lib D:\TBuild\Libraries\win64/zlib/Release/libzs.lib d3d9.lib dxgi.lib dxguid.lib Gdi32.lib User32.lib" D:/TBuild/Libraries/win64/qt_5.15.19/config.tests/signaling_nan
++ cd /d D:\TBuild\Libraries\win64\qt_5.15.19\config.tests\signaling_nan && set MAKEFLAGS=& jom
+> jom 1.1.3 - empower your cores
+> 	cl -c -nologo -Zc:wchar_t -FS -Zc:rvalueCast -Zc:inline -Zc:strictStrings -Zc:throwingNew -Zc:referenceBinding -Zc:__cplusplus -O2 -MD -W0 -EHsc -DUNICODE -D_UNICODE -DWIN32 -D_ENABLE_EXTENDED_ALIGNED_STORAGE -DWIN64 -DKHRONOS_STATIC= -DDESKTOP_APP_QT_STATIC_ANGLE= -DNDEBUG -I. -ID:\TBuild\Libraries\win64\tg_angle\include -ID:\TBuild\Libraries\win64\openssl3\include -ID:\TBuild\Libraries\win64\mozjpeg -ID:\TBuild\Libraries\win64\libwebp\src -ID:\TBuild\Libraries\win64\qt_5.15.19\qtbase\mkspecs\win32-msvc -Fo @C:\Users\RUNNER~1\AppData\Local\Temp\main.obj.4936.0.jom
+> main.cpp
+> 	link /NOLOGO /DYNAMICBASE /NXCOMPAT /OPT:REF /INCREMENTAL:NO /SUBSYSTEM:CONSOLE "/MANIFESTDEPENDENCY:type='win32' name='Microsoft.Windows.Common-Controls' version='6.0.0.0' publicKeyToken='6595b64144ccf1df' language='*' processorArchitecture='*'" /MANIFEST:embed /OUT:signaling_nan.exe @C:\Users\RUNNER~1\AppData\Local\Temp\signaling_nan.exe.4936.109.jom
+test config.qtbase.tests.signaling_nan succeeded
+executing config test stl
++ cd /d D:\TBuild\Libraries\win64\qt_5.15.19\config.tests\stl && D:\TBuild\Libraries\win64\qt_5.15.19\qtbase\bin\qmake.exe "CONFIG -= qt debug_and_release app_bundle lib_bundle" "CONFIG += static warn_off console single_arch" "DEFINES += KHRONOS_STATIC= DESKTOP_APP_QT_STATIC_ANGLE=" "QMAKE_LIBDIR += D:\\TBuild\\Libraries\\win64/libwebp/out/release-static/x64/lib" "INCLUDEPATH += D:\\TBuild\\Libraries\\win64/tg_angle/include D:\\TBuild\\Libraries\\win64/openssl3/include D:\\TBuild\\Libraries\\win64/mozjpeg D:\\TBuild\\Libraries\\win64/libwebp/src" "QMAKE_LIBS_OPENGL_ES2_DEBUG=D:\TBuild\Libraries\win64/tg_angle/out/Debug/tg_angle.lib D:\TBuild\Libraries\win64/zlib/Debug/libzsd.lib d3d9.lib dxgi.lib dxguid.lib" "QMAKE_LIBS_OPENGL_ES2_RELEASE=D:\TBuild\Libraries\win64/tg_angle/out/Release/tg_angle.lib D:\TBuild\Libraries\win64/zlib/Release/libzs.lib d3d9.lib dxgi.lib dxguid.lib" "QMAKE_LIBS_EGL_DEBUG=D:\TBuild\Libraries\win64/tg_angle/out/Debug/tg_angle.lib D:\TBuild\Libraries\win64/zlib/Debug/libzsd.lib d3d9.lib dxgi.lib dxguid.lib Gdi32.lib User32.lib" "QMAKE_LIBS_EGL_RELEASE=D:\TBuild\Libraries\win64/tg_angle/out/Release/tg_angle.lib D:\TBuild\Libraries\win64/zlib/Release/libzs.lib d3d9.lib dxgi.lib dxguid.lib Gdi32.lib User32.lib" D:/TBuild/Libraries/win64/qt_5.15.19/qtbase/config.tests/stl
++ cd /d D:\TBuild\Libraries\win64\qt_5.15.19\config.tests\stl && set MAKEFLAGS=& jom
+> jom 1.1.3 - empower your cores
+> 	cl -c -nologo -Zc:wchar_t -FS -Zc:rvalueCast -Zc:inline -Zc:strictStrings -Zc:throwingNew -Zc:referenceBinding -Zc:__cplusplus -O2 -MD -W0 -EHsc -DUNICODE -D_UNICODE -DWIN32 -D_ENABLE_EXTENDED_ALIGNED_STORAGE -DWIN64 -DKHRONOS_STATIC= -DDESKTOP_APP_QT_STATIC_ANGLE= -DNDEBUG -ID:\TBuild\Libraries\win64\qt_5.15.19\qtbase\config.tests\stl -I. -ID:\TBuild\Libraries\win64\tg_angle\include -ID:\TBuild\Libraries\win64\openssl3\include -ID:\TBuild\Libraries\win64\mozjpeg -ID:\TBuild\Libraries\win64\libwebp\src -ID:\TBuild\Libraries\win64\qt_5.15.19\qtbase\mkspecs\win32-msvc -Fo @C:\Users\RUNNER~1\AppData\Local\Temp\stltest.obj.836.0.jom
+> stltest.cpp
+> 	link /NOLOGO /DYNAMICBASE /NXCOMPAT /OPT:REF /INCREMENTAL:NO /SUBSYSTEM:CONSOLE "/MANIFESTDEPENDENCY:type='win32' name='Microsoft.Windows.Common-Controls' version='6.0.0.0' publicKeyToken='6595b64144ccf1df' language='*' processorArchitecture='*'" /MANIFEST:embed /OUT:stl.exe @C:\Users\RUNNER~1\AppData\Local\Temp\stl.exe.836.578.jom
+test config.qtbase.tests.stl succeeded
+looking for library zlib
+Trying source 0 (type inline) of library zlib ...
+zlib.h not found in [] and global paths.
+  => source produced no result.
+Trying source 1 (type inline) of library zlib ...
+zlib.h not found in [] and global paths.
+  => source produced no result.
+Trying source 2 (type inline) of library zlib ...
+  => source failed condition '!config.msvc'.
+Trying source 3 (type inline) of library zlib ...
+  => source failed condition 'config.wasm'.
+test config.qtbase.libraries.zlib FAILED
+executing config test x86SimdAlways
++ cd /d D:\TBuild\Libraries\win64\qt_5.15.19\config.tests\x86_simd && D:\TBuild\Libraries\win64\qt_5.15.19\qtbase\bin\qmake.exe "CONFIG -= qt debug_and_release app_bundle lib_bundle" "CONFIG += static warn_off console single_arch" "DEFINES += KHRONOS_STATIC= DESKTOP_APP_QT_STATIC_ANGLE=" "QMAKE_LIBDIR += D:\\TBuild\\Libraries\\win64/libwebp/out/release-static/x64/lib" "INCLUDEPATH += D:\\TBuild\\Libraries\\win64/tg_angle/include D:\\TBuild\\Libraries\\win64/openssl3/include D:\\TBuild\\Libraries\\win64/mozjpeg D:\\TBuild\\Libraries\\win64/libwebp/src" "QMAKE_LIBS_OPENGL_ES2_DEBUG=D:\TBuild\Libraries\win64/tg_angle/out/Debug/tg_angle.lib D:\TBuild\Libraries\win64/zlib/Debug/libzsd.lib d3d9.lib dxgi.lib dxguid.lib" "QMAKE_LIBS_OPENGL_ES2_RELEASE=D:\TBuild\Libraries\win64/tg_angle/out/Release/tg_angle.lib D:\TBuild\Libraries\win64/zlib/Release/libzs.lib d3d9.lib dxgi.lib dxguid.lib" "QMAKE_LIBS_EGL_DEBUG=D:\TBuild\Libraries\win64/tg_angle/out/Debug/tg_angle.lib D:\TBuild\Libraries\win64/zlib/Debug/libzsd.lib d3d9.lib dxgi.lib dxguid.lib Gdi32.lib User32.lib" "QMAKE_LIBS_EGL_RELEASE=D:\TBuild\Libraries\win64/tg_angle/out/Release/tg_angle.lib D:\TBuild\Libraries\win64/zlib/Release/libzs.lib d3d9.lib dxgi.lib dxguid.lib Gdi32.lib User32.lib" "SIMD=aesni avx avx2 avx512bw avx512cd avx512dq avx512er avx512f avx512ifma avx512pf avx512vbmi avx512vl f16c rdrnd rdseed shani sse2 sse3 sse4_1 sse4_2 ssse3" D:/TBuild/Libraries/win64/qt_5.15.19/qtbase/config.tests/x86_simd
++ cd /d D:\TBuild\Libraries\win64\qt_5.15.19\config.tests\x86_simd && set MAKEFLAGS=& jom clean && set MAKEFLAGS=& jom
+> jom 1.1.3 - empower your cores
+> 	del main.obj
+> jom 1.1.3 - empower your cores
+> 	cl -c -nologo -Zc:wchar_t -FS -Zc:rvalueCast -Zc:inline -Zc:strictStrings -Zc:throwingNew -Zc:referenceBinding -Zc:__cplusplus -O2 -MD -W0 -EHsc -DUNICODE -D_UNICODE -DWIN32 -D_ENABLE_EXTENDED_ALIGNED_STORAGE -DWIN64 -DKHRONOS_STATIC= -DDESKTOP_APP_QT_STATIC_ANGLE= -DQT_COMPILER_SUPPORTS_AESNI -DQT_COMPILER_SUPPORTS_AVX -DQT_COMPILER_SUPPORTS_AVX2 -DQT_COMPILER_SUPPORTS_AVX512BW -DQT_COMPILER_SUPPORTS_AVX512CD -DQT_COMPILER_SUPPORTS_AVX512DQ -DQT_COMPILER_SUPPORTS_AVX512ER -DQT_COMPILER_SUPPORTS_AVX512F -DQT_COMPILER_SUPPORTS_AVX512IFMA -DQT_COMPILER_SUPPORTS_AVX512PF -DQT_COMPILER_SUPPORTS_AVX512VBMI -DQT_COMPILER_SUPPORTS_AVX512VL -DQT_COMPILER_SUPPORTS_F16C -DQT_COMPILER_SUPPORTS_RDRND -DQT_COMPILER_SUPPORTS_RDSEED -DQT_COMPILER_SUPPORTS_SHANI -DQT_COMPILER_SUPPORTS_SSE2 -DQT_COMPILER_SUPPORTS_SSE3 -DQT_COMPILER_SUPPORTS_SSE4_1 -DQT_COMPILER_SUPPORTS_SSE4_2 -DQT_COMPILER_SUPPORTS_SSSE3 -DNDEBUG -ID:\TBuild\Libraries\win64\qt_5.15.19\qtbase\config.tests\x86_simd -I. -ID:\TBuild\Libraries\win64\tg_angle\include -ID:\TBuild\Libraries\win64\openssl3\include -ID:\TBuild\Libraries\win64\mozjpeg -ID:\TBuild\Libraries\win64\libwebp\src -ID:\TBuild\Libraries\win64\qt_5.15.19\qtbase\mkspecs\win32-msvc -Fo @C:\Users\RUNNER~1\AppData\Local\Temp\main.obj.5360.16.jom
+> main.cpp
+> 	link /NOLOGO /DYNAMICBASE /NXCOMPAT /OPT:REF /INCREMENTAL:NO /SUBSYSTEM:CONSOLE "/MANIFESTDEPENDENCY:type='win32' name='Microsoft.Windows.Common-Controls' version='6.0.0.0' publicKeyToken='6595b64144ccf1df' language='*' processorArchitecture='*'" /MANIFEST:embed /OUT:x86_simd.exe @C:\Users\RUNNER~1\AppData\Local\Temp\x86_simd.exe.5360.94.jom
+test config.qtbase.tests.x86SimdAlways succeeded
+looking for library zstd
+Trying source 0 (type pkgConfig) of library zstd ...
+pkg-config use disabled globally.
+  => source produced no result.
+Trying source 1 (type inline) of library zstd ...
++ cd /d D:\TBuild\Libraries\win64\qt_5.15.19\config.tests\zstd && D:\TBuild\Libraries\win64\qt_5.15.19\qtbase\bin\qmake.exe "CONFIG -= qt debug_and_release app_bundle lib_bundle" "CONFIG += static warn_off console single_arch" "DEFINES += KHRONOS_STATIC= DESKTOP_APP_QT_STATIC_ANGLE=" "QMAKE_LIBDIR += D:\\TBuild\\Libraries\\win64/libwebp/out/release-static/x64/lib" "INCLUDEPATH += D:\\TBuild\\Libraries\\win64/tg_angle/include D:\\TBuild\\Libraries\\win64/openssl3/include D:\\TBuild\\Libraries\\win64/mozjpeg D:\\TBuild\\Libraries\\win64/libwebp/src" "QMAKE_LIBS_OPENGL_ES2_DEBUG=D:\TBuild\Libraries\win64/tg_angle/out/Debug/tg_angle.lib D:\TBuild\Libraries\win64/zlib/Debug/libzsd.lib d3d9.lib dxgi.lib dxguid.lib" "QMAKE_LIBS_OPENGL_ES2_RELEASE=D:\TBuild\Libraries\win64/tg_angle/out/Release/tg_angle.lib D:\TBuild\Libraries\win64/zlib/Release/libzs.lib d3d9.lib dxgi.lib dxguid.lib" "QMAKE_LIBS_EGL_DEBUG=D:\TBuild\Libraries\win64/tg_angle/out/Debug/tg_angle.lib D:\TBuild\Libraries\win64/zlib/Debug/libzsd.lib d3d9.lib dxgi.lib dxguid.lib Gdi32.lib User32.lib" "QMAKE_LIBS_EGL_RELEASE=D:\TBuild\Libraries\win64/tg_angle/out/Release/tg_angle.lib D:\TBuild\Libraries\win64/zlib/Release/libzs.lib d3d9.lib dxgi.lib dxguid.lib Gdi32.lib User32.lib" "QMAKE_USE += zstd" "QMAKE_LIBS_ZSTD = -lzstd" D:/TBuild/Libraries/win64/qt_5.15.19/config.tests/zstd
++ cd /d D:\TBuild\Libraries\win64\qt_5.15.19\config.tests\zstd && set MAKEFLAGS=& jom
+> jom 1.1.3 - empower your cores
+> 	cl -c -nologo -Zc:wchar_t -FS -Zc:rvalueCast -Zc:inline -Zc:strictStrings -Zc:throwingNew -Zc:referenceBinding -Zc:__cplusplus -O2 -MD -W0 -EHsc -DUNICODE -D_UNICODE -DWIN32 -D_ENABLE_EXTENDED_ALIGNED_STORAGE -DWIN64 -DKHRONOS_STATIC= -DDESKTOP_APP_QT_STATIC_ANGLE= -DNDEBUG -I. -ID:\TBuild\Libraries\win64\tg_angle\include -ID:\TBuild\Libraries\win64\openssl3\include -ID:\TBuild\Libraries\win64\mozjpeg -ID:\TBuild\Libraries\win64\libwebp\src -ID:\TBuild\Libraries\win64\qt_5.15.19\qtbase\mkspecs\win32-msvc -Fo @C:\Users\RUNNER~1\AppData\Local\Temp\main.obj.3648.0.jom
+> main.cpp
+> main.cpp(2): fatal error C1083: Cannot open include file: 'zstd.h': No such file or directory
+> jom: D:\TBuild\Libraries\win64\qt_5.15.19\config.tests\zstd\Makefile [main.obj] Error 2
+ => source failed verification.
+test config.qtbase.libraries.zstd FAILED
+executing config test cxx11_future
++ cd /d D:\TBuild\Libraries\win64\qt_5.15.19\config.tests\cxx11_future && D:\TBuild\Libraries\win64\qt_5.15.19\qtbase\bin\qmake.exe "CONFIG -= qt debug_and_release app_bundle lib_bundle" "CONFIG += static warn_off console single_arch" "DEFINES += KHRONOS_STATIC= DESKTOP_APP_QT_STATIC_ANGLE=" "QMAKE_LIBDIR += D:\\TBuild\\Libraries\\win64/libwebp/out/release-static/x64/lib" "INCLUDEPATH += D:\\TBuild\\Libraries\\win64/tg_angle/include D:\\TBuild\\Libraries\\win64/openssl3/include D:\\TBuild\\Libraries\\win64/mozjpeg D:\\TBuild\\Libraries\\win64/libwebp/src" "QMAKE_LIBS_OPENGL_ES2_DEBUG=D:\TBuild\Libraries\win64/tg_angle/out/Debug/tg_angle.lib D:\TBuild\Libraries\win64/zlib/Debug/libzsd.lib d3d9.lib dxgi.lib dxguid.lib" "QMAKE_LIBS_OPENGL_ES2_RELEASE=D:\TBuild\Libraries\win64/tg_angle/out/Release/tg_angle.lib D:\TBuild\Libraries\win64/zlib/Release/libzs.lib d3d9.lib dxgi.lib dxguid.lib" "QMAKE_LIBS_EGL_DEBUG=D:\TBuild\Libraries\win64/tg_angle/out/Debug/tg_angle.lib D:\TBuild\Libraries\win64/zlib/Debug/libzsd.lib d3d9.lib dxgi.lib dxguid.lib Gdi32.lib User32.lib" "QMAKE_LIBS_EGL_RELEASE=D:\TBuild\Libraries\win64/tg_angle/out/Release/tg_angle.lib D:\TBuild\Libraries\win64/zlib/Release/libzs.lib d3d9.lib dxgi.lib dxguid.lib Gdi32.lib User32.lib" D:/TBuild/Libraries/win64/qt_5.15.19/config.tests/cxx11_future
++ cd /d D:\TBuild\Libraries\win64\qt_5.15.19\config.tests\cxx11_future && set MAKEFLAGS=& jom
+> jom 1.1.3 - empower your cores
+> 	cl -c -nologo -Zc:wchar_t -FS -Zc:rvalueCast -Zc:inline -Zc:strictStrings -Zc:throwingNew -Zc:referenceBinding -Zc:__cplusplus -Zi -MTd -W0 -EHsc /Fdcxx11_future.vc.pdb -DUNICODE -D_UNICODE -DWIN32 -D_ENABLE_EXTENDED_ALIGNED_STORAGE -DWIN64 -DKHRONOS_STATIC= -DDESKTOP_APP_QT_STATIC_ANGLE= -I. -ID:\TBuild\Libraries\win64\tg_angle\include -ID:\TBuild\Libraries\win64\openssl3\include -ID:\TBuild\Libraries\win64\mozjpeg -ID:\TBuild\Libraries\win64\libwebp\src -ID:\TBuild\Libraries\win64\qt_5.15.19\qtbase\mkspecs\win32-msvc -Fo @C:\Users\RUNNER~1\AppData\Local\Temp\main.obj.1844.16.jom
+> main.cpp
+> 	link /NOLOGO /DYNAMICBASE /NXCOMPAT /DEBUG /SUBSYSTEM:CONSOLE "/MANIFESTDEPENDENCY:type='win32' name='Microsoft.Windows.Common-Controls' version='6.0.0.0' publicKeyToken='6595b64144ccf1df' language='*' processorArchitecture='*'" /MANIFEST:embed /OUT:cxx11_future.exe @C:\Users\RUNNER~1\AppData\Local\Temp\cxx11_future.exe.1844.938.jom
+test config.qtbase_corelib.tests.cxx11_future succeeded
+executing config test eventfd
++ cd /d D:\TBuild\Libraries\win64\qt_5.15.19\config.tests\eventfd && D:\TBuild\Libraries\win64\qt_5.15.19\qtbase\bin\qmake.exe "CONFIG -= qt debug_and_release app_bundle lib_bundle" "CONFIG += static warn_off console single_arch" "DEFINES += KHRONOS_STATIC= DESKTOP_APP_QT_STATIC_ANGLE=" "QMAKE_LIBDIR += D:\\TBuild\\Libraries\\win64/libwebp/out/release-static/x64/lib" "INCLUDEPATH += D:\\TBuild\\Libraries\\win64/tg_angle/include D:\\TBuild\\Libraries\\win64/openssl3/include D:\\TBuild\\Libraries\\win64/mozjpeg D:\\TBuild\\Libraries\\win64/libwebp/src" "QMAKE_LIBS_OPENGL_ES2_DEBUG=D:\TBuild\Libraries\win64/tg_angle/out/Debug/tg_angle.lib D:\TBuild\Libraries\win64/zlib/Debug/libzsd.lib d3d9.lib dxgi.lib dxguid.lib" "QMAKE_LIBS_OPENGL_ES2_RELEASE=D:\TBuild\Libraries\win64/tg_angle/out/Release/tg_angle.lib D:\TBuild\Libraries\win64/zlib/Release/libzs.lib d3d9.lib dxgi.lib dxguid.lib" "QMAKE_LIBS_EGL_DEBUG=D:\TBuild\Libraries\win64/tg_angle/out/Debug/tg_angle.lib D:\TBuild\Libraries\win64/zlib/Debug/libzsd.lib d3d9.lib dxgi.lib dxguid.lib Gdi32.lib User32.lib" "QMAKE_LIBS_EGL_RELEASE=D:\TBuild\Libraries\win64/tg_angle/out/Release/tg_angle.lib D:\TBuild\Libraries\win64/zlib/Release/libzs.lib d3d9.lib dxgi.lib dxguid.lib Gdi32.lib User32.lib" D:/TBuild/Libraries/win64/qt_5.15.19/config.tests/eventfd
++ cd /d D:\TBuild\Libraries\win64\qt_5.15.19\config.tests\eventfd && set MAKEFLAGS=& jom
+> jom 1.1.3 - empower your cores
+> 	cl -c -nologo -Zc:wchar_t -FS -Zc:rvalueCast -Zc:inline -Zc:strictStrings -Zc:throwingNew -Zc:referenceBinding -Zc:__cplusplus -Zi -MTd -W0 -EHsc /Fdeventfd.vc.pdb -DUNICODE -D_UNICODE -DWIN32 -D_ENABLE_EXTENDED_ALIGNED_STORAGE -DWIN64 -DKHRONOS_STATIC= -DDESKTOP_APP_QT_STATIC_ANGLE= -I. -ID:\TBuild\Libraries\win64\tg_angle\include -ID:\TBuild\Libraries\win64\openssl3\include -ID:\TBuild\Libraries\win64\mozjpeg -ID:\TBuild\Libraries\win64\libwebp\src -ID:\TBuild\Libraries\win64\qt_5.15.19\qtbase\mkspecs\win32-msvc -Fo @C:\Users\RUNNER~1\AppData\Local\Temp\main.obj.1532.0.jom
+> main.cpp
+> main.cpp(2): fatal error C1083: Cannot open include file: 'sys/eventfd.h': No such file or directory
+> jom: D:\TBuild\Libraries\win64\qt_5.15.19\config.tests\eventfd\Makefile [main.obj] Error 2
+test config.qtbase_corelib.tests.eventfd FAILED
+executing config test inotify
++ cd /d D:\TBuild\Libraries\win64\qt_5.15.19\config.tests\inotify && D:\TBuild\Libraries\win64\qt_5.15.19\qtbase\bin\qmake.exe "CONFIG -= qt debug_and_release app_bundle lib_bundle" "CONFIG += static warn_off console single_arch" "DEFINES += KHRONOS_STATIC= DESKTOP_APP_QT_STATIC_ANGLE=" "QMAKE_LIBDIR += D:\\TBuild\\Libraries\\win64/libwebp/out/release-static/x64/lib" "INCLUDEPATH += D:\\TBuild\\Libraries\\win64/tg_angle/include D:\\TBuild\\Libraries\\win64/openssl3/include D:\\TBuild\\Libraries\\win64/mozjpeg D:\\TBuild\\Libraries\\win64/libwebp/src" "QMAKE_LIBS_OPENGL_ES2_DEBUG=D:\TBuild\Libraries\win64/tg_angle/out/Debug/tg_angle.lib D:\TBuild\Libraries\win64/zlib/Debug/libzsd.lib d3d9.lib dxgi.lib dxguid.lib" "QMAKE_LIBS_OPENGL_ES2_RELEASE=D:\TBuild\Libraries\win64/tg_angle/out/Release/tg_angle.lib D:\TBuild\Libraries\win64/zlib/Release/libzs.lib d3d9.lib dxgi.lib dxguid.lib" "QMAKE_LIBS_EGL_DEBUG=D:\TBuild\Libraries\win64/tg_angle/out/Debug/tg_angle.lib D:\TBuild\Libraries\win64/zlib/Debug/libzsd.lib d3d9.lib dxgi.lib dxguid.lib Gdi32.lib User32.lib" "QMAKE_LIBS_EGL_RELEASE=D:\TBuild\Libraries\win64/tg_angle/out/Release/tg_angle.lib D:\TBuild\Libraries\win64/zlib/Release/libzs.lib d3d9.lib dxgi.lib dxguid.lib Gdi32.lib User32.lib" D:/TBuild/Libraries/win64/qt_5.15.19/config.tests/inotify
++ cd /d D:\TBuild\Libraries\win64\qt_5.15.19\config.tests\inotify && set MAKEFLAGS=& jom
+> jom 1.1.3 - empower your cores
+> 	cl -c -nologo -Zc:wchar_t -FS -Zc:rvalueCast -Zc:inline -Zc:strictStrings -Zc:throwingNew -Zc:referenceBinding -Zc:__cplusplus -Zi -MTd -W0 -EHsc /Fdinotify.vc.pdb -DUNICODE -D_UNICODE -DWIN32 -D_ENABLE_EXTENDED_ALIGNED_STORAGE -DWIN64 -DKHRONOS_STATIC= -DDESKTOP_APP_QT_STATIC_ANGLE= -I. -ID:\TBuild\Libraries\win64\tg_angle\include -ID:\TBuild\Libraries\win64\openssl3\include -ID:\TBuild\Libraries\win64\mozjpeg -ID:\TBuild\Libraries\win64\libwebp\src -ID:\TBuild\Libraries\win64\qt_5.15.19\qtbase\mkspecs\win32-msvc -Fo @C:\Users\RUNNER~1\AppData\Local\Temp\main.obj.4028.0.jom
+> main.cpp
+> main.cpp(2): fatal error C1083: Cannot open include file: 'sys/inotify.h': No such file or directory
+> jom: D:\TBuild\Libraries\win64\qt_5.15.19\config.tests\inotify\Makefile [main.obj] Error 2
+test config.qtbase_corelib.tests.inotify FAILED
+looking for library pcre2
+Trying source 0 (type pkgConfig) of library pcre2 ...
+pkg-config use disabled globally.
+  => source produced no result.
+Trying source 1 (type inline) of library pcre2 ...
+pcre2.h not found in [] and global paths.
+  => source produced no result.
+test config.qtbase_corelib.libraries.pcre2 FAILED
+looking for library slog2
+Trying source 0 (type inline) of library slog2 ...
+sys/slog2.h not found in [] and global paths.
+  => source produced no result.
+test config.qtbase_corelib.libraries.slog2 FAILED
+looking for library libatomic
+Trying source 0 (type inline) of library libatomic ...
++ cd /d D:\TBuild\Libraries\win64\qt_5.15.19\config.tests\libatomic && D:\TBuild\Libraries\win64\qt_5.15.19\qtbase\bin\qmake.exe "CONFIG -= qt debug_and_release app_bundle lib_bundle" "CONFIG += static warn_off console single_arch" "DEFINES += KHRONOS_STATIC= DESKTOP_APP_QT_STATIC_ANGLE=" "QMAKE_LIBDIR += D:\\TBuild\\Libraries\\win64/libwebp/out/release-static/x64/lib" "INCLUDEPATH += D:\\TBuild\\Libraries\\win64/tg_angle/include D:\\TBuild\\Libraries\\win64/openssl3/include D:\\TBuild\\Libraries\\win64/mozjpeg D:\\TBuild\\Libraries\\win64/libwebp/src" "QMAKE_LIBS_OPENGL_ES2_DEBUG=D:\TBuild\Libraries\win64/tg_angle/out/Debug/tg_angle.lib D:\TBuild\Libraries\win64/zlib/Debug/libzsd.lib d3d9.lib dxgi.lib dxguid.lib" "QMAKE_LIBS_OPENGL_ES2_RELEASE=D:\TBuild\Libraries\win64/tg_angle/out/Release/tg_angle.lib D:\TBuild\Libraries\win64/zlib/Release/libzs.lib d3d9.lib dxgi.lib dxguid.lib" "QMAKE_LIBS_EGL_DEBUG=D:\TBuild\Libraries\win64/tg_angle/out/Debug/tg_angle.lib D:\TBuild\Libraries\win64/zlib/Debug/libzsd.lib d3d9.lib dxgi.lib dxguid.lib Gdi32.lib User32.lib" "QMAKE_LIBS_EGL_RELEASE=D:\TBuild\Libraries\win64/tg_angle/out/Release/tg_angle.lib D:\TBuild\Libraries\win64/zlib/Release/libzs.lib d3d9.lib dxgi.lib dxguid.lib Gdi32.lib User32.lib" "QMAKE_USE += libatomic" "QMAKE_LIBS_LIBATOMIC = " D:/TBuild/Libraries/win64/qt_5.15.19/config.tests/libatomic
++ cd /d D:\TBuild\Libraries\win64\qt_5.15.19\config.tests\libatomic && set MAKEFLAGS=& jom
+> jom 1.1.3 - empower your cores
+> 	cl -c -nologo -Zc:wchar_t -FS -Zc:rvalueCast -Zc:inline -Zc:strictStrings -Zc:throwingNew -Zc:referenceBinding -Zc:__cplusplus -Zi -MTd -W0 -EHsc /Fdlibatomic.vc.pdb -DUNICODE -D_UNICODE -DWIN32 -D_ENABLE_EXTENDED_ALIGNED_STORAGE -DWIN64 -DKHRONOS_STATIC= -DDESKTOP_APP_QT_STATIC_ANGLE= -I. -ID:\TBuild\Libraries\win64\tg_angle\include -ID:\TBuild\Libraries\win64\openssl3\include -ID:\TBuild\Libraries\win64\mozjpeg -ID:\TBuild\Libraries\win64\libwebp\src -ID:\TBuild\Libraries\win64\qt_5.15.19\qtbase\mkspecs\win32-msvc -Fo @C:\Users\RUNNER~1\AppData\Local\Temp\main.obj.3988.16.jom
+> main.cpp
+> 	link /NOLOGO /DYNAMICBASE /NXCOMPAT /DEBUG /SUBSYSTEM:CONSOLE "/MANIFESTDEPENDENCY:type='win32' name='Microsoft.Windows.Common-Controls' version='6.0.0.0' publicKeyToken='6595b64144ccf1df' language='*' processorArchitecture='*'" /MANIFEST:embed /OUT:libatomic.exe @C:\Users\RUNNER~1\AppData\Local\Temp\libatomic.exe.3988.94.jom
+ => source accepted.
+test config.qtbase_corelib.libraries.libatomic succeeded
+looking for library doubleconversion
+Trying source 0 (type inline) of library doubleconversion ...
+double-conversion/double-conversion.h not found in [] and global paths.
+  => source produced no result.
+test config.qtbase_corelib.libraries.doubleconversion FAILED
+executing config test cloexec
++ cd /d D:\TBuild\Libraries\win64\qt_5.15.19\config.tests\cloexec && D:\TBuild\Libraries\win64\qt_5.15.19\qtbase\bin\qmake.exe "CONFIG -= qt debug_and_release app_bundle lib_bundle" "CONFIG += static warn_off console single_arch" "DEFINES += KHRONOS_STATIC= DESKTOP_APP_QT_STATIC_ANGLE=" "QMAKE_LIBDIR += D:\\TBuild\\Libraries\\win64/libwebp/out/release-static/x64/lib" "INCLUDEPATH += D:\\TBuild\\Libraries\\win64/tg_angle/include D:\\TBuild\\Libraries\\win64/openssl3/include D:\\TBuild\\Libraries\\win64/mozjpeg D:\\TBuild\\Libraries\\win64/libwebp/src" "QMAKE_LIBS_OPENGL_ES2_DEBUG=D:\TBuild\Libraries\win64/tg_angle/out/Debug/tg_angle.lib D:\TBuild\Libraries\win64/zlib/Debug/libzsd.lib d3d9.lib dxgi.lib dxguid.lib" "QMAKE_LIBS_OPENGL_ES2_RELEASE=D:\TBuild\Libraries\win64/tg_angle/out/Release/tg_angle.lib D:\TBuild\Libraries\win64/zlib/Release/libzs.lib d3d9.lib dxgi.lib dxguid.lib" "QMAKE_LIBS_EGL_DEBUG=D:\TBuild\Libraries\win64/tg_angle/out/Debug/tg_angle.lib D:\TBuild\Libraries\win64/zlib/Debug/libzsd.lib d3d9.lib dxgi.lib dxguid.lib Gdi32.lib User32.lib" "QMAKE_LIBS_EGL_RELEASE=D:\TBuild\Libraries\win64/tg_angle/out/Release/tg_angle.lib D:\TBuild\Libraries\win64/zlib/Release/libzs.lib d3d9.lib dxgi.lib dxguid.lib Gdi32.lib User32.lib" D:/TBuild/Libraries/win64/qt_5.15.19/config.tests/cloexec
++ cd /d D:\TBuild\Libraries\win64\qt_5.15.19\config.tests\cloexec && set MAKEFLAGS=& jom
+> jom 1.1.3 - empower your cores
+> 	cl -c -nologo -Zc:wchar_t -FS -Zc:rvalueCast -Zc:inline -Zc:strictStrings -Zc:throwingNew -Zc:referenceBinding -Zc:__cplusplus -Zi -MTd -W0 -EHsc /Fdcloexec.vc.pdb -DUNICODE -D_UNICODE -DWIN32 -D_ENABLE_EXTENDED_ALIGNED_STORAGE -DWIN64 -DKHRONOS_STATIC= -DDESKTOP_APP_QT_STATIC_ANGLE= -I. -ID:\TBuild\Libraries\win64\tg_angle\include -ID:\TBuild\Libraries\win64\openssl3\include -ID:\TBuild\Libraries\win64\mozjpeg -ID:\TBuild\Libraries\win64\libwebp\src -ID:\TBuild\Libraries\win64\qt_5.15.19\qtbase\mkspecs\win32-msvc -Fo @C:\Users\RUNNER~1\AppData\Local\Temp\main.obj.4360.0.jom
+> main.cpp
+> main.cpp(4): fatal error C1083: Cannot open include file: 'sys/socket.h': No such file or directory
+> jom: D:\TBuild\Libraries\win64\qt_5.15.19\config.tests\cloexec\Makefile [main.obj] Error 2
+test config.qtbase_corelib.tests.cloexec FAILED
+looking for library advapi32
+Trying source 0 (type inline) of library advapi32 ...
+ => source accepted.
+test config.qtbase_corelib.libraries.advapi32 succeeded
+looking for library gdi32
+Trying source 0 (type inline) of library gdi32 ...
+ => source accepted.
+test config.qtbase_corelib.libraries.gdi32 succeeded
+looking for library kernel32
+Trying source 0 (type inline) of library kernel32 ...
+ => source accepted.
+test config.qtbase_corelib.libraries.kernel32 succeeded
+looking for library netapi32
+Trying source 0 (type inline) of library netapi32 ...
+ => source accepted.
+test config.qtbase_corelib.libraries.netapi32 succeeded
+looking for library ole32
+Trying source 0 (type inline) of library ole32 ...
+ => source accepted.
+test config.qtbase_corelib.libraries.ole32 succeeded
+looking for library shell32
+Trying source 0 (type inline) of library shell32 ...
+ => source accepted.
+test config.qtbase_corelib.libraries.shell32 succeeded
+looking for library uuid
+Trying source 0 (type inline) of library uuid ...
+ => source accepted.
+test config.qtbase_corelib.libraries.uuid succeeded
+looking for library user32
+Trying source 0 (type inline) of library user32 ...
+ => source accepted.
+test config.qtbase_corelib.libraries.user32 succeeded
+looking for library winmm
+Trying source 0 (type inline) of library winmm ...
+ => source accepted.
+test config.qtbase_corelib.libraries.winmm succeeded
+looking for library ws2_32
+Trying source 0 (type inline) of library ws2_32 ...
+ => source accepted.
+test config.qtbase_corelib.libraries.ws2_32 succeeded
+executing config test cxx11_random
++ cd /d D:\TBuild\Libraries\win64\qt_5.15.19\config.tests\cxx11_random && D:\TBuild\Libraries\win64\qt_5.15.19\qtbase\bin\qmake.exe "CONFIG -= qt debug_and_release app_bundle lib_bundle" "CONFIG += static warn_off console single_arch" "DEFINES += KHRONOS_STATIC= DESKTOP_APP_QT_STATIC_ANGLE=" "QMAKE_LIBDIR += D:\\TBuild\\Libraries\\win64/libwebp/out/release-static/x64/lib" "INCLUDEPATH += D:\\TBuild\\Libraries\\win64/tg_angle/include D:\\TBuild\\Libraries\\win64/openssl3/include D:\\TBuild\\Libraries\\win64/mozjpeg D:\\TBuild\\Libraries\\win64/libwebp/src" "QMAKE_LIBS_OPENGL_ES2_DEBUG=D:\TBuild\Libraries\win64/tg_angle/out/Debug/tg_angle.lib D:\TBuild\Libraries\win64/zlib/Debug/libzsd.lib d3d9.lib dxgi.lib dxguid.lib" "QMAKE_LIBS_OPENGL_ES2_RELEASE=D:\TBuild\Libraries\win64/tg_angle/out/Release/tg_angle.lib D:\TBuild\Libraries\win64/zlib/Release/libzs.lib d3d9.lib dxgi.lib dxguid.lib" "QMAKE_LIBS_EGL_DEBUG=D:\TBuild\Libraries\win64/tg_angle/out/Debug/tg_angle.lib D:\TBuild\Libraries\win64/zlib/Debug/libzsd.lib d3d9.lib dxgi.lib dxguid.lib Gdi32.lib User32.lib" "QMAKE_LIBS_EGL_RELEASE=D:\TBuild\Libraries\win64/tg_angle/out/Release/tg_angle.lib D:\TBuild\Libraries\win64/zlib/Release/libzs.lib d3d9.lib dxgi.lib dxguid.lib Gdi32.lib User32.lib" D:/TBuild/Libraries/win64/qt_5.15.19/config.tests/cxx11_random
++ cd /d D:\TBuild\Libraries\win64\qt_5.15.19\config.tests\cxx11_random && set MAKEFLAGS=& jom
+> jom 1.1.3 - empower your cores
+> 	cl -c -nologo -Zc:wchar_t -FS -Zc:rvalueCast -Zc:inline -Zc:strictStrings -Zc:throwingNew -Zc:referenceBinding -Zc:__cplusplus -Zi -MTd -W0 -EHsc /Fdcxx11_random.vc.pdb -DUNICODE -D_UNICODE -DWIN32 -D_ENABLE_EXTENDED_ALIGNED_STORAGE -DWIN64 -DKHRONOS_STATIC= -DDESKTOP_APP_QT_STATIC_ANGLE= -I. -ID:\TBuild\Libraries\win64\tg_angle\include -ID:\TBuild\Libraries\win64\openssl3\include -ID:\TBuild\Libraries\win64\mozjpeg -ID:\TBuild\Libraries\win64\libwebp\src -ID:\TBuild\Libraries\win64\qt_5.15.19\qtbase\mkspecs\win32-msvc -Fo @C:\Users\RUNNER~1\AppData\Local\Temp\main.obj.4140.0.jom
+> main.cpp
+> 	link /NOLOGO /DYNAMICBASE /NXCOMPAT /DEBUG /SUBSYSTEM:CONSOLE "/MANIFESTDEPENDENCY:type='win32' name='Microsoft.Windows.Common-Controls' version='6.0.0.0' publicKeyToken='6595b64144ccf1df' language='*' processorArchitecture='*'" /MANIFEST:embed /OUT:cxx11_random.exe @C:\Users\RUNNER~1\AppData\Local\Temp\cxx11_random.exe.4140.359.jom
+test config.qtbase_corelib.tests.cxx11_random succeeded
+executing config test atomicfptr
++ cd /d D:\TBuild\Libraries\win64\qt_5.15.19\config.tests\atomicfptr && D:\TBuild\Libraries\win64\qt_5.15.19\qtbase\bin\qmake.exe "CONFIG -= qt debug_and_release app_bundle lib_bundle" "CONFIG += static warn_off console single_arch" "DEFINES += KHRONOS_STATIC= DESKTOP_APP_QT_STATIC_ANGLE=" "QMAKE_LIBDIR += D:\\TBuild\\Libraries\\win64/libwebp/out/release-static/x64/lib" "INCLUDEPATH += D:\\TBuild\\Libraries\\win64/tg_angle/include D:\\TBuild\\Libraries\\win64/openssl3/include D:\\TBuild\\Libraries\\win64/mozjpeg D:\\TBuild\\Libraries\\win64/libwebp/src" "QMAKE_LIBS_OPENGL_ES2_DEBUG=D:\TBuild\Libraries\win64/tg_angle/out/Debug/tg_angle.lib D:\TBuild\Libraries\win64/zlib/Debug/libzsd.lib d3d9.lib dxgi.lib dxguid.lib" "QMAKE_LIBS_OPENGL_ES2_RELEASE=D:\TBuild\Libraries\win64/tg_angle/out/Release/tg_angle.lib D:\TBuild\Libraries\win64/zlib/Release/libzs.lib d3d9.lib dxgi.lib dxguid.lib" "QMAKE_LIBS_EGL_DEBUG=D:\TBuild\Libraries\win64/tg_angle/out/Debug/tg_angle.lib D:\TBuild\Libraries\win64/zlib/Debug/libzsd.lib d3d9.lib dxgi.lib dxguid.lib Gdi32.lib User32.lib" "QMAKE_LIBS_EGL_RELEASE=D:\TBuild\Libraries\win64/tg_angle/out/Release/tg_angle.lib D:\TBuild\Libraries\win64/zlib/Release/libzs.lib d3d9.lib dxgi.lib dxguid.lib Gdi32.lib User32.lib" D:/TBuild/Libraries/win64/qt_5.15.19/config.tests/atomicfptr
++ cd /d D:\TBuild\Libraries\win64\qt_5.15.19\config.tests\atomicfptr && set MAKEFLAGS=& jom
+> jom 1.1.3 - empower your cores
+> 	cl -c -nologo -Zc:wchar_t -FS -Zc:rvalueCast -Zc:inline -Zc:strictStrings -Zc:throwingNew -Zc:referenceBinding -Zc:__cplusplus -Zi -MTd -W0 -EHsc /Fdatomicfptr.vc.pdb -DUNICODE -D_UNICODE -DWIN32 -D_ENABLE_EXTENDED_ALIGNED_STORAGE -DWIN64 -DKHRONOS_STATIC= -DDESKTOP_APP_QT_STATIC_ANGLE= -I. -ID:\TBuild\Libraries\win64\tg_angle\include -ID:\TBuild\Libraries\win64\openssl3\include -ID:\TBuild\Libraries\win64\mozjpeg -ID:\TBuild\Libraries\win64\libwebp\src -ID:\TBuild\Libraries\win64\qt_5.15.19\qtbase\mkspecs\win32-msvc -Fo @C:\Users\RUNNER~1\AppData\Local\Temp\main.obj.2496.0.jom
+> main.cpp
+> 	link /NOLOGO /DYNAMICBASE /NXCOMPAT /DEBUG /SUBSYSTEM:CONSOLE "/MANIFESTDEPENDENCY:type='win32' name='Microsoft.Windows.Common-Controls' version='6.0.0.0' publicKeyToken='6595b64144ccf1df' language='*' processorArchitecture='*'" /MANIFEST:embed /OUT:atomicfptr.exe @C:\Users\RUNNER~1\AppData\Local\Temp\atomicfptr.exe.2496.78.jom
+test config.qtbase_corelib.tests.atomicfptr succeeded
+looking for library openssl
+Trying source 0 (type openssl) of library openssl ...
+$OPENSSL_LIBS is not set.
+  => source produced no result.
+Trying source 1 (type inline) of library openssl ...
++ cd /d D:\TBuild\Libraries\win64\qt_5.15.19\config.tests\openssl && D:\TBuild\Libraries\win64\qt_5.15.19\qtbase\bin\qmake.exe "CONFIG -= qt debug_and_release app_bundle lib_bundle" "CONFIG += static warn_off console single_arch" "DEFINES += KHRONOS_STATIC= DESKTOP_APP_QT_STATIC_ANGLE=" "QMAKE_LIBDIR += D:\\TBuild\\Libraries\\win64/libwebp/out/release-static/x64/lib" "INCLUDEPATH += D:\\TBuild\\Libraries\\win64/tg_angle/include D:\\TBuild\\Libraries\\win64/openssl3/include D:\\TBuild\\Libraries\\win64/mozjpeg D:\\TBuild\\Libraries\\win64/libwebp/src" "QMAKE_LIBS_OPENGL_ES2_DEBUG=D:\TBuild\Libraries\win64/tg_angle/out/Debug/tg_angle.lib D:\TBuild\Libraries\win64/zlib/Debug/libzsd.lib d3d9.lib dxgi.lib dxguid.lib" "QMAKE_LIBS_OPENGL_ES2_RELEASE=D:\TBuild\Libraries\win64/tg_angle/out/Release/tg_angle.lib D:\TBuild\Libraries\win64/zlib/Release/libzs.lib d3d9.lib dxgi.lib dxguid.lib" "QMAKE_LIBS_EGL_DEBUG=D:\TBuild\Libraries\win64/tg_angle/out/Debug/tg_angle.lib D:\TBuild\Libraries\win64/zlib/Debug/libzsd.lib d3d9.lib dxgi.lib dxguid.lib Gdi32.lib User32.lib" "QMAKE_LIBS_EGL_RELEASE=D:\TBuild\Libraries\win64/tg_angle/out/Release/tg_angle.lib D:\TBuild\Libraries\win64/zlib/Release/libzs.lib d3d9.lib dxgi.lib dxguid.lib Gdi32.lib User32.lib" "QMAKE_USE += openssl" "QMAKE_LIBS_OPENSSL = " "QMAKE_LIBS_OPENSSL_DEBUG = D:\\TBuild\\Libraries\\win64/openssl3/out.dbg/libssl.lib D:\\TBuild\\Libraries\\win64/openssl3/out.dbg/libcrypto.lib Ws2_32.lib Gdi32.lib Advapi32.lib Crypt32.lib User32.lib" "QMAKE_LIBS_OPENSSL_RELEASE = D:\\TBuild\\Libraries\\win64/openssl3/out/libssl.lib D:\\TBuild\\Libraries\\win64/openssl3/out/libcrypto.lib Ws2_32.lib Gdi32.lib Advapi32.lib Crypt32.lib User32.lib" D:/TBuild/Libraries/win64/qt_5.15.19/config.tests/openssl
++ cd /d D:\TBuild\Libraries\win64\qt_5.15.19\config.tests\openssl && set MAKEFLAGS=& jom
+> jom 1.1.3 - empower your cores
+> 	cl -c -nologo -Zc:wchar_t -FS -Zc:rvalueCast -Zc:inline -Zc:strictStrings -Zc:throwingNew -Zc:referenceBinding -Zc:__cplusplus -Zi -MTd -W0 -EHsc /Fdopenssl.vc.pdb -DUNICODE -D_UNICODE -DWIN32 -D_ENABLE_EXTENDED_ALIGNED_STORAGE -DWIN64 -DKHRONOS_STATIC= -DDESKTOP_APP_QT_STATIC_ANGLE= -I. -ID:\TBuild\Libraries\win64\tg_angle\include -ID:\TBuild\Libraries\win64\openssl3\include -ID:\TBuild\Libraries\win64\mozjpeg -ID:\TBuild\Libraries\win64\libwebp\src -ID:\TBuild\Libraries\win64\qt_5.15.19\qtbase\mkspecs\win32-msvc -Fo @C:\Users\RUNNER~1\AppData\Local\Temp\main.obj.3368.16.jom
+> main.cpp
+> 	link /NOLOGO /DYNAMICBASE /NXCOMPAT /DEBUG /SUBSYSTEM:CONSOLE "/MANIFESTDEPENDENCY:type='win32' name='Microsoft.Windows.Common-Controls' version='6.0.0.0' publicKeyToken='6595b64144ccf1df' language='*' processorArchitecture='*'" /MANIFEST:embed /OUT:openssl.exe @C:\Users\RUNNER~1\AppData\Local\Temp\openssl.exe.3368.438.jom
+ => source accepted.
+test config.qtbase_network.libraries.openssl succeeded
+executing config test dtls
++ cd /d D:\TBuild\Libraries\win64\qt_5.15.19\config.tests\dtls && D:\TBuild\Libraries\win64\qt_5.15.19\qtbase\bin\qmake.exe "CONFIG -= qt debug_and_release app_bundle lib_bundle" "CONFIG += static warn_off console single_arch" "DEFINES += KHRONOS_STATIC= DESKTOP_APP_QT_STATIC_ANGLE=" "QMAKE_LIBDIR += D:\\TBuild\\Libraries\\win64/libwebp/out/release-static/x64/lib" "INCLUDEPATH += D:\\TBuild\\Libraries\\win64/tg_angle/include D:\\TBuild\\Libraries\\win64/openssl3/include D:\\TBuild\\Libraries\\win64/mozjpeg D:\\TBuild\\Libraries\\win64/libwebp/src" "QMAKE_LIBS_OPENGL_ES2_DEBUG=D:\TBuild\Libraries\win64/tg_angle/out/Debug/tg_angle.lib D:\TBuild\Libraries\win64/zlib/Debug/libzsd.lib d3d9.lib dxgi.lib dxguid.lib" "QMAKE_LIBS_OPENGL_ES2_RELEASE=D:\TBuild\Libraries\win64/tg_angle/out/Release/tg_angle.lib D:\TBuild\Libraries\win64/zlib/Release/libzs.lib d3d9.lib dxgi.lib dxguid.lib" "QMAKE_LIBS_EGL_DEBUG=D:\TBuild\Libraries\win64/tg_angle/out/Debug/tg_angle.lib D:\TBuild\Libraries\win64/zlib/Debug/libzsd.lib d3d9.lib dxgi.lib dxguid.lib Gdi32.lib User32.lib" "QMAKE_LIBS_EGL_RELEASE=D:\TBuild\Libraries\win64/tg_angle/out/Release/tg_angle.lib D:\TBuild\Libraries\win64/zlib/Release/libzs.lib d3d9.lib dxgi.lib dxguid.lib Gdi32.lib User32.lib" "QMAKE_USE += openssl" "QMAKE_LIBS_OPENSSL = " "QMAKE_LIBS_OPENSSL_DEBUG = D:\\TBuild\\Libraries\\win64/openssl3/out.dbg/libssl.lib D:\\TBuild\\Libraries\\win64/openssl3/out.dbg/libcrypto.lib Ws2_32.lib Gdi32.lib Advapi32.lib Crypt32.lib User32.lib" "QMAKE_LIBS_OPENSSL_RELEASE = D:\\TBuild\\Libraries\\win64/openssl3/out/libssl.lib D:\\TBuild\\Libraries\\win64/openssl3/out/libcrypto.lib Ws2_32.lib Gdi32.lib Advapi32.lib Crypt32.lib User32.lib" D:/TBuild/Libraries/win64/qt_5.15.19/config.tests/dtls
++ cd /d D:\TBuild\Libraries\win64\qt_5.15.19\config.tests\dtls && set MAKEFLAGS=& jom
+> jom 1.1.3 - empower your cores
+> 	cl -c -nologo -Zc:wchar_t -FS -Zc:rvalueCast -Zc:inline -Zc:strictStrings -Zc:throwingNew -Zc:referenceBinding -Zc:__cplusplus -Zi -MTd -W0 -EHsc /Fddtls.vc.pdb -DUNICODE -D_UNICODE -DWIN32 -D_ENABLE_EXTENDED_ALIGNED_STORAGE -DWIN64 -DKHRONOS_STATIC= -DDESKTOP_APP_QT_STATIC_ANGLE= -I. -ID:\TBuild\Libraries\win64\tg_angle\include -ID:\TBuild\Libraries\win64\openssl3\include -ID:\TBuild\Libraries\win64\mozjpeg -ID:\TBuild\Libraries\win64\libwebp\src -ID:\TBuild\Libraries\win64\qt_5.15.19\qtbase\mkspecs\win32-msvc -Fo @C:\Users\RUNNER~1\AppData\Local\Temp\main.obj.3304.15.jom
+> main.cpp
+> 	link /NOLOGO /DYNAMICBASE /NXCOMPAT /DEBUG /SUBSYSTEM:CONSOLE "/MANIFESTDEPENDENCY:type='win32' name='Microsoft.Windows.Common-Controls' version='6.0.0.0' publicKeyToken='6595b64144ccf1df' language='*' processorArchitecture='*'" /MANIFEST:embed /OUT:dtls.exe @C:\Users\RUNNER~1\AppData\Local\Temp\dtls.exe.3304.406.jom
+test config.qtbase_network.tests.dtls succeeded
+Trying source 0 (type makeSpec) of library network ...
+ => source accepted.
+executing config test getifaddrs
++ cd /d D:\TBuild\Libraries\win64\qt_5.15.19\config.tests\getifaddrs && D:\TBuild\Libraries\win64\qt_5.15.19\qtbase\bin\qmake.exe "CONFIG -= qt debug_and_release app_bundle lib_bundle" "CONFIG += static warn_off console single_arch" "DEFINES += KHRONOS_STATIC= DESKTOP_APP_QT_STATIC_ANGLE=" "QMAKE_LIBDIR += D:\\TBuild\\Libraries\\win64/libwebp/out/release-static/x64/lib" "INCLUDEPATH += D:\\TBuild\\Libraries\\win64/tg_angle/include D:\\TBuild\\Libraries\\win64/openssl3/include D:\\TBuild\\Libraries\\win64/mozjpeg D:\\TBuild\\Libraries\\win64/libwebp/src" "QMAKE_LIBS_OPENGL_ES2_DEBUG=D:\TBuild\Libraries\win64/tg_angle/out/Debug/tg_angle.lib D:\TBuild\Libraries\win64/zlib/Debug/libzsd.lib d3d9.lib dxgi.lib dxguid.lib" "QMAKE_LIBS_OPENGL_ES2_RELEASE=D:\TBuild\Libraries\win64/tg_angle/out/Release/tg_angle.lib D:\TBuild\Libraries\win64/zlib/Release/libzs.lib d3d9.lib dxgi.lib dxguid.lib" "QMAKE_LIBS_EGL_DEBUG=D:\TBuild\Libraries\win64/tg_angle/out/Debug/tg_angle.lib D:\TBuild\Libraries\win64/zlib/Debug/libzsd.lib d3d9.lib dxgi.lib dxguid.lib Gdi32.lib User32.lib" "QMAKE_LIBS_EGL_RELEASE=D:\TBuild\Libraries\win64/tg_angle/out/Release/tg_angle.lib D:\TBuild\Libraries\win64/zlib/Release/libzs.lib d3d9.lib dxgi.lib dxguid.lib Gdi32.lib User32.lib" "QMAKE_USE += network" "QMAKE_LIBS_NETWORK = ws2_32.lib" D:/TBuild/Libraries/win64/qt_5.15.19/config.tests/getifaddrs
++ cd /d D:\TBuild\Libraries\win64\qt_5.15.19\config.tests\getifaddrs && set MAKEFLAGS=& jom
+> jom 1.1.3 - empower your cores
+> 	cl -c -nologo -Zc:wchar_t -FS -Zc:rvalueCast -Zc:inline -Zc:strictStrings -Zc:throwingNew -Zc:referenceBinding -Zc:__cplusplus -Zi -MTd -W0 -EHsc /Fdgetifaddrs.vc.pdb -DUNICODE -D_UNICODE -DWIN32 -D_ENABLE_EXTENDED_ALIGNED_STORAGE -DWIN64 -DKHRONOS_STATIC= -DDESKTOP_APP_QT_STATIC_ANGLE= -I. -ID:\TBuild\Libraries\win64\tg_angle\include -ID:\TBuild\Libraries\win64\openssl3\include -ID:\TBuild\Libraries\win64\mozjpeg -ID:\TBuild\Libraries\win64\libwebp\src -ID:\TBuild\Libraries\win64\qt_5.15.19\qtbase\mkspecs\win32-msvc -Fo @C:\Users\RUNNER~1\AppData\Local\Temp\main.obj.1508.15.jom
+> main.cpp
+> main.cpp(3): fatal error C1083: Cannot open include file: 'sys/socket.h': No such file or directory
+> jom: D:\TBuild\Libraries\win64\qt_5.15.19\config.tests\getifaddrs\Makefile [main.obj] Error 2
+test config.qtbase_network.tests.getifaddrs FAILED
+executing config test ipv6ifname
++ cd /d D:\TBuild\Libraries\win64\qt_5.15.19\config.tests\ipv6ifname && D:\TBuild\Libraries\win64\qt_5.15.19\qtbase\bin\qmake.exe "CONFIG -= qt debug_and_release app_bundle lib_bundle" "CONFIG += static warn_off console single_arch" "DEFINES += KHRONOS_STATIC= DESKTOP_APP_QT_STATIC_ANGLE=" "QMAKE_LIBDIR += D:\\TBuild\\Libraries\\win64/libwebp/out/release-static/x64/lib" "INCLUDEPATH += D:\\TBuild\\Libraries\\win64/tg_angle/include D:\\TBuild\\Libraries\\win64/openssl3/include D:\\TBuild\\Libraries\\win64/mozjpeg D:\\TBuild\\Libraries\\win64/libwebp/src" "QMAKE_LIBS_OPENGL_ES2_DEBUG=D:\TBuild\Libraries\win64/tg_angle/out/Debug/tg_angle.lib D:\TBuild\Libraries\win64/zlib/Debug/libzsd.lib d3d9.lib dxgi.lib dxguid.lib" "QMAKE_LIBS_OPENGL_ES2_RELEASE=D:\TBuild\Libraries\win64/tg_angle/out/Release/tg_angle.lib D:\TBuild\Libraries\win64/zlib/Release/libzs.lib d3d9.lib dxgi.lib dxguid.lib" "QMAKE_LIBS_EGL_DEBUG=D:\TBuild\Libraries\win64/tg_angle/out/Debug/tg_angle.lib D:\TBuild\Libraries\win64/zlib/Debug/libzsd.lib d3d9.lib dxgi.lib dxguid.lib Gdi32.lib User32.lib" "QMAKE_LIBS_EGL_RELEASE=D:\TBuild\Libraries\win64/tg_angle/out/Release/tg_angle.lib D:\TBuild\Libraries\win64/zlib/Release/libzs.lib d3d9.lib dxgi.lib dxguid.lib Gdi32.lib User32.lib" "QMAKE_USE += network" "QMAKE_LIBS_NETWORK = ws2_32.lib" D:/TBuild/Libraries/win64/qt_5.15.19/config.tests/ipv6ifname
++ cd /d D:\TBuild\Libraries\win64\qt_5.15.19\config.tests\ipv6ifname && set MAKEFLAGS=& jom
+> jom 1.1.3 - empower your cores
+> 	cl -c -nologo -Zc:wchar_t -FS -Zc:rvalueCast -Zc:inline -Zc:strictStrings -Zc:throwingNew -Zc:referenceBinding -Zc:__cplusplus -Zi -MTd -W0 -EHsc /Fdipv6ifname.vc.pdb -DUNICODE -D_UNICODE -DWIN32 -D_ENABLE_EXTENDED_ALIGNED_STORAGE -DWIN64 -DKHRONOS_STATIC= -DDESKTOP_APP_QT_STATIC_ANGLE= -I. -ID:\TBuild\Libraries\win64\tg_angle\include -ID:\TBuild\Libraries\win64\openssl3\include -ID:\TBuild\Libraries\win64\mozjpeg -ID:\TBuild\Libraries\win64\libwebp\src -ID:\TBuild\Libraries\win64\qt_5.15.19\qtbase\mkspecs\win32-msvc -Fo @C:\Users\RUNNER~1\AppData\Local\Temp\main.obj.1900.0.jom
+> main.cpp
+> main.cpp(3): fatal error C1083: Cannot open include file: 'sys/socket.h': No such file or directory
+> jom: D:\TBuild\Libraries\win64\qt_5.15.19\config.tests\ipv6ifname\Makefile [main.obj] Error 2
+test config.qtbase_network.tests.ipv6ifname FAILED
+executing config test ocsp
++ cd /d D:\TBuild\Libraries\win64\qt_5.15.19\config.tests\ocsp && D:\TBuild\Libraries\win64\qt_5.15.19\qtbase\bin\qmake.exe "CONFIG -= qt debug_and_release app_bundle lib_bundle" "CONFIG += static warn_off console single_arch" "DEFINES += KHRONOS_STATIC= DESKTOP_APP_QT_STATIC_ANGLE=" "QMAKE_LIBDIR += D:\\TBuild\\Libraries\\win64/libwebp/out/release-static/x64/lib" "INCLUDEPATH += D:\\TBuild\\Libraries\\win64/tg_angle/include D:\\TBuild\\Libraries\\win64/openssl3/include D:\\TBuild\\Libraries\\win64/mozjpeg D:\\TBuild\\Libraries\\win64/libwebp/src" "QMAKE_LIBS_OPENGL_ES2_DEBUG=D:\TBuild\Libraries\win64/tg_angle/out/Debug/tg_angle.lib D:\TBuild\Libraries\win64/zlib/Debug/libzsd.lib d3d9.lib dxgi.lib dxguid.lib" "QMAKE_LIBS_OPENGL_ES2_RELEASE=D:\TBuild\Libraries\win64/tg_angle/out/Release/tg_angle.lib D:\TBuild\Libraries\win64/zlib/Release/libzs.lib d3d9.lib dxgi.lib dxguid.lib" "QMAKE_LIBS_EGL_DEBUG=D:\TBuild\Libraries\win64/tg_angle/out/Debug/tg_angle.lib D:\TBuild\Libraries\win64/zlib/Debug/libzsd.lib d3d9.lib dxgi.lib dxguid.lib Gdi32.lib User32.lib" "QMAKE_LIBS_EGL_RELEASE=D:\TBuild\Libraries\win64/tg_angle/out/Release/tg_angle.lib D:\TBuild\Libraries\win64/zlib/Release/libzs.lib d3d9.lib dxgi.lib dxguid.lib Gdi32.lib User32.lib" "QMAKE_USE += openssl" "QMAKE_LIBS_OPENSSL = " "QMAKE_LIBS_OPENSSL_DEBUG = D:\\TBuild\\Libraries\\win64/openssl3/out.dbg/libssl.lib D:\\TBuild\\Libraries\\win64/openssl3/out.dbg/libcrypto.lib Ws2_32.lib Gdi32.lib Advapi32.lib Crypt32.lib User32.lib" "QMAKE_LIBS_OPENSSL_RELEASE = D:\\TBuild\\Libraries\\win64/openssl3/out/libssl.lib D:\\TBuild\\Libraries\\win64/openssl3/out/libcrypto.lib Ws2_32.lib Gdi32.lib Advapi32.lib Crypt32.lib User32.lib" D:/TBuild/Libraries/win64/qt_5.15.19/config.tests/ocsp
++ cd /d D:\TBuild\Libraries\win64\qt_5.15.19\config.tests\ocsp && set MAKEFLAGS=& jom
+> jom 1.1.3 - empower your cores
+> 	cl -c -nologo -Zc:wchar_t -FS -Zc:rvalueCast -Zc:inline -Zc:strictStrings -Zc:throwingNew -Zc:referenceBinding -Zc:__cplusplus -Zi -MTd -W0 -EHsc /Fdocsp.vc.pdb -DUNICODE -D_UNICODE -DWIN32 -D_ENABLE_EXTENDED_ALIGNED_STORAGE -DWIN64 -DKHRONOS_STATIC= -DDESKTOP_APP_QT_STATIC_ANGLE= -I. -ID:\TBuild\Libraries\win64\tg_angle\include -ID:\TBuild\Libraries\win64\openssl3\include -ID:\TBuild\Libraries\win64\mozjpeg -ID:\TBuild\Libraries\win64\libwebp\src -ID:\TBuild\Libraries\win64\qt_5.15.19\qtbase\mkspecs\win32-msvc -Fo @C:\Users\RUNNER~1\AppData\Local\Temp\main.obj.5112.15.jom
+> main.cpp
+> 	link /NOLOGO /DYNAMICBASE /NXCOMPAT /DEBUG /SUBSYSTEM:CONSOLE "/MANIFESTDEPENDENCY:type='win32' name='Microsoft.Windows.Common-Controls' version='6.0.0.0' publicKeyToken='6595b64144ccf1df' language='*' processorArchitecture='*'" /MANIFEST:embed /OUT:ocsp.exe @C:\Users\RUNNER~1\AppData\Local\Temp\ocsp.exe.5112.406.jom
+test config.qtbase_network.tests.ocsp succeeded
+looking for library xcb
+Trying source 0 (type pkgConfig) of library xcb ...
+pkg-config use disabled globally.
+  => source produced no result.
+Trying source 1 (type inline) of library xcb ...
+xcb/xcb.h not found in [] and global paths.
+  => source produced no result.
+test config.qtbase_gui.libraries.xcb FAILED
+looking for library dxgi
+Trying source 0 (type inline) of library dxgi ...
+ => source accepted.
+test config.qtbase_gui.libraries.dxgi succeeded
+looking for library d3d11
+Trying source 0 (type inline) of library d3d11 ...
+ => source accepted.
+test config.qtbase_gui.libraries.d3d11 succeeded
+looking for library d2d1
+Trying source 0 (type inline) of library d2d1 ...
+ => source accepted.
+test config.qtbase_gui.libraries.d2d1 succeeded
+looking for library d2d1_1
+Trying source 0 (type inline) of library d2d1_1 ...
++ cd /d D:\TBuild\Libraries\win64\qt_5.15.19\config.tests\d2d1_1 && D:\TBuild\Libraries\win64\qt_5.15.19\qtbase\bin\qmake.exe "CONFIG -= qt debug_and_release app_bundle lib_bundle" "CONFIG += static warn_off console single_arch" "DEFINES += KHRONOS_STATIC= DESKTOP_APP_QT_STATIC_ANGLE=" "QMAKE_LIBDIR += D:\\TBuild\\Libraries\\win64/libwebp/out/release-static/x64/lib" "INCLUDEPATH += D:\\TBuild\\Libraries\\win64/tg_angle/include D:\\TBuild\\Libraries\\win64/openssl3/include D:\\TBuild\\Libraries\\win64/mozjpeg D:\\TBuild\\Libraries\\win64/libwebp/src" "QMAKE_LIBS_OPENGL_ES2_DEBUG=D:\TBuild\Libraries\win64/tg_angle/out/Debug/tg_angle.lib D:\TBuild\Libraries\win64/zlib/Debug/libzsd.lib d3d9.lib dxgi.lib dxguid.lib" "QMAKE_LIBS_OPENGL_ES2_RELEASE=D:\TBuild\Libraries\win64/tg_angle/out/Release/tg_angle.lib D:\TBuild\Libraries\win64/zlib/Release/libzs.lib d3d9.lib dxgi.lib dxguid.lib" "QMAKE_LIBS_EGL_DEBUG=D:\TBuild\Libraries\win64/tg_angle/out/Debug/tg_angle.lib D:\TBuild\Libraries\win64/zlib/Debug/libzsd.lib d3d9.lib dxgi.lib dxguid.lib Gdi32.lib User32.lib" "QMAKE_LIBS_EGL_RELEASE=D:\TBuild\Libraries\win64/tg_angle/out/Release/tg_angle.lib D:\TBuild\Libraries\win64/zlib/Release/libzs.lib d3d9.lib dxgi.lib dxguid.lib Gdi32.lib User32.lib" "QMAKE_USE += d2d1_1" "QMAKE_LIBS_D2D1_1 = -ld2d1" D:/TBuild/Libraries/win64/qt_5.15.19/config.tests/d2d1_1
++ cd /d D:\TBuild\Libraries\win64\qt_5.15.19\config.tests\d2d1_1 && set MAKEFLAGS=& jom
+> jom 1.1.3 - empower your cores
+> 	cl -c -nologo -Zc:wchar_t -FS -Zc:rvalueCast -Zc:inline -Zc:strictStrings -Zc:throwingNew -Zc:referenceBinding -Zc:__cplusplus -Zi -MTd -W0 -EHsc /Fdd2d1_1.vc.pdb -DUNICODE -D_UNICODE -DWIN32 -D_ENABLE_EXTENDED_ALIGNED_STORAGE -DWIN64 -DKHRONOS_STATIC= -DDESKTOP_APP_QT_STATIC_ANGLE= -I. -ID:\TBuild\Libraries\win64\tg_angle\include -ID:\TBuild\Libraries\win64\openssl3\include -ID:\TBuild\Libraries\win64\mozjpeg -ID:\TBuild\Libraries\win64\libwebp\src -ID:\TBuild\Libraries\win64\qt_5.15.19\qtbase\mkspecs\win32-msvc -Fo @C:\Users\RUNNER~1\AppData\Local\Temp\main.obj.1904.0.jom
+> main.cpp
+> 	link /NOLOGO /DYNAMICBASE /NXCOMPAT /DEBUG /SUBSYSTEM:CONSOLE "/MANIFESTDEPENDENCY:type='win32' name='Microsoft.Windows.Common-Controls' version='6.0.0.0' publicKeyToken='6595b64144ccf1df' language='*' processorArchitecture='*'" /MANIFEST:embed /OUT:d2d1_1.exe @C:\Users\RUNNER~1\AppData\Local\Temp\d2d1_1.exe.1904.484.jom
+ => source accepted.
+test config.qtbase_gui.libraries.d2d1_1 succeeded
+looking for library dxgi1_2
+Trying source 0 (type inline) of library dxgi1_2 ...
++ cd /d D:\TBuild\Libraries\win64\qt_5.15.19\config.tests\dxgi1_2 && D:\TBuild\Libraries\win64\qt_5.15.19\qtbase\bin\qmake.exe "CONFIG -= qt debug_and_release app_bundle lib_bundle" "CONFIG += static warn_off console single_arch" "DEFINES += KHRONOS_STATIC= DESKTOP_APP_QT_STATIC_ANGLE=" "QMAKE_LIBDIR += D:\\TBuild\\Libraries\\win64/libwebp/out/release-static/x64/lib" "INCLUDEPATH += D:\\TBuild\\Libraries\\win64/tg_angle/include D:\\TBuild\\Libraries\\win64/openssl3/include D:\\TBuild\\Libraries\\win64/mozjpeg D:\\TBuild\\Libraries\\win64/libwebp/src" "QMAKE_LIBS_OPENGL_ES2_DEBUG=D:\TBuild\Libraries\win64/tg_angle/out/Debug/tg_angle.lib D:\TBuild\Libraries\win64/zlib/Debug/libzsd.lib d3d9.lib dxgi.lib dxguid.lib" "QMAKE_LIBS_OPENGL_ES2_RELEASE=D:\TBuild\Libraries\win64/tg_angle/out/Release/tg_angle.lib D:\TBuild\Libraries\win64/zlib/Release/libzs.lib d3d9.lib dxgi.lib dxguid.lib" "QMAKE_LIBS_EGL_DEBUG=D:\TBuild\Libraries\win64/tg_angle/out/Debug/tg_angle.lib D:\TBuild\Libraries\win64/zlib/Debug/libzsd.lib d3d9.lib dxgi.lib dxguid.lib Gdi32.lib User32.lib" "QMAKE_LIBS_EGL_RELEASE=D:\TBuild\Libraries\win64/tg_angle/out/Release/tg_angle.lib D:\TBuild\Libraries\win64/zlib/Release/libzs.lib d3d9.lib dxgi.lib dxguid.lib Gdi32.lib User32.lib" "QMAKE_USE += dxgi1_2" "QMAKE_LIBS_DXGI1_2 = -ldxgi" D:/TBuild/Libraries/win64/qt_5.15.19/config.tests/dxgi1_2
++ cd /d D:\TBuild\Libraries\win64\qt_5.15.19\config.tests\dxgi1_2 && set MAKEFLAGS=& jom
+> jom 1.1.3 - empower your cores
+> 	cl -c -nologo -Zc:wchar_t -FS -Zc:rvalueCast -Zc:inline -Zc:strictStrings -Zc:throwingNew -Zc:referenceBinding -Zc:__cplusplus -Zi -MTd -W0 -EHsc /Fddxgi1_2.vc.pdb -DUNICODE -D_UNICODE -DWIN32 -D_ENABLE_EXTENDED_ALIGNED_STORAGE -DWIN64 -DKHRONOS_STATIC= -DDESKTOP_APP_QT_STATIC_ANGLE= -I. -ID:\TBuild\Libraries\win64\tg_angle\include -ID:\TBuild\Libraries\win64\openssl3\include -ID:\TBuild\Libraries\win64\mozjpeg -ID:\TBuild\Libraries\win64\libwebp\src -ID:\TBuild\Libraries\win64\qt_5.15.19\qtbase\mkspecs\win32-msvc -Fo @C:\Users\RUNNER~1\AppData\Local\Temp\main.obj.1156.0.jom
+> main.cpp
+> 	link /NOLOGO /DYNAMICBASE /NXCOMPAT /DEBUG /SUBSYSTEM:CONSOLE "/MANIFESTDEPENDENCY:type='win32' name='Microsoft.Windows.Common-Controls' version='6.0.0.0' publicKeyToken='6595b64144ccf1df' language='*' processorArchitecture='*'" /MANIFEST:embed /OUT:dxgi1_2.exe @C:\Users\RUNNER~1\AppData\Local\Temp\dxgi1_2.exe.1156.328.jom
+ => source accepted.
+test config.qtbase_gui.libraries.dxgi1_2 succeeded
+looking for library d3d11_1
+Trying source 0 (type inline) of library d3d11_1 ...
+ => source accepted.
+test config.qtbase_gui.libraries.d3d11_1 succeeded
+looking for library d3d9
+Trying source 0 (type inline) of library d3d9 ...
+ => source accepted.
+test config.qtbase_gui.libraries.d3d9 succeeded
+looking for library dwrite
+Trying source 0 (type inline) of library dwrite ...
++ cd /d D:\TBuild\Libraries\win64\qt_5.15.19\config.tests\dwrite && D:\TBuild\Libraries\win64\qt_5.15.19\qtbase\bin\qmake.exe "CONFIG -= qt debug_and_release app_bundle lib_bundle" "CONFIG += static warn_off console single_arch" "DEFINES += KHRONOS_STATIC= DESKTOP_APP_QT_STATIC_ANGLE=" "QMAKE_LIBDIR += D:\\TBuild\\Libraries\\win64/libwebp/out/release-static/x64/lib" "INCLUDEPATH += D:\\TBuild\\Libraries\\win64/tg_angle/include D:\\TBuild\\Libraries\\win64/openssl3/include D:\\TBuild\\Libraries\\win64/mozjpeg D:\\TBuild\\Libraries\\win64/libwebp/src" "QMAKE_LIBS_OPENGL_ES2_DEBUG=D:\TBuild\Libraries\win64/tg_angle/out/Debug/tg_angle.lib D:\TBuild\Libraries\win64/zlib/Debug/libzsd.lib d3d9.lib dxgi.lib dxguid.lib" "QMAKE_LIBS_OPENGL_ES2_RELEASE=D:\TBuild\Libraries\win64/tg_angle/out/Release/tg_angle.lib D:\TBuild\Libraries\win64/zlib/Release/libzs.lib d3d9.lib dxgi.lib dxguid.lib" "QMAKE_LIBS_EGL_DEBUG=D:\TBuild\Libraries\win64/tg_angle/out/Debug/tg_angle.lib D:\TBuild\Libraries\win64/zlib/Debug/libzsd.lib d3d9.lib dxgi.lib dxguid.lib Gdi32.lib User32.lib" "QMAKE_LIBS_EGL_RELEASE=D:\TBuild\Libraries\win64/tg_angle/out/Release/tg_angle.lib D:\TBuild\Libraries\win64/zlib/Release/libzs.lib d3d9.lib dxgi.lib dxguid.lib Gdi32.lib User32.lib" "QMAKE_USE += dwrite" "QMAKE_LIBS_DWRITE = -ldwrite" D:/TBuild/Libraries/win64/qt_5.15.19/config.tests/dwrite
++ cd /d D:\TBuild\Libraries\win64\qt_5.15.19\config.tests\dwrite && set MAKEFLAGS=& jom
+> jom 1.1.3 - empower your cores
+> 	cl -c -nologo -Zc:wchar_t -FS -Zc:rvalueCast -Zc:inline -Zc:strictStrings -Zc:throwingNew -Zc:referenceBinding -Zc:__cplusplus -Zi -MTd -W0 -EHsc /Fddwrite.vc.pdb -DUNICODE -D_UNICODE -DWIN32 -D_ENABLE_EXTENDED_ALIGNED_STORAGE -DWIN64 -DKHRONOS_STATIC= -DDESKTOP_APP_QT_STATIC_ANGLE= -I. -ID:\TBuild\Libraries\win64\tg_angle\include -ID:\TBuild\Libraries\win64\openssl3\include -ID:\TBuild\Libraries\win64\mozjpeg -ID:\TBuild\Libraries\win64\libwebp\src -ID:\TBuild\Libraries\win64\qt_5.15.19\qtbase\mkspecs\win32-msvc -Fo @C:\Users\RUNNER~1\AppData\Local\Temp\main.obj.6028.0.jom
+> main.cpp
+> 	link /NOLOGO /DYNAMICBASE /NXCOMPAT /DEBUG /SUBSYSTEM:CONSOLE "/MANIFESTDEPENDENCY:type='win32' name='Microsoft.Windows.Common-Controls' version='6.0.0.0' publicKeyToken='6595b64144ccf1df' language='*' processorArchitecture='*'" /MANIFEST:embed /OUT:dwrite.exe @C:\Users\RUNNER~1\AppData\Local\Temp\dwrite.exe.6028.328.jom
+ => source accepted.
+test config.qtbase_gui.libraries.dwrite succeeded
+looking for library dwrite_1
+Trying source 0 (type inline) of library dwrite_1 ...
+ => source accepted.
+test config.qtbase_gui.libraries.dwrite_1 succeeded
+looking for library dwrite_2
+Trying source 0 (type inline) of library dwrite_2 ...
++ cd /d D:\TBuild\Libraries\win64\qt_5.15.19\config.tests\dwrite_2 && D:\TBuild\Libraries\win64\qt_5.15.19\qtbase\bin\qmake.exe "CONFIG -= qt debug_and_release app_bundle lib_bundle" "CONFIG += static warn_off console single_arch" "DEFINES += KHRONOS_STATIC= DESKTOP_APP_QT_STATIC_ANGLE=" "QMAKE_LIBDIR += D:\\TBuild\\Libraries\\win64/libwebp/out/release-static/x64/lib" "INCLUDEPATH += D:\\TBuild\\Libraries\\win64/tg_angle/include D:\\TBuild\\Libraries\\win64/openssl3/include D:\\TBuild\\Libraries\\win64/mozjpeg D:\\TBuild\\Libraries\\win64/libwebp/src" "QMAKE_LIBS_OPENGL_ES2_DEBUG=D:\TBuild\Libraries\win64/tg_angle/out/Debug/tg_angle.lib D:\TBuild\Libraries\win64/zlib/Debug/libzsd.lib d3d9.lib dxgi.lib dxguid.lib" "QMAKE_LIBS_OPENGL_ES2_RELEASE=D:\TBuild\Libraries\win64/tg_angle/out/Release/tg_angle.lib D:\TBuild\Libraries\win64/zlib/Release/libzs.lib d3d9.lib dxgi.lib dxguid.lib" "QMAKE_LIBS_EGL_DEBUG=D:\TBuild\Libraries\win64/tg_angle/out/Debug/tg_angle.lib D:\TBuild\Libraries\win64/zlib/Debug/libzsd.lib d3d9.lib dxgi.lib dxguid.lib Gdi32.lib User32.lib" "QMAKE_LIBS_EGL_RELEASE=D:\TBuild\Libraries\win64/tg_angle/out/Release/tg_angle.lib D:\TBuild\Libraries\win64/zlib/Release/libzs.lib d3d9.lib dxgi.lib dxguid.lib Gdi32.lib User32.lib" "QMAKE_USE += dwrite_2" "QMAKE_LIBS_DWRITE_2 = -ldwrite" D:/TBuild/Libraries/win64/qt_5.15.19/config.tests/dwrite_2
++ cd /d D:\TBuild\Libraries\win64\qt_5.15.19\config.tests\dwrite_2 && set MAKEFLAGS=& jom
+> jom 1.1.3 - empower your cores
+> 	cl -c -nologo -Zc:wchar_t -FS -Zc:rvalueCast -Zc:inline -Zc:strictStrings -Zc:throwingNew -Zc:referenceBinding -Zc:__cplusplus -Zi -MTd -W0 -EHsc /Fddwrite_2.vc.pdb -DUNICODE -D_UNICODE -DWIN32 -D_ENABLE_EXTENDED_ALIGNED_STORAGE -DWIN64 -DKHRONOS_STATIC= -DDESKTOP_APP_QT_STATIC_ANGLE= -I. -ID:\TBuild\Libraries\win64\tg_angle\include -ID:\TBuild\Libraries\win64\openssl3\include -ID:\TBuild\Libraries\win64\mozjpeg -ID:\TBuild\Libraries\win64\libwebp\src -ID:\TBuild\Libraries\win64\qt_5.15.19\qtbase\mkspecs\win32-msvc -Fo @C:\Users\RUNNER~1\AppData\Local\Temp\main.obj.6760.16.jom
+> main.cpp
+> 	link /NOLOGO /DYNAMICBASE /NXCOMPAT /DEBUG /SUBSYSTEM:CONSOLE "/MANIFESTDEPENDENCY:type='win32' name='Microsoft.Windows.Common-Controls' version='6.0.0.0' publicKeyToken='6595b64144ccf1df' language='*' processorArchitecture='*'" /MANIFEST:embed /OUT:dwrite_2.exe @C:\Users\RUNNER~1\AppData\Local\Temp\dwrite_2.exe.6760.344.jom
+ => source accepted.
+test config.qtbase_gui.libraries.dwrite_2 succeeded
+looking for library drm
+Trying source 0 (type pkgConfig) of library drm ...
+pkg-config use disabled globally.
+  => source produced no result.
+Trying source 1 (type inline) of library drm ...
+xf86drmMode.h not found in [] and global paths.
+xf86drm.h not found in [] and global paths.
+  => source produced no result.
+Trying source 2 (type inline) of library drm ...
+  => source failed condition 'config.integrity'.
+test config.qtbase_gui.libraries.drm FAILED
+looking for library dxguid
+Trying source 0 (type inline) of library dxguid ...
+ => source accepted.
+test config.qtbase_gui.libraries.dxguid succeeded
+looking for library egl
+Trying source 0 (type pkgConfig) of library egl ...
+pkg-config use disabled globally.
+  => source produced no result.
+Trying source 1 (type makeSpec) of library egl ...
++ cd /d D:\TBuild\Libraries\win64\qt_5.15.19\config.tests\egl && D:\TBuild\Libraries\win64\qt_5.15.19\qtbase\bin\qmake.exe "CONFIG -= qt debug_and_release app_bundle lib_bundle" "CONFIG += static warn_off console single_arch" "DEFINES += KHRONOS_STATIC= DESKTOP_APP_QT_STATIC_ANGLE=" "QMAKE_LIBDIR += D:\\TBuild\\Libraries\\win64/libwebp/out/release-static/x64/lib" "INCLUDEPATH += D:\\TBuild\\Libraries\\win64/tg_angle/include D:\\TBuild\\Libraries\\win64/openssl3/include D:\\TBuild\\Libraries\\win64/mozjpeg D:\\TBuild\\Libraries\\win64/libwebp/src" "QMAKE_LIBS_OPENGL_ES2_DEBUG=D:\TBuild\Libraries\win64/tg_angle/out/Debug/tg_angle.lib D:\TBuild\Libraries\win64/zlib/Debug/libzsd.lib d3d9.lib dxgi.lib dxguid.lib" "QMAKE_LIBS_OPENGL_ES2_RELEASE=D:\TBuild\Libraries\win64/tg_angle/out/Release/tg_angle.lib D:\TBuild\Libraries\win64/zlib/Release/libzs.lib d3d9.lib dxgi.lib dxguid.lib" "QMAKE_LIBS_EGL_DEBUG=D:\TBuild\Libraries\win64/tg_angle/out/Debug/tg_angle.lib D:\TBuild\Libraries\win64/zlib/Debug/libzsd.lib d3d9.lib dxgi.lib dxguid.lib Gdi32.lib User32.lib" "QMAKE_LIBS_EGL_RELEASE=D:\TBuild\Libraries\win64/tg_angle/out/Release/tg_angle.lib D:\TBuild\Libraries\win64/zlib/Release/libzs.lib d3d9.lib dxgi.lib dxguid.lib Gdi32.lib User32.lib" "QMAKE_USE += egl" "QMAKE_LIBS_EGL = " D:/TBuild/Libraries/win64/qt_5.15.19/config.tests/egl
++ cd /d D:\TBuild\Libraries\win64\qt_5.15.19\config.tests\egl && set MAKEFLAGS=& jom
+> jom 1.1.3 - empower your cores
+> 	cl -c -nologo -Zc:wchar_t -FS -Zc:rvalueCast -Zc:inline -Zc:strictStrings -Zc:throwingNew -Zc:referenceBinding -Zc:__cplusplus -Zi -MTd -W0 -EHsc /Fdegl.vc.pdb -DUNICODE -D_UNICODE -DWIN32 -D_ENABLE_EXTENDED_ALIGNED_STORAGE -DWIN64 -DKHRONOS_STATIC= -DDESKTOP_APP_QT_STATIC_ANGLE= -I. -ID:\TBuild\Libraries\win64\tg_angle\include -ID:\TBuild\Libraries\win64\openssl3\include -ID:\TBuild\Libraries\win64\mozjpeg -ID:\TBuild\Libraries\win64\libwebp\src -ID:\TBuild\Libraries\win64\qt_5.15.19\qtbase\mkspecs\win32-msvc -Fo @C:\Users\RUNNER~1\AppData\Local\Temp\main.obj.7460.0.jom
+> main.cpp
+> 	link /NOLOGO /DYNAMICBASE /NXCOMPAT /DEBUG /SUBSYSTEM:CONSOLE "/MANIFESTDEPENDENCY:type='win32' name='Microsoft.Windows.Common-Controls' version='6.0.0.0' publicKeyToken='6595b64144ccf1df' language='*' processorArchitecture='*'" /MANIFEST:embed /OUT:egl.exe @C:\Users\RUNNER~1\AppData\Local\Temp\egl.exe.7460.172.jom
+>    Creating library egl.lib and object egl.exp
+ => source accepted.
+test config.qtbase_gui.libraries.egl succeeded
+looking for library xlib
+Trying source 0 (type makeSpec) of library xlib ...
+X11/Xlib.h not found in [] and global paths.
+  => source produced no result.
+test config.qtbase_gui.libraries.xlib FAILED
+executing config test evdev
++ cd /d D:\TBuild\Libraries\win64\qt_5.15.19\config.tests\evdev && D:\TBuild\Libraries\win64\qt_5.15.19\qtbase\bin\qmake.exe "CONFIG -= qt debug_and_release app_bundle lib_bundle" "CONFIG += static warn_off console single_arch" "DEFINES += KHRONOS_STATIC= DESKTOP_APP_QT_STATIC_ANGLE=" "QMAKE_LIBDIR += D:\\TBuild\\Libraries\\win64/libwebp/out/release-static/x64/lib" "INCLUDEPATH += D:\\TBuild\\Libraries\\win64/tg_angle/include D:\\TBuild\\Libraries\\win64/openssl3/include D:\\TBuild\\Libraries\\win64/mozjpeg D:\\TBuild\\Libraries\\win64/libwebp/src" "QMAKE_LIBS_OPENGL_ES2_DEBUG=D:\TBuild\Libraries\win64/tg_angle/out/Debug/tg_angle.lib D:\TBuild\Libraries\win64/zlib/Debug/libzsd.lib d3d9.lib dxgi.lib dxguid.lib" "QMAKE_LIBS_OPENGL_ES2_RELEASE=D:\TBuild\Libraries\win64/tg_angle/out/Release/tg_angle.lib D:\TBuild\Libraries\win64/zlib/Release/libzs.lib d3d9.lib dxgi.lib dxguid.lib" "QMAKE_LIBS_EGL_DEBUG=D:\TBuild\Libraries\win64/tg_angle/out/Debug/tg_angle.lib D:\TBuild\Libraries\win64/zlib/Debug/libzsd.lib d3d9.lib dxgi.lib dxguid.lib Gdi32.lib User32.lib" "QMAKE_LIBS_EGL_RELEASE=D:\TBuild\Libraries\win64/tg_angle/out/Release/tg_angle.lib D:\TBuild\Libraries\win64/zlib/Release/libzs.lib d3d9.lib dxgi.lib dxguid.lib Gdi32.lib User32.lib" D:/TBuild/Libraries/win64/qt_5.15.19/config.tests/evdev
++ cd /d D:\TBuild\Libraries\win64\qt_5.15.19\config.tests\evdev && set MAKEFLAGS=& jom
+> jom 1.1.3 - empower your cores
+> 	cl -c -nologo -Zc:wchar_t -FS -Zc:rvalueCast -Zc:inline -Zc:strictStrings -Zc:throwingNew -Zc:referenceBinding -Zc:__cplusplus -Zi -MTd -W0 -EHsc /Fdevdev.vc.pdb -DUNICODE -D_UNICODE -DWIN32 -D_ENABLE_EXTENDED_ALIGNED_STORAGE -DWIN64 -DKHRONOS_STATIC= -DDESKTOP_APP_QT_STATIC_ANGLE= -I. -ID:\TBuild\Libraries\win64\tg_angle\include -ID:\TBuild\Libraries\win64\openssl3\include -ID:\TBuild\Libraries\win64\mozjpeg -ID:\TBuild\Libraries\win64\libwebp\src -ID:\TBuild\Libraries\win64\qt_5.15.19\qtbase\mkspecs\win32-msvc -Fo @C:\Users\RUNNER~1\AppData\Local\Temp\main.obj.3896.0.jom
+> main.cpp
+> main.cpp(5): fatal error C1083: Cannot open include file: 'linux/input.h': No such file or directory
+> jom: D:\TBuild\Libraries\win64\qt_5.15.19\config.tests\evdev\Makefile [main.obj] Error 2
+test config.qtbase_gui.tests.evdev FAILED
+looking for library gbm
+Trying source 0 (type pkgConfig) of library gbm ...
+pkg-config use disabled globally.
+  => source produced no result.
+test config.qtbase_gui.libraries.gbm FAILED
+executing config test harfbuzz-ng
++ cd /d D:\TBuild\Libraries\win64\qt_5.15.19\config.tests\harfbuzz-ng && D:\TBuild\Libraries\win64\qt_5.15.19\qtbase\bin\qmake.exe "CONFIG -= qt debug_and_release app_bundle lib_bundle" "CONFIG += static warn_off console single_arch" "DEFINES += KHRONOS_STATIC= DESKTOP_APP_QT_STATIC_ANGLE=" "QMAKE_LIBDIR += D:\\TBuild\\Libraries\\win64/libwebp/out/release-static/x64/lib" "INCLUDEPATH += D:\\TBuild\\Libraries\\win64/tg_angle/include D:\\TBuild\\Libraries\\win64/openssl3/include D:\\TBuild\\Libraries\\win64/mozjpeg D:\\TBuild\\Libraries\\win64/libwebp/src" "QMAKE_LIBS_OPENGL_ES2_DEBUG=D:\TBuild\Libraries\win64/tg_angle/out/Debug/tg_angle.lib D:\TBuild\Libraries\win64/zlib/Debug/libzsd.lib d3d9.lib dxgi.lib dxguid.lib" "QMAKE_LIBS_OPENGL_ES2_RELEASE=D:\TBuild\Libraries\win64/tg_angle/out/Release/tg_angle.lib D:\TBuild\Libraries\win64/zlib/Release/libzs.lib d3d9.lib dxgi.lib dxguid.lib" "QMAKE_LIBS_EGL_DEBUG=D:\TBuild\Libraries\win64/tg_angle/out/Debug/tg_angle.lib D:\TBuild\Libraries\win64/zlib/Debug/libzsd.lib d3d9.lib dxgi.lib dxguid.lib Gdi32.lib User32.lib" "QMAKE_LIBS_EGL_RELEASE=D:\TBuild\Libraries\win64/tg_angle/out/Release/tg_angle.lib D:\TBuild\Libraries\win64/zlib/Release/libzs.lib d3d9.lib dxgi.lib dxguid.lib Gdi32.lib User32.lib" D:/TBuild/Libraries/win64/qt_5.15.19/config.tests/harfbuzz-ng
++ cd /d D:\TBuild\Libraries\win64\qt_5.15.19\config.tests\harfbuzz-ng && set MAKEFLAGS=& jom
+> jom 1.1.3 - empower your cores
+> 	cl -c -nologo -Zc:wchar_t -FS -Zc:rvalueCast -Zc:inline -Zc:strictStrings -Zc:throwingNew -Zc:referenceBinding -Zc:__cplusplus -Zi -MTd -W0 -EHsc /Fdharfbuzz-ng.vc.pdb -DUNICODE -D_UNICODE -DWIN32 -D_ENABLE_EXTENDED_ALIGNED_STORAGE -DWIN64 -DKHRONOS_STATIC= -DDESKTOP_APP_QT_STATIC_ANGLE= -I. -ID:\TBuild\Libraries\win64\tg_angle\include -ID:\TBuild\Libraries\win64\openssl3\include -ID:\TBuild\Libraries\win64\mozjpeg -ID:\TBuild\Libraries\win64\libwebp\src -ID:\TBuild\Libraries\win64\qt_5.15.19\qtbase\mkspecs\win32-msvc -Fo @C:\Users\RUNNER~1\AppData\Local\Temp\main.obj.2556.16.jom
+> main.cpp
+> 	link /NOLOGO /DYNAMICBASE /NXCOMPAT /DEBUG /SUBSYSTEM:CONSOLE "/MANIFESTDEPENDENCY:type='win32' name='Microsoft.Windows.Common-Controls' version='6.0.0.0' publicKeyToken='6595b64144ccf1df' language='*' processorArchitecture='*'" /MANIFEST:embed /OUT:harfbuzz-ng.exe @C:\Users\RUNNER~1\AppData\Local\Temp\harfbuzz-ng.exe.2556.78.jom
+test config.qtbase_gui.tests.harfbuzz-ng succeeded
+executing config test linuxfb
++ cd /d D:\TBuild\Libraries\win64\qt_5.15.19\config.tests\linuxfb && D:\TBuild\Libraries\win64\qt_5.15.19\qtbase\bin\qmake.exe "CONFIG -= qt debug_and_release app_bundle lib_bundle" "CONFIG += static warn_off console single_arch" "DEFINES += KHRONOS_STATIC= DESKTOP_APP_QT_STATIC_ANGLE=" "QMAKE_LIBDIR += D:\\TBuild\\Libraries\\win64/libwebp/out/release-static/x64/lib" "INCLUDEPATH += D:\\TBuild\\Libraries\\win64/tg_angle/include D:\\TBuild\\Libraries\\win64/openssl3/include D:\\TBuild\\Libraries\\win64/mozjpeg D:\\TBuild\\Libraries\\win64/libwebp/src" "QMAKE_LIBS_OPENGL_ES2_DEBUG=D:\TBuild\Libraries\win64/tg_angle/out/Debug/tg_angle.lib D:\TBuild\Libraries\win64/zlib/Debug/libzsd.lib d3d9.lib dxgi.lib dxguid.lib" "QMAKE_LIBS_OPENGL_ES2_RELEASE=D:\TBuild\Libraries\win64/tg_angle/out/Release/tg_angle.lib D:\TBuild\Libraries\win64/zlib/Release/libzs.lib d3d9.lib dxgi.lib dxguid.lib" "QMAKE_LIBS_EGL_DEBUG=D:\TBuild\Libraries\win64/tg_angle/out/Debug/tg_angle.lib D:\TBuild\Libraries\win64/zlib/Debug/libzsd.lib d3d9.lib dxgi.lib dxguid.lib Gdi32.lib User32.lib" "QMAKE_LIBS_EGL_RELEASE=D:\TBuild\Libraries\win64/tg_angle/out/Release/tg_angle.lib D:\TBuild\Libraries\win64/zlib/Release/libzs.lib d3d9.lib dxgi.lib dxguid.lib Gdi32.lib User32.lib" D:/TBuild/Libraries/win64/qt_5.15.19/config.tests/linuxfb
++ cd /d D:\TBuild\Libraries\win64\qt_5.15.19\config.tests\linuxfb && set MAKEFLAGS=& jom
+> jom 1.1.3 - empower your cores
+> 	cl -c -nologo -Zc:wchar_t -FS -Zc:rvalueCast -Zc:inline -Zc:strictStrings -Zc:throwingNew -Zc:referenceBinding -Zc:__cplusplus -Zi -MTd -W0 -EHsc /Fdlinuxfb.vc.pdb -DUNICODE -D_UNICODE -DWIN32 -D_ENABLE_EXTENDED_ALIGNED_STORAGE -DWIN64 -DKHRONOS_STATIC= -DDESKTOP_APP_QT_STATIC_ANGLE= -I. -ID:\TBuild\Libraries\win64\tg_angle\include -ID:\TBuild\Libraries\win64\openssl3\include -ID:\TBuild\Libraries\win64\mozjpeg -ID:\TBuild\Libraries\win64\libwebp\src -ID:\TBuild\Libraries\win64\qt_5.15.19\qtbase\mkspecs\win32-msvc -Fo @C:\Users\RUNNER~1\AppData\Local\Temp\main.obj.2712.0.jom
+> main.cpp
+> main.cpp(2): fatal error C1083: Cannot open include file: 'linux/fb.h': No such file or directory
+> jom: D:\TBuild\Libraries\win64\qt_5.15.19\config.tests\linuxfb\Makefile [main.obj] Error 2
+test config.qtbase_gui.tests.linuxfb FAILED
+looking for library mtdev
+Trying source 0 (type pkgConfig) of library mtdev ...
+pkg-config use disabled globally.
+  => source produced no result.
+test config.qtbase_gui.libraries.mtdev FAILED
+looking for library opengl_es2
+Trying source 0 (type pkgConfig) of library opengl_es2 ...
+pkg-config use disabled globally.
+  => source produced no result.
+Trying source 1 (type makeSpec) of library opengl_es2 ...
+header entry 'config.qtbase_gui.libraries.opengl_es2.headers.0' passed condition.
+header entry 'config.qtbase_gui.libraries.opengl_es2.headers.0' passed condition.
++ cd /d D:\TBuild\Libraries\win64\qt_5.15.19\config.tests\opengl_es2 && D:\TBuild\Libraries\win64\qt_5.15.19\qtbase\bin\qmake.exe "CONFIG -= qt debug_and_release app_bundle lib_bundle" "CONFIG += static warn_off console single_arch" "DEFINES += KHRONOS_STATIC= DESKTOP_APP_QT_STATIC_ANGLE=" "QMAKE_LIBDIR += D:\\TBuild\\Libraries\\win64/libwebp/out/release-static/x64/lib" "INCLUDEPATH += D:\\TBuild\\Libraries\\win64/tg_angle/include D:\\TBuild\\Libraries\\win64/openssl3/include D:\\TBuild\\Libraries\\win64/mozjpeg D:\\TBuild\\Libraries\\win64/libwebp/src" "QMAKE_LIBS_OPENGL_ES2_DEBUG=D:\TBuild\Libraries\win64/tg_angle/out/Debug/tg_angle.lib D:\TBuild\Libraries\win64/zlib/Debug/libzsd.lib d3d9.lib dxgi.lib dxguid.lib" "QMAKE_LIBS_OPENGL_ES2_RELEASE=D:\TBuild\Libraries\win64/tg_angle/out/Release/tg_angle.lib D:\TBuild\Libraries\win64/zlib/Release/libzs.lib d3d9.lib dxgi.lib dxguid.lib" "QMAKE_LIBS_EGL_DEBUG=D:\TBuild\Libraries\win64/tg_angle/out/Debug/tg_angle.lib D:\TBuild\Libraries\win64/zlib/Debug/libzsd.lib d3d9.lib dxgi.lib dxguid.lib Gdi32.lib User32.lib" "QMAKE_LIBS_EGL_RELEASE=D:\TBuild\Libraries\win64/tg_angle/out/Release/tg_angle.lib D:\TBuild\Libraries\win64/zlib/Release/libzs.lib d3d9.lib dxgi.lib dxguid.lib Gdi32.lib User32.lib" "QMAKE_USE += opengl_es2" "QMAKE_LIBS_OPENGL_ES2 = gdi32.lib user32.lib" D:/TBuild/Libraries/win64/qt_5.15.19/config.tests/opengl_es2
++ cd /d D:\TBuild\Libraries\win64\qt_5.15.19\config.tests\opengl_es2 && set MAKEFLAGS=& jom
+> jom 1.1.3 - empower your cores
+> 	cl -c -nologo -Zc:wchar_t -FS -Zc:rvalueCast -Zc:inline -Zc:strictStrings -Zc:throwingNew -Zc:referenceBinding -Zc:__cplusplus -Zi -MTd -W0 -EHsc /Fdopengl_es2.vc.pdb -DUNICODE -D_UNICODE -DWIN32 -D_ENABLE_EXTENDED_ALIGNED_STORAGE -DWIN64 -DKHRONOS_STATIC= -DDESKTOP_APP_QT_STATIC_ANGLE= -I. -ID:\TBuild\Libraries\win64\tg_angle\include -ID:\TBuild\Libraries\win64\openssl3\include -ID:\TBuild\Libraries\win64\mozjpeg -ID:\TBuild\Libraries\win64\libwebp\src -ID:\TBuild\Libraries\win64\qt_5.15.19\qtbase\mkspecs\win32-msvc -Fo @C:\Users\RUNNER~1\AppData\Local\Temp\main.obj.2648.0.jom
+> main.cpp
+> 	link /NOLOGO /DYNAMICBASE /NXCOMPAT /DEBUG /SUBSYSTEM:CONSOLE "/MANIFESTDEPENDENCY:type='win32' name='Microsoft.Windows.Common-Controls' version='6.0.0.0' publicKeyToken='6595b64144ccf1df' language='*' processorArchitecture='*'" /MANIFEST:embed /OUT:opengl_es2.exe @C:\Users\RUNNER~1\AppData\Local\Temp\opengl_es2.exe.2648.47.jom
+>    Creating library opengl_es2.lib and object opengl_es2.exp
+ => source accepted.
+test config.qtbase_gui.libraries.opengl_es2 succeeded
+executing config test opengles3
++ cd /d D:\TBuild\Libraries\win64\qt_5.15.19\config.tests\opengles3 && D:\TBuild\Libraries\win64\qt_5.15.19\qtbase\bin\qmake.exe "CONFIG -= qt debug_and_release app_bundle lib_bundle" "CONFIG += static warn_off console single_arch" "DEFINES += KHRONOS_STATIC= DESKTOP_APP_QT_STATIC_ANGLE=" "QMAKE_LIBDIR += D:\\TBuild\\Libraries\\win64/libwebp/out/release-static/x64/lib" "INCLUDEPATH += D:\\TBuild\\Libraries\\win64/tg_angle/include D:\\TBuild\\Libraries\\win64/openssl3/include D:\\TBuild\\Libraries\\win64/mozjpeg D:\\TBuild\\Libraries\\win64/libwebp/src" "QMAKE_LIBS_OPENGL_ES2_DEBUG=D:\TBuild\Libraries\win64/tg_angle/out/Debug/tg_angle.lib D:\TBuild\Libraries\win64/zlib/Debug/libzsd.lib d3d9.lib dxgi.lib dxguid.lib" "QMAKE_LIBS_OPENGL_ES2_RELEASE=D:\TBuild\Libraries\win64/tg_angle/out/Release/tg_angle.lib D:\TBuild\Libraries\win64/zlib/Release/libzs.lib d3d9.lib dxgi.lib dxguid.lib" "QMAKE_LIBS_EGL_DEBUG=D:\TBuild\Libraries\win64/tg_angle/out/Debug/tg_angle.lib D:\TBuild\Libraries\win64/zlib/Debug/libzsd.lib d3d9.lib dxgi.lib dxguid.lib Gdi32.lib User32.lib" "QMAKE_LIBS_EGL_RELEASE=D:\TBuild\Libraries\win64/tg_angle/out/Release/tg_angle.lib D:\TBuild\Libraries\win64/zlib/Release/libzs.lib d3d9.lib dxgi.lib dxguid.lib Gdi32.lib User32.lib" "QMAKE_USE += opengl_es2" "QMAKE_LIBS_OPENGL_ES2 = gdi32.lib user32.lib" D:/TBuild/Libraries/win64/qt_5.15.19/config.tests/opengles3
++ cd /d D:\TBuild\Libraries\win64\qt_5.15.19\config.tests\opengles3 && set MAKEFLAGS=& jom
+> jom 1.1.3 - empower your cores
+> 	cl -c -nologo -Zc:wchar_t -FS -Zc:rvalueCast -Zc:inline -Zc:strictStrings -Zc:throwingNew -Zc:referenceBinding -Zc:__cplusplus -Zi -MTd -W0 -EHsc /Fdopengles3.vc.pdb -DUNICODE -D_UNICODE -DWIN32 -D_ENABLE_EXTENDED_ALIGNED_STORAGE -DWIN64 -DKHRONOS_STATIC= -DDESKTOP_APP_QT_STATIC_ANGLE= -I. -ID:\TBuild\Libraries\win64\tg_angle\include -ID:\TBuild\Libraries\win64\openssl3\include -ID:\TBuild\Libraries\win64\mozjpeg -ID:\TBuild\Libraries\win64\libwebp\src -ID:\TBuild\Libraries\win64\qt_5.15.19\qtbase\mkspecs\win32-msvc -Fo @C:\Users\RUNNER~1\AppData\Local\Temp\main.obj.7360.0.jom
+> main.cpp
+> 	link /NOLOGO /DYNAMICBASE /NXCOMPAT /DEBUG /SUBSYSTEM:CONSOLE "/MANIFESTDEPENDENCY:type='win32' name='Microsoft.Windows.Common-Controls' version='6.0.0.0' publicKeyToken='6595b64144ccf1df' language='*' processorArchitecture='*'" /MANIFEST:embed /OUT:opengles3.exe @C:\Users\RUNNER~1\AppData\Local\Temp\opengles3.exe.7360.47.jom
+>    Creating library opengles3.lib and object opengles3.exp
+test config.qtbase_gui.tests.opengles3 succeeded
+executing config test opengles31
++ cd /d D:\TBuild\Libraries\win64\qt_5.15.19\config.tests\opengles31 && D:\TBuild\Libraries\win64\qt_5.15.19\qtbase\bin\qmake.exe "CONFIG -= qt debug_and_release app_bundle lib_bundle" "CONFIG += static warn_off console single_arch" "DEFINES += KHRONOS_STATIC= DESKTOP_APP_QT_STATIC_ANGLE=" "QMAKE_LIBDIR += D:\\TBuild\\Libraries\\win64/libwebp/out/release-static/x64/lib" "INCLUDEPATH += D:\\TBuild\\Libraries\\win64/tg_angle/include D:\\TBuild\\Libraries\\win64/openssl3/include D:\\TBuild\\Libraries\\win64/mozjpeg D:\\TBuild\\Libraries\\win64/libwebp/src" "QMAKE_LIBS_OPENGL_ES2_DEBUG=D:\TBuild\Libraries\win64/tg_angle/out/Debug/tg_angle.lib D:\TBuild\Libraries\win64/zlib/Debug/libzsd.lib d3d9.lib dxgi.lib dxguid.lib" "QMAKE_LIBS_OPENGL_ES2_RELEASE=D:\TBuild\Libraries\win64/tg_angle/out/Release/tg_angle.lib D:\TBuild\Libraries\win64/zlib/Release/libzs.lib d3d9.lib dxgi.lib dxguid.lib" "QMAKE_LIBS_EGL_DEBUG=D:\TBuild\Libraries\win64/tg_angle/out/Debug/tg_angle.lib D:\TBuild\Libraries\win64/zlib/Debug/libzsd.lib d3d9.lib dxgi.lib dxguid.lib Gdi32.lib User32.lib" "QMAKE_LIBS_EGL_RELEASE=D:\TBuild\Libraries\win64/tg_angle/out/Release/tg_angle.lib D:\TBuild\Libraries\win64/zlib/Release/libzs.lib d3d9.lib dxgi.lib dxguid.lib Gdi32.lib User32.lib" "QMAKE_USE += opengl_es2" "QMAKE_LIBS_OPENGL_ES2 = gdi32.lib user32.lib" D:/TBuild/Libraries/win64/qt_5.15.19/config.tests/opengles31
++ cd /d D:\TBuild\Libraries\win64\qt_5.15.19\config.tests\opengles31 && set MAKEFLAGS=& jom
+> jom 1.1.3 - empower your cores
+> 	cl -c -nologo -Zc:wchar_t -FS -Zc:rvalueCast -Zc:inline -Zc:strictStrings -Zc:throwingNew -Zc:referenceBinding -Zc:__cplusplus -Zi -MTd -W0 -EHsc /Fdopengles31.vc.pdb -DUNICODE -D_UNICODE -DWIN32 -D_ENABLE_EXTENDED_ALIGNED_STORAGE -DWIN64 -DKHRONOS_STATIC= -DDESKTOP_APP_QT_STATIC_ANGLE= -I. -ID:\TBuild\Libraries\win64\tg_angle\include -ID:\TBuild\Libraries\win64\openssl3\include -ID:\TBuild\Libraries\win64\mozjpeg -ID:\TBuild\Libraries\win64\libwebp\src -ID:\TBuild\Libraries\win64\qt_5.15.19\qtbase\mkspecs\win32-msvc -Fo @C:\Users\RUNNER~1\AppData\Local\Temp\main.obj.5276.16.jom
+> main.cpp
+> 	link /NOLOGO /DYNAMICBASE /NXCOMPAT /DEBUG /SUBSYSTEM:CONSOLE "/MANIFESTDEPENDENCY:type='win32' name='Microsoft.Windows.Common-Controls' version='6.0.0.0' publicKeyToken='6595b64144ccf1df' language='*' processorArchitecture='*'" /MANIFEST:embed /OUT:opengles31.exe @C:\Users\RUNNER~1\AppData\Local\Temp\opengles31.exe.5276.47.jom
+>    Creating library opengles31.lib and object opengles31.exp
+test config.qtbase_gui.tests.opengles31 succeeded
+executing config test opengles32
++ cd /d D:\TBuild\Libraries\win64\qt_5.15.19\config.tests\opengles32 && D:\TBuild\Libraries\win64\qt_5.15.19\qtbase\bin\qmake.exe "CONFIG -= qt debug_and_release app_bundle lib_bundle" "CONFIG += static warn_off console single_arch" "DEFINES += KHRONOS_STATIC= DESKTOP_APP_QT_STATIC_ANGLE=" "QMAKE_LIBDIR += D:\\TBuild\\Libraries\\win64/libwebp/out/release-static/x64/lib" "INCLUDEPATH += D:\\TBuild\\Libraries\\win64/tg_angle/include D:\\TBuild\\Libraries\\win64/openssl3/include D:\\TBuild\\Libraries\\win64/mozjpeg D:\\TBuild\\Libraries\\win64/libwebp/src" "QMAKE_LIBS_OPENGL_ES2_DEBUG=D:\TBuild\Libraries\win64/tg_angle/out/Debug/tg_angle.lib D:\TBuild\Libraries\win64/zlib/Debug/libzsd.lib d3d9.lib dxgi.lib dxguid.lib" "QMAKE_LIBS_OPENGL_ES2_RELEASE=D:\TBuild\Libraries\win64/tg_angle/out/Release/tg_angle.lib D:\TBuild\Libraries\win64/zlib/Release/libzs.lib d3d9.lib dxgi.lib dxguid.lib" "QMAKE_LIBS_EGL_DEBUG=D:\TBuild\Libraries\win64/tg_angle/out/Debug/tg_angle.lib D:\TBuild\Libraries\win64/zlib/Debug/libzsd.lib d3d9.lib dxgi.lib dxguid.lib Gdi32.lib User32.lib" "QMAKE_LIBS_EGL_RELEASE=D:\TBuild\Libraries\win64/tg_angle/out/Release/tg_angle.lib D:\TBuild\Libraries\win64/zlib/Release/libzs.lib d3d9.lib dxgi.lib dxguid.lib Gdi32.lib User32.lib" "QMAKE_USE += opengl_es2" "QMAKE_LIBS_OPENGL_ES2 = gdi32.lib user32.lib" D:/TBuild/Libraries/win64/qt_5.15.19/config.tests/opengles32
++ cd /d D:\TBuild\Libraries\win64\qt_5.15.19\config.tests\opengles32 && set MAKEFLAGS=& jom
+> jom 1.1.3 - empower your cores
+> 	cl -c -nologo -Zc:wchar_t -FS -Zc:rvalueCast -Zc:inline -Zc:strictStrings -Zc:throwingNew -Zc:referenceBinding -Zc:__cplusplus -Zi -MTd -W0 -EHsc /Fdopengles32.vc.pdb -DUNICODE -D_UNICODE -DWIN32 -D_ENABLE_EXTENDED_ALIGNED_STORAGE -DWIN64 -DKHRONOS_STATIC= -DDESKTOP_APP_QT_STATIC_ANGLE= -I. -ID:\TBuild\Libraries\win64\tg_angle\include -ID:\TBuild\Libraries\win64\openssl3\include -ID:\TBuild\Libraries\win64\mozjpeg -ID:\TBuild\Libraries\win64\libwebp\src -ID:\TBuild\Libraries\win64\qt_5.15.19\qtbase\mkspecs\win32-msvc -Fo @C:\Users\RUNNER~1\AppData\Local\Temp\main.obj.3136.0.jom
+> main.cpp
+> 	link /NOLOGO /DYNAMICBASE /NXCOMPAT /DEBUG /SUBSYSTEM:CONSOLE "/MANIFESTDEPENDENCY:type='win32' name='Microsoft.Windows.Common-Controls' version='6.0.0.0' publicKeyToken='6595b64144ccf1df' language='*' processorArchitecture='*'" /MANIFEST:embed /OUT:opengles32.exe @C:\Users\RUNNER~1\AppData\Local\Temp\opengles32.exe.3136.47.jom
+>    Creating library opengles32.lib and object opengles32.exp
+test config.qtbase_gui.tests.opengles32 succeeded
+looking for library openvg
+Trying source 0 (type pkgConfig) of library openvg ...
+pkg-config use disabled globally.
+  => source produced no result.
+Trying source 1 (type makeSpec) of library openvg ...
+VG/openvg.h not found in [] and global paths.
+  => source produced no result.
+test config.qtbase_gui.libraries.openvg FAILED
+executing config test qpa_default_platform
+test config.qtbase_gui.tests.qpa_default_platform gave result windows
+looking for library libjpeg
+Trying source 0 (type pkgConfig) of library libjpeg ...
+pkg-config use disabled globally.
+  => source produced no result.
+Trying source 1 (type inline) of library libjpeg ...
++ cd /d D:\TBuild\Libraries\win64\qt_5.15.19\config.tests\libjpeg && D:\TBuild\Libraries\win64\qt_5.15.19\qtbase\bin\qmake.exe "CONFIG -= qt debug_and_release app_bundle lib_bundle" "CONFIG += static warn_off console single_arch" "DEFINES += KHRONOS_STATIC= DESKTOP_APP_QT_STATIC_ANGLE=" "QMAKE_LIBDIR += D:\\TBuild\\Libraries\\win64/libwebp/out/release-static/x64/lib" "INCLUDEPATH += D:\\TBuild\\Libraries\\win64/tg_angle/include D:\\TBuild\\Libraries\\win64/openssl3/include D:\\TBuild\\Libraries\\win64/mozjpeg D:\\TBuild\\Libraries\\win64/libwebp/src" "QMAKE_LIBS_OPENGL_ES2_DEBUG=D:\TBuild\Libraries\win64/tg_angle/out/Debug/tg_angle.lib D:\TBuild\Libraries\win64/zlib/Debug/libzsd.lib d3d9.lib dxgi.lib dxguid.lib" "QMAKE_LIBS_OPENGL_ES2_RELEASE=D:\TBuild\Libraries\win64/tg_angle/out/Release/tg_angle.lib D:\TBuild\Libraries\win64/zlib/Release/libzs.lib d3d9.lib dxgi.lib dxguid.lib" "QMAKE_LIBS_EGL_DEBUG=D:\TBuild\Libraries\win64/tg_angle/out/Debug/tg_angle.lib D:\TBuild\Libraries\win64/zlib/Debug/libzsd.lib d3d9.lib dxgi.lib dxguid.lib Gdi32.lib User32.lib" "QMAKE_LIBS_EGL_RELEASE=D:\TBuild\Libraries\win64/tg_angle/out/Release/tg_angle.lib D:\TBuild\Libraries\win64/zlib/Release/libzs.lib d3d9.lib dxgi.lib dxguid.lib Gdi32.lib User32.lib" "QMAKE_USE += libjpeg" "QMAKE_LIBS_LIBJPEG = " "QMAKE_LIBS_LIBJPEG_DEBUG = D:\\TBuild\\Libraries\\win64/mozjpeg/Debug/jpeg-static.lib" "QMAKE_LIBS_LIBJPEG_RELEASE = D:\\TBuild\\Libraries\\win64/mozjpeg/Release/jpeg-static.lib" D:/TBuild/Libraries/win64/qt_5.15.19/config.tests/libjpeg
++ cd /d D:\TBuild\Libraries\win64\qt_5.15.19\config.tests\libjpeg && set MAKEFLAGS=& jom
+> jom 1.1.3 - empower your cores
+> 	cl -c -nologo -Zc:wchar_t -FS -Zc:rvalueCast -Zc:inline -Zc:strictStrings -Zc:throwingNew -Zc:referenceBinding -Zc:__cplusplus -Zi -MTd -W0 -EHsc /Fdlibjpeg.vc.pdb -DUNICODE -D_UNICODE -DWIN32 -D_ENABLE_EXTENDED_ALIGNED_STORAGE -DWIN64 -DKHRONOS_STATIC= -DDESKTOP_APP_QT_STATIC_ANGLE= -I. -ID:\TBuild\Libraries\win64\tg_angle\include -ID:\TBuild\Libraries\win64\openssl3\include -ID:\TBuild\Libraries\win64\mozjpeg -ID:\TBuild\Libraries\win64\libwebp\src -ID:\TBuild\Libraries\win64\qt_5.15.19\qtbase\mkspecs\win32-msvc -Fo @C:\Users\RUNNER~1\AppData\Local\Temp\main.obj.3284.0.jom
+> main.cpp
+> 	link /NOLOGO /DYNAMICBASE /NXCOMPAT /DEBUG /SUBSYSTEM:CONSOLE "/MANIFESTDEPENDENCY:type='win32' name='Microsoft.Windows.Common-Controls' version='6.0.0.0' publicKeyToken='6595b64144ccf1df' language='*' processorArchitecture='*'" /MANIFEST:embed /OUT:libjpeg.exe @C:\Users\RUNNER~1\AppData\Local\Temp\libjpeg.exe.3284.63.jom
+ => source accepted.
+test config.qtbase_gui.libraries.libjpeg succeeded
+looking for library libmd4c
+Trying source 0 (type pkgConfig) of library libmd4c ...
+pkg-config use disabled globally.
+  => source produced no result.
+Trying source 1 (type inline) of library libmd4c ...
+md4c.h not found in [] and global paths.
+  => source produced no result.
+test config.qtbase_gui.libraries.libmd4c FAILED
+looking for library tslib
+Trying source 0 (type inline) of library tslib ...
+tslib.h not found in [] and global paths.
+  => source produced no result.
+test config.qtbase_gui.libraries.tslib FAILED
+looking for library vulkan
+Trying source 0 (type pkgConfig) of library vulkan ...
+pkg-config use disabled globally.
+  => source produced no result.
+Trying source 1 (type makeSpec) of library vulkan ...
+Include path /include is invalid.
+vulkan/vulkan.h not found in [/include] and global paths.
+  => source produced no result.
+test config.qtbase_gui.libraries.vulkan FAILED
+looking for library xkbcommon
+Trying source 0 (type pkgConfig) of library xkbcommon ...
+pkg-config use disabled globally.
+  => source produced no result.
+Trying source 1 (type inline) of library xkbcommon ...
+xkbcommon/xkbcommon.h not found in [] and global paths.
+  => source produced no result.
+test config.qtbase_gui.libraries.xkbcommon FAILED
+executing config test uxtheme
+Searching for file uxtheme.h.
+    Found at C:\Program Files (x86)\Windows Kits\10\\include\10.0.26100.0\\um/uxtheme.h.
+test config.qtbase_widgets.tests.uxtheme succeeded
+looking for library cups
+Trying source 0 (type inline) of library cups ...
+cups/cups.h not found in [] and global paths.
+  => source produced no result.
+test config.qtbase_printsupport.libraries.cups FAILED
+looking for library db2
+Trying source 0 (type inline) of library db2 ...
+sqlcli.h not found in [] and global paths.
+sqlcli1.h not found in [] and global paths.
+  => source produced no result.
+Trying source 1 (type inline) of library db2 ...
+  => source failed condition '!config.win32'.
+test config.qtbase_sqldrivers.libraries.db2 FAILED
+looking for library ibase
+Trying source 0 (type inline) of library ibase ...
+ibase.h not found in [] and global paths.
+  => source produced no result.
+Trying source 1 (type inline) of library ibase ...
+  => source failed condition '!config.win32'.
+test config.qtbase_sqldrivers.libraries.ibase FAILED
+looking for library mysql
+Trying source 0 (type mysqlConfig) of library mysql ...
+mysql_config not found.
+  => source produced no result.
+Trying source 1 (type mysqlConfig) of library mysql ...
+mysql_config not found.
+  => source produced no result.
+Trying source 2 (type mysqlConfig) of library mysql ...
+mysql_config not found.
+  => source produced no result.
+Trying source 3 (type mysqlConfig) of library mysql ...
+mysql_config not found.
+  => source produced no result.
+Trying source 4 (type inline) of library mysql ...
+  => source failed condition '!config.win32'.
+Trying source 5 (type inline) of library mysql ...
+mysql.h not found in [] and global paths.
+  => source produced no result.
+Trying source 6 (type inline) of library mysql ...
+mysql.h not found in [] and global paths.
+  => source produced no result.
+Trying source 7 (type inline) of library mysql ...
+  => source failed condition '!config.win32'.
+Trying source 8 (type inline) of library mysql ...
+  => source failed condition '!config.win32'.
+test config.qtbase_sqldrivers.libraries.mysql FAILED
+looking for library oci
+Trying source 0 (type inline) of library oci ...
+oci.h not found in [] and global paths.
+  => source produced no result.
+Trying source 1 (type inline) of library oci ...
+  => source failed condition '!config.win32'.
+test config.qtbase_sqldrivers.libraries.oci FAILED
+looking for library odbc
+Trying source 0 (type inline) of library odbc ...
++ cd /d D:\TBuild\Libraries\win64\qt_5.15.19\config.tests\odbc && D:\TBuild\Libraries\win64\qt_5.15.19\qtbase\bin\qmake.exe "CONFIG -= qt debug_and_release app_bundle lib_bundle" "CONFIG += static warn_off console single_arch" "DEFINES += KHRONOS_STATIC= DESKTOP_APP_QT_STATIC_ANGLE=" "QMAKE_LIBDIR += D:\\TBuild\\Libraries\\win64/libwebp/out/release-static/x64/lib" "INCLUDEPATH += D:\\TBuild\\Libraries\\win64/tg_angle/include D:\\TBuild\\Libraries\\win64/openssl3/include D:\\TBuild\\Libraries\\win64/mozjpeg D:\\TBuild\\Libraries\\win64/libwebp/src" "QMAKE_LIBS_OPENGL_ES2_DEBUG=D:\TBuild\Libraries\win64/tg_angle/out/Debug/tg_angle.lib D:\TBuild\Libraries\win64/zlib/Debug/libzsd.lib d3d9.lib dxgi.lib dxguid.lib" "QMAKE_LIBS_OPENGL_ES2_RELEASE=D:\TBuild\Libraries\win64/tg_angle/out/Release/tg_angle.lib D:\TBuild\Libraries\win64/zlib/Release/libzs.lib d3d9.lib dxgi.lib dxguid.lib" "QMAKE_LIBS_EGL_DEBUG=D:\TBuild\Libraries\win64/tg_angle/out/Debug/tg_angle.lib D:\TBuild\Libraries\win64/zlib/Debug/libzsd.lib d3d9.lib dxgi.lib dxguid.lib Gdi32.lib User32.lib" "QMAKE_LIBS_EGL_RELEASE=D:\TBuild\Libraries\win64/tg_angle/out/Release/tg_angle.lib D:\TBuild\Libraries\win64/zlib/Release/libzs.lib d3d9.lib dxgi.lib dxguid.lib Gdi32.lib User32.lib" "QMAKE_USE += odbc" "QMAKE_LIBS_ODBC = -lodbc32" D:/TBuild/Libraries/win64/qt_5.15.19/config.tests/odbc
++ cd /d D:\TBuild\Libraries\win64\qt_5.15.19\config.tests\odbc && set MAKEFLAGS=& jom
+> jom 1.1.3 - empower your cores
+> 	cl -c -nologo -Zc:wchar_t -FS -Zc:rvalueCast -Zc:inline -Zc:strictStrings -Zc:throwingNew -Zc:referenceBinding -Zc:__cplusplus -Zi -MTd -W0 -EHsc /Fdodbc.vc.pdb -DUNICODE -D_UNICODE -DWIN32 -D_ENABLE_EXTENDED_ALIGNED_STORAGE -DWIN64 -DKHRONOS_STATIC= -DDESKTOP_APP_QT_STATIC_ANGLE= -I. -ID:\TBuild\Libraries\win64\tg_angle\include -ID:\TBuild\Libraries\win64\openssl3\include -ID:\TBuild\Libraries\win64\mozjpeg -ID:\TBuild\Libraries\win64\libwebp\src -ID:\TBuild\Libraries\win64\qt_5.15.19\qtbase\mkspecs\win32-msvc -Fo @C:\Users\RUNNER~1\AppData\Local\Temp\main.obj.5692.0.jom
+> main.cpp
+> 	link /NOLOGO /DYNAMICBASE /NXCOMPAT /DEBUG /SUBSYSTEM:CONSOLE "/MANIFESTDEPENDENCY:type='win32' name='Microsoft.Windows.Common-Controls' version='6.0.0.0' publicKeyToken='6595b64144ccf1df' language='*' processorArchitecture='*'" /MANIFEST:embed /OUT:odbc.exe @C:\Users\RUNNER~1\AppData\Local\Temp\odbc.exe.5692.344.jom
+ => source accepted.
+test config.qtbase_sqldrivers.libraries.odbc succeeded
+looking for library psql
+Trying source 0 (type pkgConfig) of library psql ...
+pkg-config use disabled globally.
+  => source produced no result.
+Trying source 1 (type psqlConfig) of library psql ...
+pg_config not found.
+  => source produced no result.
+Trying source 2 (type psqlEnv) of library psql ...
+libpq-fe.h not found in [] and global paths.
+  => source produced no result.
+Trying source 3 (type psqlEnv) of library psql ...
+  => source failed condition '!config.win32'.
+test config.qtbase_sqldrivers.libraries.psql FAILED
+looking for library sqlite2
+Trying source 0 (type inline) of library sqlite2 ...
+sqlite.h not found in [] and global paths.
+  => source produced no result.
+test config.qtbase_sqldrivers.libraries.sqlite2 FAILED
+looking for library tds
+Trying source 0 (type sybaseEnv) of library tds ...
++ cd /d D:\TBuild\Libraries\win64\qt_5.15.19\config.tests\tds && D:\TBuild\Libraries\win64\qt_5.15.19\qtbase\bin\qmake.exe "CONFIG -= qt debug_and_release app_bundle lib_bundle" "CONFIG += static warn_off console single_arch" "DEFINES += KHRONOS_STATIC= DESKTOP_APP_QT_STATIC_ANGLE=" "QMAKE_LIBDIR += D:\\TBuild\\Libraries\\win64/libwebp/out/release-static/x64/lib" "INCLUDEPATH += D:\\TBuild\\Libraries\\win64/tg_angle/include D:\\TBuild\\Libraries\\win64/openssl3/include D:\\TBuild\\Libraries\\win64/mozjpeg D:\\TBuild\\Libraries\\win64/libwebp/src" "QMAKE_LIBS_OPENGL_ES2_DEBUG=D:\TBuild\Libraries\win64/tg_angle/out/Debug/tg_angle.lib D:\TBuild\Libraries\win64/zlib/Debug/libzsd.lib d3d9.lib dxgi.lib dxguid.lib" "QMAKE_LIBS_OPENGL_ES2_RELEASE=D:\TBuild\Libraries\win64/tg_angle/out/Release/tg_angle.lib D:\TBuild\Libraries\win64/zlib/Release/libzs.lib d3d9.lib dxgi.lib dxguid.lib" "QMAKE_LIBS_EGL_DEBUG=D:\TBuild\Libraries\win64/tg_angle/out/Debug/tg_angle.lib D:\TBuild\Libraries\win64/zlib/Debug/libzsd.lib d3d9.lib dxgi.lib dxguid.lib Gdi32.lib User32.lib" "QMAKE_LIBS_EGL_RELEASE=D:\TBuild\Libraries\win64/tg_angle/out/Release/tg_angle.lib D:\TBuild\Libraries\win64/zlib/Release/libzs.lib d3d9.lib dxgi.lib dxguid.lib Gdi32.lib User32.lib" "QMAKE_USE += tds" "QMAKE_LIBS_TDS = -lNTWDBLIB" D:/TBuild/Libraries/win64/qt_5.15.19/config.tests/tds
++ cd /d D:\TBuild\Libraries\win64\qt_5.15.19\config.tests\tds && set MAKEFLAGS=& jom
+> jom 1.1.3 - empower your cores
+> 	cl -c -nologo -Zc:wchar_t -FS -Zc:rvalueCast -Zc:inline -Zc:strictStrings -Zc:throwingNew -Zc:referenceBinding -Zc:__cplusplus -Zi -MTd -W0 -EHsc /Fdtds.vc.pdb -DUNICODE -D_UNICODE -DWIN32 -D_ENABLE_EXTENDED_ALIGNED_STORAGE -DWIN64 -DKHRONOS_STATIC= -DDESKTOP_APP_QT_STATIC_ANGLE= -I. -ID:\TBuild\Libraries\win64\tg_angle\include -ID:\TBuild\Libraries\win64\openssl3\include -ID:\TBuild\Libraries\win64\mozjpeg -ID:\TBuild\Libraries\win64\libwebp\src -ID:\TBuild\Libraries\win64\qt_5.15.19\qtbase\mkspecs\win32-msvc -Fo @C:\Users\RUNNER~1\AppData\Local\Temp\main.obj.4496.0.jom
+> main.cpp
+> main.cpp(2): fatal error C1083: Cannot open include file: 'sybfront.h': No such file or directory
+> jom: D:\TBuild\Libraries\win64\qt_5.15.19\config.tests\tds\Makefile [main.obj] Error 2
+ => source failed verification.
+Trying source 1 (type sybaseEnv) of library tds ...
+  => source failed condition '!config.win32'.
+test config.qtbase_sqldrivers.libraries.tds FAILED
+Trying source 0 (type pkgConfig) of library jasper ...
+pkg-config use disabled globally.
+  => source produced no result.
+Trying source 1 (type inline) of library jasper ...
+jasper/jasper.h not found in [] and global paths.
+  => source produced no result.
+Trying source 0 (type pkgConfig) of library mng ...
+pkg-config use disabled globally.
+  => source produced no result.
+Trying source 1 (type inline) of library mng ...
+libmng.h not found in [] and global paths.
+  => source produced no result.
+Trying source 0 (type pkgConfig) of library tiff ...
+pkg-config use disabled globally.
+  => source produced no result.
+Trying source 1 (type inline) of library tiff ...
+tiffio.h not found in [] and global paths.
+  => source produced no result.
+Trying source 0 (type pkgConfig) of library webp ...
+pkg-config use disabled globally.
+  => source produced no result.
+Trying source 1 (type inline) of library webp ...
++ cd /d D:\TBuild\Libraries\win64\qt_5.15.19\config.tests\webp && D:\TBuild\Libraries\win64\qt_5.15.19\qtbase\bin\qmake.exe "CONFIG -= qt debug_and_release app_bundle lib_bundle" "CONFIG += static warn_off console single_arch" "DEFINES += KHRONOS_STATIC= DESKTOP_APP_QT_STATIC_ANGLE=" "QMAKE_LIBDIR += D:\\TBuild\\Libraries\\win64/libwebp/out/release-static/x64/lib" "INCLUDEPATH += D:\\TBuild\\Libraries\\win64/tg_angle/include D:\\TBuild\\Libraries\\win64/openssl3/include D:\\TBuild\\Libraries\\win64/mozjpeg D:\\TBuild\\Libraries\\win64/libwebp/src" "QMAKE_LIBS_OPENGL_ES2_DEBUG=D:\TBuild\Libraries\win64/tg_angle/out/Debug/tg_angle.lib D:\TBuild\Libraries\win64/zlib/Debug/libzsd.lib d3d9.lib dxgi.lib dxguid.lib" "QMAKE_LIBS_OPENGL_ES2_RELEASE=D:\TBuild\Libraries\win64/tg_angle/out/Release/tg_angle.lib D:\TBuild\Libraries\win64/zlib/Release/libzs.lib d3d9.lib dxgi.lib dxguid.lib" "QMAKE_LIBS_EGL_DEBUG=D:\TBuild\Libraries\win64/tg_angle/out/Debug/tg_angle.lib D:\TBuild\Libraries\win64/zlib/Debug/libzsd.lib d3d9.lib dxgi.lib dxguid.lib Gdi32.lib User32.lib" "QMAKE_LIBS_EGL_RELEASE=D:\TBuild\Libraries\win64/tg_angle/out/Release/tg_angle.lib D:\TBuild\Libraries\win64/zlib/Release/libzs.lib d3d9.lib dxgi.lib dxguid.lib Gdi32.lib User32.lib" "QMAKE_USE += webp" "QMAKE_LIBS_WEBP = -lwebp -lwebpdemux -lwebpmux" D:/TBuild/Libraries/win64/qt_5.15.19/config.tests/webp
++ cd /d D:\TBuild\Libraries\win64\qt_5.15.19\config.tests\webp && set MAKEFLAGS=& jom
+> jom 1.1.3 - empower your cores
+> 	cl -c -nologo -Zc:wchar_t -FS -Zc:rvalueCast -Zc:inline -Zc:strictStrings -Zc:throwingNew -Zc:referenceBinding -Zc:__cplusplus -Zi -MTd -W0 -EHsc /Fdwebp.vc.pdb -DUNICODE -D_UNICODE -DWIN32 -D_ENABLE_EXTENDED_ALIGNED_STORAGE -DWIN64 -DKHRONOS_STATIC= -DDESKTOP_APP_QT_STATIC_ANGLE= -I. -ID:\TBuild\Libraries\win64\tg_angle\include -ID:\TBuild\Libraries\win64\openssl3\include -ID:\TBuild\Libraries\win64\mozjpeg -ID:\TBuild\Libraries\win64\libwebp\src -ID:\TBuild\Libraries\win64\qt_5.15.19\qtbase\mkspecs\win32-msvc -Fo @C:\Users\RUNNER~1\AppData\Local\Temp\main.obj.6432.16.jom
+> main.cpp
+> 	link /NOLOGO /DYNAMICBASE /NXCOMPAT /DEBUG /SUBSYSTEM:CONSOLE "/MANIFESTDEPENDENCY:type='win32' name='Microsoft.Windows.Common-Controls' version='6.0.0.0' publicKeyToken='6595b64144ccf1df' language='*' processorArchitecture='*'" /MANIFEST:embed /OUT:webp.exe @C:\Users\RUNNER~1\AppData\Local\Temp\webp.exe.6432.63.jom
+> LINK : warning LNK4098: defaultlib 'LIBCMT' conflicts with use of other libs; use /NODEFAULTLIB:library
+ => source accepted.
