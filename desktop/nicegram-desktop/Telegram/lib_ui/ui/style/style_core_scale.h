@@ -8,6 +8,7 @@
 
 #include "base/algorithm.h"
 #include "base/assertion.h"
+#include "base/basic_types.h"
 
 #include <QtCore/QSize>
 
