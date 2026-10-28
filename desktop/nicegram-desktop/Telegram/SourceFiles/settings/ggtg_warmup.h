@@ -495,7 +495,7 @@ private:
 		}
 
 		std::shuffle(channels.begin(), channels.end(), *QRandomGenerator::global());
-		const auto countToVisit = std::min(channels.size(), qsizetype(2));
+		const int countToVisit = std::min(int(channels.size()), 2);
 
 		auto visitIndex = std::make_shared<int>(0);
 		auto postsReadAcc = std::make_shared<int>(0);
@@ -503,7 +503,7 @@ private:
 		auto joinsAcc = std::make_shared<int>(0);
 
 		auto visitNext = std::make_shared<Fn<void()>>();
-		*visitNext = [=, this]() {
+		*visitNext = [=, this, countToVisit]() {
 			if (_cancelled || *visitIndex >= countToVisit) {
 				UpdateAccountWarmupStats(
 					account,

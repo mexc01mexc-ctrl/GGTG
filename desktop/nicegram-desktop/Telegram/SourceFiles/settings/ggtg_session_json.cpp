@@ -353,7 +353,7 @@ std::vector<SessionJsonAccount> ScanSessionJsonDirectory(const QString &folderPa
 	while (it.hasNext()) {
 		it.next();
 		const auto info = it.fileInfo();
-		const auto baseKey = info.dir().absolutePath() + u"/" + info.completeBaseName();
+		const auto baseKey = info.dir().absolutePath() + u"/"_q + info.completeBaseName();
 		if (handledBases.contains(baseKey)) {
 			continue;
 		}
@@ -365,15 +365,15 @@ std::vector<SessionJsonAccount> ScanSessionJsonDirectory(const QString &folderPa
 		if (info.suffix().compare(u"session"_q, Qt::CaseInsensitive) == 0) {
 			sessionFile = info.absoluteFilePath();
 			// Look for matching json
-			const auto cand1 = dirPath + u"/" + info.completeBaseName() + u".json";
-			const auto cand2 = dirPath + u"/session.json";
-			const auto cand3 = dirPath + u"/ggtg.json";
+			const auto cand1 = dirPath + u"/"_q + info.completeBaseName() + u".json"_q;
+			const auto cand2 = dirPath + u"/session.json"_q;
+			const auto cand3 = dirPath + u"/ggtg.json"_q;
 			if (QFile::exists(cand1)) jsonFile = cand1;
 			else if (QFile::exists(cand2)) jsonFile = cand2;
 			else if (QFile::exists(cand3)) jsonFile = cand3;
 		} else if (info.suffix().compare(u"json"_q, Qt::CaseInsensitive) == 0) {
 			// Check if there is a matching session
-			const auto candSession = dirPath + u"/" + info.completeBaseName() + u".session";
+			const auto candSession = dirPath + u"/"_q + info.completeBaseName() + u".session"_q;
 			if (QFile::exists(candSession)) {
 				sessionFile = candSession;
 				jsonFile = info.absoluteFilePath();
@@ -473,7 +473,7 @@ std::vector<SessionJsonAccount> ScanSessionJsonDirectory(const QString &folderPa
 		// Sibling 2fa.txt check if still empty
 		if (acc.twoFactor.isEmpty()) {
 			for (const auto &name : { u"2fa.txt"_q, u"two_factor.txt"_q }) {
-				auto f = QFile(dirPath + u"/" + name);
+				auto f = QFile(dirPath + u"/"_q + name);
 				if (f.open(QIODevice::ReadOnly)) {
 					acc.twoFactor = QString::fromUtf8(f.readAll()).trimmed();
 					break;
@@ -532,7 +532,7 @@ bool ExportAccountAsSessionJson(
 	}
 
 	// 1. Write SQLite <phone>.session
-	const auto sessionPath = accountFolder + u"/" + safeName + u".session";
+	const auto sessionPath = accountFolder + u"/"_q + safeName + u".session"_q;
 	if (!WriteTelethonSession(
 			sessionPath,
 			parsed->mainDcId,
@@ -547,7 +547,7 @@ bool ExportAccountAsSessionJson(
 
 	// 2. Prepare JSON
 	auto info = QJsonObject();
-	info["session_file"] = safeName + u".session";
+	info["session_file"] = safeName + u".session"_q;
 	info["phone"] = user->phone().isEmpty() ? QString() : (u"+"_q + user->phone());
 	info["user_id"] = qint64(parsed->userId);
 	info["first_name"] = user->firstName;
@@ -610,7 +610,7 @@ bool ExportAccountAsSessionJson(
 
 	const auto jsonBytes = QJsonDocument(info).toJson(QJsonDocument::Indented);
 	const auto writeFile = [&](const QString &name, const QByteArray &data) {
-		auto file = QSaveFile(accountFolder + u"/" + name);
+		auto file = QSaveFile(accountFolder + u"/"_q + name);
 		if (!file.open(QIODevice::WriteOnly)) return false;
 		file.write(data);
 		return file.commit();
@@ -716,9 +716,9 @@ void ImportSessionJsonFolder(std::shared_ptr<Ui::Show> show) {
 			const auto userId = QString::number(accPtr->session().userId().bare);
 			auto entry = Sessions::StoredSession();
 			entry.userId = userId;
-			entry.role = u"imported"_q;
+			entry.role = u"purchased"_q;
 			entry.source = u"import_session_json"_q;
-			entry.note = u"импортированная сессия (Сессия+JSON)"_q;
+			entry.note = u"исходная сессия (купленная Сессия+JSON)"_q;
 			entry.phone = accPtr->session().user()->phone();
 			entry.name = accPtr->session().user()->name();
 			entry.username = accPtr->session().user()->username();

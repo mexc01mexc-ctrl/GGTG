@@ -43,6 +43,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "ui/text/text_entity.h"
 #include "ui/vertical_list.h"
 #include "ui/widgets/buttons.h"
+#include <QtWidgets/QFileDialog>
 #include "ui/widgets/checkbox.h"
 #include "ui/widgets/fields/input_field.h"
 #include "ui/widgets/labels.h"
@@ -80,7 +81,10 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include <QtNetwork/QNetworkAccessManager>
 #include <QtNetwork/QNetworkReply>
 #include <QtNetwork/QNetworkRequest>
+#include <QtCore/QLibrary>
+#ifdef Q_OS_MAC
 #include <dlfcn.h>
+#endif
 
 namespace Settings {
 namespace Registration {
@@ -114,29 +118,31 @@ struct CountryItem {
 	QString flag;
 	QString name;
 	QString phoneCode;
+	int count = 0;
+	double cost = 0.0;
 };
 
 inline const std::vector<CountryItem> &PopularCountries() {
 	static const auto list = std::vector<CountryItem>{
-		{ 16, u"🇬🇧"_q, u"Великобритания"_q, u"+44"_q },
-		{ 187, u"🇺🇸"_q, u"США"_q, u"+1"_q },
-		{ 6, u"🇮🇩"_q, u"Индонезия"_q, u"+62"_q },
-		{ 2, u"🇰🇿"_q, u"Казахстан"_q, u"+77"_q },
-		{ 22, u"🇮🇳"_q, u"Индия"_q, u"+91"_q },
-		{ 73, u"🇧🇷"_q, u"Бразилия"_q, u"+55"_q },
-		{ 10, u"🇻🇳"_q, u"Вьетнам"_q, u"+84"_q },
-		{ 19, u"🇳🇬"_q, u"Нигерия"_q, u"+234"_q },
-		{ 4, u"🇵🇭"_q, u"Филиппины"_q, u"+63"_q },
-		{ 11, u"🇰🇬"_q, u"Кыргызстан"_q, u"+996"_q },
-		{ 35, u"🇦🇿"_q, u"Азербайджан"_q, u"+994"_q },
-		{ 40, u"🇺🇿"_q, u"Узбекистан"_q, u"+998"_q },
-		{ 51, u"🇧🇾"_q, u"Беларусь"_q, u"+375"_q },
-		{ 1, u"🇺🇦"_q, u"Украина"_q, u"+380"_q },
-		{ 143, u"🇹🇯"_q, u"Таджикистан"_q, u"+992"_q },
-		{ 128, u"🇬🇪"_q, u"Грузия"_q, u"+995"_q },
-		{ 148, u"🇦🇲"_q, u"Армения"_q, u"+374"_q },
-		{ 17, u"🇲🇩"_q, u"Молдова"_q, u"+373"_q },
-		{ 0, u"🇷🇺"_q, u"Россия"_q, u"+7"_q },
+		{ 16, QString(), u"Великобритания"_q, u"+44"_q },
+		{ 187, QString(), u"США"_q, u"+1"_q },
+		{ 6, QString(), u"Индонезия"_q, u"+62"_q },
+		{ 2, QString(), u"Казахстан"_q, u"+77"_q },
+		{ 22, QString(), u"Индия"_q, u"+91"_q },
+		{ 73, QString(), u"Бразилия"_q, u"+55"_q },
+		{ 10, QString(), u"Вьетнам"_q, u"+84"_q },
+		{ 19, QString(), u"Нигерия"_q, u"+234"_q },
+		{ 4, QString(), u"Филиппины"_q, u"+63"_q },
+		{ 11, QString(), u"Кыргызстан"_q, u"+996"_q },
+		{ 35, QString(), u"Азербайджан"_q, u"+994"_q },
+		{ 40, QString(), u"Узбекистан"_q, u"+998"_q },
+		{ 51, QString(), u"Беларусь"_q, u"+375"_q },
+		{ 1, QString(), u"Украина"_q, u"+380"_q },
+		{ 143, QString(), u"Таджикистан"_q, u"+992"_q },
+		{ 128, QString(), u"Грузия"_q, u"+995"_q },
+		{ 148, QString(), u"Армения"_q, u"+374"_q },
+		{ 17, QString(), u"Молдова"_q, u"+373"_q },
+		{ 0, QString(), u"Россия"_q, u"+7"_q },
 	};
 	return list;
 }
@@ -228,8 +234,9 @@ struct SettingsData {
 	// Mobile emulation settings (Point 1 & 2)
 	int clientMode = 1; // Always Mobile (Android)
 	QString baseDbPath = u"2026-10-16_15-42-19_Base.db"_q;
-	int tokenService = 1; // 0 = None, 1 = TokenFast, 2 = AntiSafety
-	QString tokenApiKey;
+	int tokenService = 2; // 0 = None, 1 = TokenFast, 2 = AntiSafety
+	QString tokenApiKey = u"asf735e8f6e16974b12f1569b0492e70"_q;
+	QString antiSafetyAid = u"308aba4e-5680-466b-81a5-477ac6befa95"_q;
 
 	// Captcha solving settings (reCAPTCHA Enterprise)
 	int captchaService = 0; // 0 = Auto, 1 = TokenFast, 2 = AntiSafety, 3 = NextCaptcha
@@ -289,6 +296,9 @@ inline SettingsData LoadSettings() {
 	if (!result.apiKey.isEmpty() && !result.apiKeys.contains(result.serviceId)) {
 		result.apiKeys.insert(result.serviceId, result.apiKey);
 	}
+	if (result.apiKeys.contains(result.serviceId) && !result.apiKeys.value(result.serviceId).isEmpty()) {
+		result.apiKey = result.apiKeys.value(result.serviceId);
+	}
 	if (obj.contains(u"proxyPoolName"_q)) result.proxyPoolName = obj[u"proxyPoolName"_q].toString();
 	if (obj.contains(u"folderTag"_q)) result.folderTag = obj[u"folderTag"_q].toString();
 	if (obj.contains(u"twoFactorPassword"_q)) result.twoFactorPassword = obj[u"twoFactorPassword"_q].toString();
@@ -319,6 +329,7 @@ inline SettingsData LoadSettings() {
 	if (obj.contains(u"baseDbPath"_q)) result.baseDbPath = obj[u"baseDbPath"_q].toString();
 	if (obj.contains(u"tokenService"_q)) result.tokenService = obj[u"tokenService"_q].toInt();
 	if (obj.contains(u"tokenApiKey"_q)) result.tokenApiKey = obj[u"tokenApiKey"_q].toString();
+	if (obj.contains(u"antiSafetyAid"_q)) result.antiSafetyAid = obj[u"antiSafetyAid"_q].toString();
 	if (obj.contains(u"captchaService"_q)) result.captchaService = obj[u"captchaService"_q].toInt();
 	if (obj.contains(u"captchaApiKey"_q)) result.captchaApiKey = obj[u"captchaApiKey"_q].toString();
 
@@ -347,20 +358,24 @@ inline void SaveSettings(const SettingsData &data) {
 	if (!file.open(QIODevice::WriteOnly)) {
 		return;
 	}
+	auto copy = data;
+	if (!copy.apiKey.trimmed().isEmpty()) {
+		copy.apiKeys.insert(copy.serviceId, copy.apiKey.trimmed());
+	}
 	auto obj = QJsonObject();
-	obj[u"serviceId"_q] = data.serviceId;
-	obj[u"apiKey"_q] = data.apiKey;
-	obj[u"customUrl"_q] = data.customUrl;
-	obj[u"countryId"_q] = data.countryId;
-	obj[u"countryName"_q] = data.countryName;
+	obj[u"serviceId"_q] = copy.serviceId;
+	obj[u"apiKey"_q] = copy.apiKey;
+	obj[u"customUrl"_q] = copy.customUrl;
+	obj[u"countryId"_q] = copy.countryId;
+	obj[u"countryName"_q] = copy.countryName;
 	{
 		auto keys = QJsonObject();
-		for (auto it = data.apiKeys.constBegin(); it != data.apiKeys.constEnd(); ++it) {
+		for (auto it = copy.apiKeys.constBegin(); it != copy.apiKeys.constEnd(); ++it) {
 			keys[it.key()] = it.value();
 		}
 		obj[u"apiKeys"_q] = keys;
 	}
-	obj[u"proxyPoolName"_q] = data.proxyPoolName;
+	obj[u"proxyPoolName"_q] = copy.proxyPoolName;
 	obj[u"folderTag"_q] = data.folderTag;
 	obj[u"twoFactorPassword"_q] = data.twoFactorPassword;
 	obj[u"single2faForAll"_q] = data.single2faForAll;
@@ -390,6 +405,7 @@ inline void SaveSettings(const SettingsData &data) {
 	obj[u"baseDbPath"_q] = data.baseDbPath;
 	obj[u"tokenService"_q] = data.tokenService;
 	obj[u"tokenApiKey"_q] = data.tokenApiKey;
+	obj[u"antiSafetyAid"_q] = data.antiSafetyAid;
 	obj[u"captchaService"_q] = data.captchaService;
 	obj[u"captchaApiKey"_q] = data.captchaApiKey;
 
@@ -436,7 +452,7 @@ inline QJsonObject ToDeviceJson(const MobileDeviceProfile &p) {
 		{ "appVersion", p.appVersion },
 		{ "systemLangCode", p.systemLangCode },
 		{ "cloudLangCode", p.langCode },
-		{ "langPackName", p.langPack },
+		{ "langPackName", QString::fromLatin1(Ggtg::AndroidProfiles::kLangPack) },
 		{ "tzOffset", p.tzOffset },
 	};
 }
@@ -462,95 +478,139 @@ inline QString FindBaseDbPath(const QString &customPath = QString()) {
 	return QString();
 }
 
+struct SqliteFunctions {
+	using sqlite3_ptr = void*;
+	using sqlite3_stmt_ptr = void*;
+	int (*open_v2)(const char*, sqlite3_ptr*, int, const char*) = nullptr;
+	int (*prepare_v2)(sqlite3_ptr, const char*, int, sqlite3_stmt_ptr*, const char**) = nullptr;
+	int (*step)(sqlite3_stmt_ptr) = nullptr;
+	int (*column_int)(sqlite3_stmt_ptr, int) = nullptr;
+	const unsigned char *(*column_text)(sqlite3_stmt_ptr, int) = nullptr;
+	int (*finalize)(sqlite3_stmt_ptr) = nullptr;
+	int (*close)(sqlite3_ptr) = nullptr;
+
+	bool valid() const {
+		return open_v2 && prepare_v2 && step && column_int && finalize && close;
+	}
+};
+
+inline SqliteFunctions LoadSqlite() {
+	static const SqliteFunctions funcs = [] {
+		SqliteFunctions f;
+#ifdef Q_OS_MAC
+		void *lib = dlopen("libsqlite3.dylib", RTLD_LAZY);
+		if (lib) {
+			f.open_v2 = (decltype(f.open_v2))dlsym(lib, "sqlite3_open_v2");
+			f.prepare_v2 = (decltype(f.prepare_v2))dlsym(lib, "sqlite3_prepare_v2");
+			f.step = (decltype(f.step))dlsym(lib, "sqlite3_step");
+			f.column_int = (decltype(f.column_int))dlsym(lib, "sqlite3_column_int");
+			f.column_text = (decltype(f.column_text))dlsym(lib, "sqlite3_column_text");
+			f.finalize = (decltype(f.finalize))dlsym(lib, "sqlite3_finalize");
+			f.close = (decltype(f.close))dlsym(lib, "sqlite3_close");
+			if (f.valid()) return f;
+		}
+#endif
+		static QLibrary lib("sqlite3");
+		if (!lib.isLoaded()) lib.load();
+		if (lib.isLoaded()) {
+			f.open_v2 = (decltype(f.open_v2))lib.resolve("sqlite3_open_v2");
+			f.prepare_v2 = (decltype(f.prepare_v2))lib.resolve("sqlite3_prepare_v2");
+			f.step = (decltype(f.step))lib.resolve("sqlite3_step");
+			f.column_int = (decltype(f.column_int))lib.resolve("sqlite3_column_int");
+			f.column_text = (decltype(f.column_text))lib.resolve("sqlite3_column_text");
+			f.finalize = (decltype(f.finalize))lib.resolve("sqlite3_finalize");
+			f.close = (decltype(f.close))lib.resolve("sqlite3_close");
+		}
+		return f;
+	}();
+	return funcs;
+}
+
 inline int CountBaseDbProfiles(const QString &dbPath = QString()) {
 	const auto realPath = FindBaseDbPath(dbPath);
 	if (realPath.isEmpty()) return 0;
 
-	void *lib = dlopen("libsqlite3.dylib", RTLD_LAZY);
-	if (!lib) return 0;
-
-	using sqlite3_ptr = void*;
-	using sqlite3_stmt_ptr = void*;
-	auto fn_open = (int(*)(const char*, sqlite3_ptr*, int, const char*))dlsym(lib, "sqlite3_open_v2");
-	auto fn_prepare = (int(*)(sqlite3_ptr, const char*, int, sqlite3_stmt_ptr*, const char**))dlsym(lib, "sqlite3_prepare_v2");
-	auto fn_step = (int(*)(sqlite3_stmt_ptr))dlsym(lib, "sqlite3_step");
-	auto fn_int = (int(*)(sqlite3_stmt_ptr, int))dlsym(lib, "sqlite3_column_int");
-	auto fn_finalize = (int(*)(sqlite3_stmt_ptr))dlsym(lib, "sqlite3_finalize");
-	auto fn_close = (int(*)(sqlite3_ptr))dlsym(lib, "sqlite3_close");
+	const auto f = LoadSqlite();
+	if (!f.valid()) return 0;
 
 	int count = 0;
-	if (fn_open && fn_prepare && fn_step && fn_int && fn_finalize && fn_close) {
-		sqlite3_ptr db = nullptr;
-		if (fn_open(realPath.toUtf8().constData(), &db, 0x00000001, nullptr) == 0 && db) {
-			const char *sql = "SELECT count(*) FROM REGISTRATOR;";
-			sqlite3_stmt_ptr stmt = nullptr;
-			if (fn_prepare(db, sql, -1, &stmt, nullptr) == 0 && stmt) {
-				if (fn_step(stmt) == 100) {
-					count = fn_int(stmt, 0);
-				}
-				fn_finalize(stmt);
+	SqliteFunctions::sqlite3_ptr db = nullptr;
+	if (f.open_v2(realPath.toUtf8().constData(), &db, 0x00000001, nullptr) == 0 && db) {
+		const char *sql = "SELECT count(*) FROM REGISTRATOR;";
+		SqliteFunctions::sqlite3_stmt_ptr stmt = nullptr;
+		if (f.prepare_v2(db, sql, -1, &stmt, nullptr) == 0 && stmt) {
+			if (f.step(stmt) == 100) {
+				count = f.column_int(stmt, 0);
 			}
-			fn_close(db);
+			f.finalize(stmt);
 		}
+		f.close(db);
 	}
-	dlclose(lib);
 	return count;
 }
 
 inline MobileDeviceProfile LoadRandomMobileProfile(const QString &dbPath = QString()) {
 	const auto realPath = FindBaseDbPath(dbPath);
 	if (!realPath.isEmpty()) {
-		void *lib = dlopen("libsqlite3.dylib", RTLD_LAZY);
-		if (lib) {
-			using sqlite3_ptr = void*;
-			using sqlite3_stmt_ptr = void*;
-			auto fn_open = (int(*)(const char*, sqlite3_ptr*, int, const char*))dlsym(lib, "sqlite3_open_v2");
-			auto fn_prepare = (int(*)(sqlite3_ptr, const char*, int, sqlite3_stmt_ptr*, const char**))dlsym(lib, "sqlite3_prepare_v2");
-			auto fn_step = (int(*)(sqlite3_stmt_ptr))dlsym(lib, "sqlite3_step");
-			auto fn_text = (const unsigned char*(*)(sqlite3_stmt_ptr, int))dlsym(lib, "sqlite3_column_text");
-			auto fn_int = (int(*)(sqlite3_stmt_ptr, int))dlsym(lib, "sqlite3_column_int");
-			auto fn_finalize = (int(*)(sqlite3_stmt_ptr))dlsym(lib, "sqlite3_finalize");
-			auto fn_close = (int(*)(sqlite3_ptr))dlsym(lib, "sqlite3_close");
+		const auto f = LoadSqlite();
+		if (f.valid() && f.column_text) {
+			SqliteFunctions::sqlite3_ptr db = nullptr;
+			if (f.open_v2(realPath.toUtf8().constData(), &db, 0x00000001, nullptr) == 0 && db) {
+				// Strictly filter out iOS, iPhone, iPad, macOS profiles (only pure Android)
+				const char *sql = "SELECT APP_ID, APP_HASH, SDK, DEVICE, APP_VERSION, LANG_CODE, SYSTEM_LANG_CODE, LANG_PACK, TZ_OFFSET, PERF_CAT "
+					"FROM REGISTRATOR "
+					"WHERE (LANG_PACK IS NULL OR LOWER(LANG_PACK) = 'android') "
+					"  AND LOWER(DEVICE) NOT LIKE '%iphone%' "
+					"  AND LOWER(DEVICE) NOT LIKE '%ipad%' "
+					"  AND LOWER(DEVICE) NOT LIKE '%macbook%' "
+					"  AND LOWER(SDK) NOT LIKE '%ios%' "
+					"  AND APP_ID != 10840 "
+					"ORDER BY RANDOM() LIMIT 1;";
+				SqliteFunctions::sqlite3_stmt_ptr stmt = nullptr;
+				if (f.prepare_v2(db, sql, -1, &stmt, nullptr) == 0 && stmt) {
+					if (f.step(stmt) == 100) {
+						auto p = MobileDeviceProfile();
+						p.appId = f.column_int(stmt, 0);
+						p.appHash = QString::fromUtf8((const char*)f.column_text(stmt, 1));
+						p.sdk = QString::fromUtf8((const char*)f.column_text(stmt, 2));
+						p.device = QString::fromUtf8((const char*)f.column_text(stmt, 3));
+						p.appVersion = QString::fromUtf8((const char*)f.column_text(stmt, 4));
+						p.langCode = QString::fromUtf8((const char*)f.column_text(stmt, 5));
+						p.systemLangCode = QString::fromUtf8((const char*)f.column_text(stmt, 6));
+						p.langPack = QString::fromUtf8((const char*)f.column_text(stmt, 7));
+						p.tzOffset = f.column_int(stmt, 8);
+						p.perfCat = f.column_int(stmt, 9);
 
-			if (fn_open && fn_prepare && fn_step && fn_text && fn_int && fn_finalize && fn_close) {
-				sqlite3_ptr db = nullptr;
-				if (fn_open(realPath.toUtf8().constData(), &db, 0x00000001, nullptr) == 0 && db) {
-					const char *sql = "SELECT APP_ID, APP_HASH, SDK, DEVICE, APP_VERSION, LANG_CODE, SYSTEM_LANG_CODE, LANG_PACK, TZ_OFFSET, PERF_CAT FROM REGISTRATOR ORDER BY RANDOM() LIMIT 1;";
-					sqlite3_stmt_ptr stmt = nullptr;
-					if (fn_prepare(db, sql, -1, &stmt, nullptr) == 0 && stmt) {
-						if (fn_step(stmt) == 100) {
-							auto p = MobileDeviceProfile();
-							p.appId = fn_int(stmt, 0);
-							p.appHash = QString::fromUtf8((const char*)fn_text(stmt, 1));
-							p.sdk = QString::fromUtf8((const char*)fn_text(stmt, 2));
-							p.device = QString::fromUtf8((const char*)fn_text(stmt, 3));
-							p.appVersion = QString::fromUtf8((const char*)fn_text(stmt, 4));
-							p.langCode = QString::fromUtf8((const char*)fn_text(stmt, 5));
-							p.systemLangCode = QString::fromUtf8((const char*)fn_text(stmt, 6));
-							p.langPack = QString::fromUtf8((const char*)fn_text(stmt, 7));
-							p.tzOffset = fn_int(stmt, 8);
-							p.perfCat = fn_int(stmt, 9);
+						// Hard safeguard: NEVER allow iOS parameters under any circumstances
+						const auto isIosDevice = p.langPack.compare(u"ios"_q, Qt::CaseInsensitive) == 0
+							|| p.device.contains(u"iPhone"_q, Qt::CaseInsensitive)
+							|| p.device.contains(u"iPad"_q, Qt::CaseInsensitive)
+							|| p.sdk.contains(u"iOS"_q, Qt::CaseInsensitive)
+							|| p.appId == 10840;
 
-							if (p.appId == 4 || p.appId <= 0 || p.appHash.isEmpty()) {
-								p.appId = Ggtg::AndroidProfiles::kAppId;
-								p.appHash = QString::fromLatin1(Ggtg::AndroidProfiles::kAppHash);
-							}
-
-							fn_finalize(stmt);
-							fn_close(db);
-							dlclose(lib);
-							return p;
+						if (isIosDevice || p.appId == 4 || p.appId <= 0 || p.appHash.isEmpty()) {
+							p.appId = Ggtg::AndroidProfiles::kAppId;
+							p.appHash = QString::fromLatin1(Ggtg::AndroidProfiles::kAppHash);
+							p.langPack = QString::fromLatin1(Ggtg::AndroidProfiles::kLangPack);
+							const auto fb = Ggtg::AndroidProfiles::RandomProfile();
+							p.device = fb.deviceModel;
+							p.sdk = fb.systemVersion;
+							p.appVersion = fb.appVersion;
 						}
-						fn_finalize(stmt);
+						p.langPack = QString::fromLatin1(Ggtg::AndroidProfiles::kLangPack);
+
+						f.finalize(stmt);
+						f.close(db);
+						return p;
 					}
-					fn_close(db);
+					f.finalize(stmt);
 				}
+				f.close(db);
 			}
-			dlclose(lib);
 		}
 	}
 
-	// Fallback to internal AndroidProfiles generator
+	// Fallback to internal AndroidProfiles generator (100% Android)
 	const auto random = Ggtg::AndroidProfiles::RandomProfile();
 	auto p = MobileDeviceProfile();
 	p.appId = Ggtg::AndroidProfiles::kAppId;
@@ -568,13 +628,17 @@ inline MobileDeviceProfile LoadRandomMobileProfile(const QString &dbPath = QStri
 
 inline MTP::DeviceOverride ToDeviceOverride(const MobileDeviceProfile &p) {
 	auto d = MTP::DeviceOverride();
-	d.apiId = p.appId;
-	d.apiHash = p.appHash;
+	d.apiId = (p.appId > 0 && p.appId != 10840 && p.appId != 2040)
+		? p.appId
+		: Ggtg::AndroidProfiles::kAppId;
+	d.apiHash = (!p.appHash.isEmpty() && p.appId != 10840 && p.appId != 2040)
+		? p.appHash
+		: QString::fromLatin1(Ggtg::AndroidProfiles::kAppHash);
 	d.deviceModel = p.device;
 	d.systemVersion = p.sdk;
 	d.appVersion = p.appVersion;
 	d.systemLangCode = p.systemLangCode;
-	d.langPackName = p.langPack;
+	d.langPackName = QString::fromLatin1(Ggtg::AndroidProfiles::kLangPack); // STRICTLY "android", NEVER "ios"
 	d.cloudLangCode = p.langCode;
 	d.tzOffset = p.tzOffset;
 	return d;
@@ -1472,6 +1536,43 @@ inline void OrderEmail(
 		return;
 	}
 
+	const auto isAntiSafety = (data.emailService == u"antisafety"_q)
+		|| (data.emailService == u"auto"_q && data.tokenService == int(MobileTokenProvider::AntiSafety));
+
+	if (isAntiSafety) {
+		const auto asfKey = !data.emailApiKey.trimmed().isEmpty()
+			? data.emailApiKey.trimmed()
+			: (!data.tokenApiKey.trimmed().isEmpty() ? data.tokenApiKey.trimmed() : data.apiKey.trimmed());
+		const auto aid = data.antiSafetyAid.trimmed().isEmpty()
+			? u"308aba4e-5680-466b-81a5-477ac6befa95"_q
+			: data.antiSafetyAid.trimmed();
+		const auto url = QUrl(u"https://antisafety.net/api/tasks/email/create?api_key="_q
+			+ asfKey + u"&aid="_q + aid + u"&type=premium"_q);
+		SendApiGet(url, [=](const QString &resp, const QString &err) {
+			if (!err.isEmpty()) {
+				done(QString(), QString(), err);
+				return;
+			}
+			const auto doc = QJsonDocument::fromJson(resp.toUtf8());
+			if (doc.isObject()) {
+				const auto obj = doc.object();
+				if (obj.value(u"status"_q).toString() == u"ok"_q) {
+					const auto id = obj.value(u"id"_q).toString();
+					const auto email = obj.value(u"email"_q).toString();
+					if (!id.isEmpty() && !email.isEmpty()) {
+						done(id, email, QString());
+						return;
+					}
+				}
+				const auto msg = obj.value(u"message"_q).toString();
+				done(QString(), QString(), msg.isEmpty() ? resp : msg);
+			} else {
+				done(QString(), QString(), resp);
+			}
+		});
+		return;
+	}
+
 	const auto useSmsBower = (data.emailService == u"smsbower"_q)
 		|| (data.emailService == u"auto"_q && data.serviceId == u"smsbower"_q);
 
@@ -1583,6 +1684,54 @@ inline void PollEmailCode(
 	const auto key = (!data.emailApiKey.trimmed().isEmpty()
 		? data.emailApiKey.trimmed()
 		: data.apiKey.trimmed());
+
+	const auto isAntiSafety = (data.emailService == u"antisafety"_q)
+		|| (data.emailService == u"auto"_q && data.tokenService == int(MobileTokenProvider::AntiSafety));
+
+	if (isAntiSafety) {
+		const auto asfKey = !data.emailApiKey.trimmed().isEmpty()
+			? data.emailApiKey.trimmed()
+			: (!data.tokenApiKey.trimmed().isEmpty() ? data.tokenApiKey.trimmed() : data.apiKey.trimmed());
+		const auto aid = data.antiSafetyAid.trimmed().isEmpty()
+			? u"308aba4e-5680-466b-81a5-477ac6befa95"_q
+			: data.antiSafetyAid.trimmed();
+		const auto url = QUrl(u"https://antisafety.net/api/tasks/email/get?api_key="_q
+			+ asfKey + u"&aid="_q + aid + u"&id="_q + mailId);
+		SendApiGet(url, [=](const QString &resp, const QString &err) {
+			if (!err.isEmpty()) {
+				done(u"wait"_q, QString(), err);
+				return;
+			}
+			const auto doc = QJsonDocument::fromJson(resp.toUtf8());
+			if (!doc.isObject()) {
+				done(u"wait"_q, QString(), QString());
+				return;
+			}
+			const auto obj = doc.object();
+			const auto status = obj.value(u"status"_q).toString();
+			if (status == u"ok"_q) {
+				const auto rawCode = obj.contains(u"result"_q)
+					? obj.value(u"result"_q).toString()
+					: obj.value(u"code"_q).toString();
+				if (!rawCode.isEmpty()) {
+					static const auto re = QRegularExpression(u"\\b(\\d{5,6})\\b"_q);
+					const auto m = re.match(rawCode);
+					done(u"ok"_q, m.hasMatch() ? m.captured(1) : rawCode, QString());
+					return;
+				}
+				// status ok, message "No code" -> keep waiting
+				done(u"wait"_q, QString(), QString());
+				return;
+			}
+			if (status == u"error"_q) {
+				const auto msg = obj.value(u"message"_q).toString();
+				done(u"error"_q, QString(), msg);
+				return;
+			}
+			done(u"wait"_q, QString(), QString());
+		});
+		return;
+	}
 
 	const auto useSmsBower = (data.emailService == u"smsbower"_q)
 		|| (data.emailService == u"auto"_q && data.serviceId == u"smsbower"_q);
@@ -1714,11 +1863,55 @@ inline void PollTokenFastStatus(
 	}, headers);
 }
 
+inline void PollAntiSafetyPushToken(
+		const QString &apiKey,
+		const QString &aid,
+		const QString &taskId,
+		int attemptsLeft,
+		Fn<void(QString token, QString error)> done) {
+	if (attemptsLeft <= 0) {
+		done(QString(), u"Тайм-аут ожидания токена AntiSafety (taskId: "_q + taskId + u")"_q);
+		return;
+	}
+	const auto url = QUrl(u"https://antisafety.net/api/tasks/android-push/get?api_key="_q
+		+ apiKey.trimmed() + u"&aid="_q + aid.trimmed() + u"&id="_q + taskId);
+	SendApiGet(url, [=](const QString &resp, const QString &err) {
+		if (!err.isEmpty()) {
+			done(QString(), u"Ошибка AntiSafety poll: "_q + err);
+			return;
+		}
+		const auto doc = QJsonDocument::fromJson(resp.toUtf8());
+		if (!doc.isObject()) {
+			done(QString(), u"Некорректный ответ AntiSafety: "_q + resp);
+			return;
+		}
+		const auto obj = doc.object();
+		const auto status = obj.value(u"status"_q).toString();
+		if (status == u"ok"_q) {
+			const auto token = obj.value(u"token"_q).toString();
+			if (!token.isEmpty()) {
+				done(token, QString());
+				return;
+			}
+		}
+		if (status == u"error"_q) {
+			const auto msg = obj.value(u"message"_q).toString();
+			done(QString(), u"AntiSafety: "_q + (msg.isEmpty() ? resp : msg));
+			return;
+		}
+		// status is "solving"
+		QTimer::singleShot(1500, [=] {
+			PollAntiSafetyPushToken(apiKey, aid, taskId, attemptsLeft - 1, done);
+		});
+	});
+}
+
 inline void FetchMobileToken(
 		MobileTokenProvider provider,
 		const QString &apiKey,
 		const QString &phone,
-		Fn<void(QString token, QString error)> done) {
+		Fn<void(QString token, QString error)> done,
+		const QString &aid = QString()) {
 	if (provider == MobileTokenProvider::None || apiKey.trimmed().isEmpty()) {
 		done(QString(), QString());
 		return;
@@ -1759,36 +1952,31 @@ inline void FetchMobileToken(
 			PollTokenFastStatus(key, orderId, 20, done);
 		});
 	} else if (provider == MobileTokenProvider::AntiSafety) {
-		const auto url = QUrl(u"https://antisafety.net/api/v1/tokens/get"_q);
-		auto headers = QMap<QByteArray, QByteArray>();
-		headers.insert("X-API-Key", apiKey.trimmed().toUtf8());
-		headers.insert("Authorization", "Bearer " + apiKey.trimmed().toUtf8());
-
-		const auto body = QJsonDocument(QJsonObject{
-			{ u"service"_q, u"telegram"_q },
-			{ u"phone"_q, phone.startsWith('+') ? phone : ('+' + phone) },
-		}).toJson(QJsonDocument::Compact);
-
-		SendApiPostJson(url, body, headers, [=](const QByteArray &resp, const QString &err) {
-			if (!err.isEmpty() && resp.isEmpty()) {
-				done(QString(), u"Ошибка AntiSafety: "_q + err);
+		const auto key = apiKey.trimmed();
+		const auto aidStr = aid.trimmed().isEmpty() ? u"308aba4e-5680-466b-81a5-477ac6befa95"_q : aid.trimmed();
+		const auto url = QUrl(u"https://antisafety.net/api/tasks/android-push/create?api_key="_q
+			+ key + u"&aid="_q + aidStr);
+		SendApiGet(url, [=](const QString &resp, const QString &err) {
+			if (!err.isEmpty()) {
+				done(QString(), u"Ошибка AntiSafety create push: "_q + err);
 				return;
 			}
-			const auto doc = QJsonDocument::fromJson(resp);
-			if (doc.isObject()) {
-				const auto obj = doc.object();
-				const auto token = obj.contains(u"token"_q)
-					? obj[u"token"_q].toString()
-					: (obj.contains(u"data"_q) && obj[u"data"_q].isObject() ? obj[u"data"_q].toObject()[u"token"_q].toString() : QString());
-				if (!token.isEmpty()) {
-					done(token, QString());
+			const auto doc = QJsonDocument::fromJson(resp.toUtf8());
+			if (!doc.isObject()) {
+				done(QString(), u"Некорректный ответ AntiSafety: "_q + resp);
+				return;
+			}
+			const auto obj = doc.object();
+			const auto status = obj.value(u"status"_q).toString();
+			if (status == u"ok"_q) {
+				const auto taskId = obj.value(u"id"_q).toString();
+				if (!taskId.isEmpty()) {
+					PollAntiSafetyPushToken(key, aidStr, taskId, 20, done);
 					return;
 				}
-				const auto msg = obj[u"message"_q].toString();
-				done(QString(), msg.isEmpty() ? QString::fromUtf8(resp) : msg);
-			} else {
-				done(QString(), QString::fromUtf8(resp));
 			}
+			const auto msg = obj.value(u"message"_q).toString();
+			done(QString(), u"AntiSafety create push error: "_q + (msg.isEmpty() ? resp : msg));
 		});
 	}
 }
@@ -1796,7 +1984,8 @@ inline void FetchMobileToken(
 inline void CheckMobileTokenBalance(
 		MobileTokenProvider provider,
 		const QString &apiKey,
-		Fn<void(QString info, QString error)> done) {
+		Fn<void(QString info, QString error)> done,
+		const QString &aid = QString()) {
 	if (provider == MobileTokenProvider::None) {
 		done(u"Провайдер не выбран"_q, QString());
 		return;
@@ -1828,45 +2017,24 @@ inline void CheckMobileTokenBalance(
 		}, headers);
 	} else if (provider == MobileTokenProvider::AntiSafety) {
 		const auto key = apiKey.trimmed();
-		const auto url = QUrl(u"https://antisafety.net/api/auth/user"_q);
-		const auto headers = QMap<QByteArray, QByteArray>{
-			{ "Authorization", "Bearer " + key.toUtf8() },
-			{ "X-API-Key", key.toUtf8() },
-			{ "Accept", "application/json" }
-		};
+		const auto aidStr = aid.trimmed().isEmpty() ? u"308aba4e-5680-466b-81a5-477ac6befa95"_q : aid.trimmed();
+		const auto url = QUrl(u"https://antisafety.net/api/tasks/balance?api_key="_q + key + u"&aid="_q + aidStr);
 		SendApiGet(url, [=](const QString &resp, const QString &err) {
 			if (!resp.isEmpty()) {
 				const auto doc = QJsonDocument::fromJson(resp.toUtf8());
 				if (doc.isObject()) {
 					const auto obj = doc.object();
 					const auto status = obj.value(u"status"_q).toString();
-					if (status == u"error"_q || obj.contains(u"message"_q) || obj.contains(u"detail"_q)) {
-						const auto msg = obj.value(u"message"_q).toString();
-						if (msg.contains(u"validate credentials", Qt::CaseInsensitive)
-							|| msg.contains(u"authenticated", Qt::CaseInsensitive)
-							|| msg.contains(u"not found", Qt::CaseInsensitive)) {
-							done(QString(), u"AntiSafety: неверный Master API key"_q);
-							return;
-						}
-						done(QString(), u"AntiSafety: "_q + (msg.isEmpty() ? resp : msg));
+					if (status == u"ok"_q && obj.contains(u"balance"_q)) {
+						const auto rawBal = obj.value(u"balance"_q).toDouble();
+						const auto usd = rawBal / 1000000.0;
+						const auto cur = obj.value(u"currency"_q).toString(u"USD"_q);
+						done(QString::number(usd, 'f', 2) + u" "_q + cur, QString());
 						return;
 					}
-					const auto userObj = obj.value(u"user"_q).toObject();
-					if (userObj.contains(u"balance_usd"_q) || obj.contains(u"balance_usd"_q)) {
-						const auto val = userObj.contains(u"balance_usd"_q)
-							? userObj.value(u"balance_usd"_q).toDouble()
-							: obj.value(u"balance_usd"_q).toDouble();
-						const auto usd = val / 1000000.0;
-						done(QString::number(usd, 'f', 2) + u" USD"_q, QString());
-						return;
-					} else if (userObj.contains(u"balance"_q) || obj.contains(u"balance"_q)) {
-						double val = userObj.contains(u"balance"_q)
-							? userObj.value(u"balance"_q).toVariant().toDouble()
-							: obj.value(u"balance"_q).toVariant().toDouble();
-						if (val >= 10000.0) val /= 1000000.0;
-						done(QString::number(val, 'f', 2) + u" USD"_q, QString());
-						return;
-					}
+					const auto msg = obj.value(u"message"_q).toString();
+					done(QString(), u"AntiSafety: "_q + (msg.isEmpty() ? resp : msg));
+					return;
 				}
 			}
 			if (!err.isEmpty()) {
@@ -1874,7 +2042,7 @@ inline void CheckMobileTokenBalance(
 				return;
 			}
 			done(resp, QString());
-		}, headers);
+		});
 	} else {
 		done(QString(), u"Неизвестный провайдер"_q);
 	}
@@ -2067,43 +2235,86 @@ inline void SolveNextCaptcha(
 	});
 }
 
-inline void SolveAntiSafetyCaptcha(
+inline void PollAntiSafetyCaptcha(
 		const QString &apiKey,
-		const QString &action,
-		const QString &keyId,
+		const QString &aid,
+		const QString &taskId,
+		int attemptsLeft,
 		Fn<void(QString token, QString error)> done) {
-	const auto url = QUrl(u"https://antisafety.net/api/v1/tokens/get"_q);
-	auto headers = QMap<QByteArray, QByteArray>();
-	headers.insert("X-API-Key", apiKey.trimmed().toUtf8());
-	headers.insert("Authorization", "Bearer " + apiKey.trimmed().toUtf8());
-
-	const auto body = QJsonDocument(QJsonObject{
-		{ u"service"_q, u"telegram"_q },
-		{ u"action"_q, action },
-		{ u"key_id"_q, keyId },
-		{ u"type"_q, u"recaptcha"_q },
-	}).toJson(QJsonDocument::Compact);
-
-	SendApiPostJson(url, body, headers, [=](const QByteArray &resp, const QString &err) {
-		if (!err.isEmpty() && resp.isEmpty()) {
-			done(QString(), u"Ошибка AntiSafety: "_q + err);
+	if (attemptsLeft <= 0) {
+		done(QString(), u"Тайм-аут ожидания решения reCAPTCHA AntiSafety (taskId: "_q + taskId + u")"_q);
+		return;
+	}
+	const auto url = QUrl(u"https://antisafety.net/api/tasks/recaptcha/get?api_key="_q
+		+ apiKey.trimmed() + u"&aid="_q + aid.trimmed() + u"&id="_q + taskId);
+	SendApiGet(url, [=](const QString &resp, const QString &err) {
+		if (!err.isEmpty()) {
+			done(QString(), u"Ошибка AntiSafety recaptcha poll: "_q + err);
 			return;
 		}
-		const auto doc = QJsonDocument::fromJson(resp);
-		if (doc.isObject()) {
-			const auto obj = doc.object();
-			const auto token = obj.contains(u"token"_q)
-				? obj[u"token"_q].toString()
-				: (obj.contains(u"data"_q) && obj[u"data"_q].isObject() ? obj[u"data"_q].toObject()[u"token"_q].toString() : QString());
+		const auto doc = QJsonDocument::fromJson(resp.toUtf8());
+		if (!doc.isObject()) {
+			done(QString(), u"Некорректный ответ AntiSafety recaptcha: "_q + resp);
+			return;
+		}
+		const auto obj = doc.object();
+		const auto status = obj.value(u"status"_q).toString();
+		if (status == u"ok"_q) {
+			const auto token = obj.value(u"token"_q).toString();
 			if (!token.isEmpty()) {
 				done(token, QString());
 				return;
 			}
-			const auto msg = obj[u"message"_q].toString();
-			done(QString(), msg.isEmpty() ? QString::fromUtf8(resp) : msg);
-		} else {
-			done(QString(), QString::fromUtf8(resp));
 		}
+		if (status == u"error"_q) {
+			const auto msg = obj.value(u"message"_q).toString();
+			done(QString(), u"AntiSafety recaptcha: "_q + (msg.isEmpty() ? resp : msg));
+			return;
+		}
+		// status is solving
+		QTimer::singleShot(2000, [=] {
+			PollAntiSafetyCaptcha(apiKey, aid, taskId, attemptsLeft - 1, done);
+		});
+	});
+}
+
+inline void SolveAntiSafetyCaptcha(
+		const QString &apiKey,
+		const QString &aid,
+		const QString &action,
+		const QString &keyId,
+		Fn<void(QString token, QString error)> done) {
+	const auto key = apiKey.trimmed();
+	const auto aidStr = aid.trimmed().isEmpty() ? u"308aba4e-5680-466b-81a5-477ac6befa95"_q : aid.trimmed();
+	const auto act = action.trimmed().isEmpty() ? u"login"_q : action.trimmed();
+	const auto appKey = keyId.trimmed();
+	const auto url = QUrl(u"https://antisafety.net/api/tasks/recaptcha/create?api_key="_q
+		+ key + u"&aid="_q + aidStr
+		+ u"&action="_q + act
+		+ u"&app_key="_q + appKey
+		+ u"&score=high"_q);
+
+	SendApiGet(url, [=](const QString &resp, const QString &err) {
+		if (!err.isEmpty()) {
+			done(QString(), u"Ошибка AntiSafety solve recaptcha: "_q + err);
+			return;
+		}
+		const auto doc = QJsonDocument::fromJson(resp.toUtf8());
+		if (!doc.isObject()) {
+			done(QString(), u"Некорректный ответ AntiSafety recaptcha: "_q + resp);
+			return;
+		}
+		const auto obj = doc.object();
+		const auto status = obj.value(u"status"_q).toString();
+		if (status == u"ok"_q) {
+			const auto taskId = obj.value(u"id"_q).toString();
+			if (!taskId.isEmpty()) {
+				PollAntiSafetyCaptcha(key, aidStr, taskId, 25, done);
+				return;
+			}
+		}
+		const auto msg = obj.value(u"message"_q).toString();
+		done(QString(), u"AntiSafety recaptcha create error: "_q + (msg.isEmpty() ? resp : msg));
 	});
 }
 
@@ -2140,7 +2351,7 @@ inline void SolveAppCaptcha(
 	if (service == 3) {
 		SolveNextCaptcha(key, action, keyId, done);
 	} else if (service == 2) {
-		SolveAntiSafetyCaptcha(key, action, keyId, done);
+		SolveAntiSafetyCaptcha(key, settings.antiSafetyAid, action, keyId, done);
 	} else {
 		SolveTokenFastCaptcha(key, action, keyId, done);
 	}
@@ -2149,7 +2360,8 @@ inline void SolveAppCaptcha(
 inline void CheckCaptchaBalance(
 		int provider,
 		const QString &apiKey,
-		Fn<void(QString info, QString error)> done) {
+		Fn<void(QString info, QString error)> done,
+		const QString &aid = QString()) {
 	if (apiKey.trimmed().isEmpty()) {
 		done(QString(), u"Введите API-ключ"_q);
 		return;
@@ -2182,7 +2394,7 @@ inline void CheckCaptchaBalance(
 	} else if (provider == 1) { // TokenFast
 		CheckMobileTokenBalance(MobileTokenProvider::TokenFast, apiKey, done);
 	} else {
-		CheckMobileTokenBalance(MobileTokenProvider::AntiSafety, apiKey, done);
+		CheckMobileTokenBalance(MobileTokenProvider::AntiSafety, apiKey, done, aid);
 	}
 }
 
@@ -2835,10 +3047,11 @@ private:
 					strong->log(u"Предупреждение сервиса токенов: "_q + err + u" (продолжаем без токена)"_q);
 				} else if (!token.isEmpty()) {
 					strong->_token = token;
-					strong->log(u"Токен Play Integrity успешно получен и привязан"_q);
+					strong->log(u"Токен Play Integrity/Google Push успешно получен и привязан"_q);
 				}
 				strong->_sendCode();
-			});
+			},
+			_settings.antiSafetyAid);
 	}
 
 	void handleEmailRequired() {
@@ -4068,6 +4281,11 @@ public:
 		}, lifetime());
 	}
 
+	void setValue(QString value) {
+		_value = std::move(value);
+		update();
+	}
+
 protected:
 	void paintEvent(QPaintEvent *e) override {
 		auto p = QPainter(this);
@@ -4114,11 +4332,510 @@ private:
 
 };
 
+// -----------------------------------------------------------------------------
+// Phone Migration (Change Phone Number) via Mobile Sessions
+// -----------------------------------------------------------------------------
+inline void PerformAccountPhoneChange(
+		not_null<Main::Account*> account,
+		const SettingsData &settings,
+		Fn<void(QString status, bool success)> progressCb,
+		Fn<void(bool ok, QString result)> done) {
+	namespace Sessions = Core::GgtgSessions;
+	if (!Main::AccountIsLive(account)) {
+		done(false, u"нет активной сессии"_q);
+		return;
+	}
+	const auto userId = QString::number(account->session().userId().bare);
+	const auto vault = Sessions::LoadVault();
+
+	auto mobileTrusted = (const Sessions::StoredSession*)nullptr;
+	auto mobileYoung = (const Sessions::StoredSession*)nullptr;
+
+	for (const auto &entry : Sessions::StoredForUser(vault, userId)) {
+		const auto isAndroid = (entry.role == u"android"_q)
+			|| entry.source.contains(u"android"_q, Qt::CaseInsensitive)
+			|| entry.device.value(u"deviceModel"_q).toString().contains(u"Samsung"_q, Qt::CaseInsensitive)
+			|| entry.device.value(u"deviceModel"_q).toString().contains(u"Xiaomi"_q, Qt::CaseInsensitive)
+			|| entry.device.value(u"deviceModel"_q).toString().contains(u"Pixel"_q, Qt::CaseInsensitive)
+			|| entry.device.value(u"langPackName"_q).toString() == u"android"_q;
+
+		if (isAndroid && QDir(Sessions::VaultFolder(entry) + u"/tdata"_q).exists() && entry.state != u"revoked"_q) {
+			if (Sessions::IsSessionTrusted(entry)) {
+				mobileTrusted = &entry;
+				break;
+			} else if (!mobileYoung) {
+				mobileYoung = &entry;
+			}
+		}
+	}
+
+	bool currentIsMobile = false;
+	const auto &dev = account->deviceOverride();
+	if (dev != MTP::DeviceOverride()) {
+		if (dev.langPackName == u"android"_q
+			|| dev.deviceModel.contains(u"Samsung"_q, Qt::CaseInsensitive)
+			|| dev.deviceModel.contains(u"Xiaomi"_q, Qt::CaseInsensitive)
+			|| dev.deviceModel.contains(u"Pixel"_q, Qt::CaseInsensitive)) {
+			currentIsMobile = true;
+		}
+	}
+
+	if (!mobileTrusted && !currentIsMobile) {
+		if (mobileYoung) {
+			const auto countdown = Sessions::TrustCountdownString(*mobileYoung);
+			done(false, u"Мобильная сессия на отлёжке (%1). Смена номера заблокирована Telegram (FRESH_CHANGE_PHONE_FORBIDDEN)."_q.arg(countdown));
+			return;
+		}
+		progressCb(u"Создаём мобильную Android-сессию..."_q, true);
+		CreateMobileSessionWith(
+			account,
+			u"мобильная Android (для смены номера)"_q,
+			MakeSessionPasswordPrompt(account),
+			[=](QString err, QString) {
+				if (!err.isEmpty()) {
+					done(false, u"Не удалось создать мобильную сессию: "_q + err);
+				} else {
+					done(false, u"Мобильная Android-сессия создана. Telegram требует отлёжку 24 часа перед сменой номера. Таймер запущен (осталось 24 ч. 00 мин.). Попробуйте через 24 часа."_q);
+				}
+			});
+		return;
+	}
+
+	const auto proceedWithMobile = [=](not_null<Main::Account*> liveAccount) {
+		progressCb(u"Заказ номера в SMS-сервисе..."_q, true);
+		OrderNumber(settings, settings.countryId, [=](QString activationId, QString phone, QString reqErr) {
+			if (!reqErr.isEmpty()) {
+				done(false, u"Ошибка заказа номера: "_q + reqErr);
+				return;
+			}
+			progressCb(u"Номер получен: +"_q + phone + u". Запрос смены номера в Telegram..."_q, true);
+
+			const auto api = static_cast<MTP::Sender*>(&liveAccount->session().api());
+			api->request(MTPaccount_SendChangePhoneCode(
+				MTP_string(phone),
+				MTP_codeSettings(
+					MTP_flags(0),
+					MTPVector<MTPbytes>(),
+					MTPstring(),
+					MTPBool())
+			)).done([=, api = api](const MTPauth_SentCode &sentCode) {
+				if (sentCode.type() == mtpc_auth_sentCode) {
+					const auto &data = sentCode.c_auth_sentCode();
+					const auto phoneCodeHash = qs(data.vphone_code_hash());
+					progressCb(u"Код отправлен. Ожидание SMS-кода..."_q, true);
+
+					const auto pollAttempts = std::make_shared<int>(0);
+					const auto pollTimer = std::make_shared<QTimer>();
+					QObject::connect(pollTimer.get(), &QTimer::timeout, [=] {
+						++*pollAttempts;
+						if (*pollAttempts > 36) {
+							pollTimer->stop();
+							SetSmsStatus(settings, activationId, 8);
+							done(false, u"Время ожидания SMS истекло (тайм-аут). Номер отменён, баланс сохранён."_q);
+							return;
+						}
+						progressCb(u"Ожидание SMS-кода (%1с)..."_q.arg((*pollAttempts) * 3), true);
+
+						PollSmsCode(settings, activationId, [=](QString status, QString smsCode, QString) {
+							if (status == u"ok"_q && !smsCode.isEmpty()) {
+								pollTimer->stop();
+								progressCb(u"SMS код получен: "_q + smsCode + u". Применение в Telegram..."_q, true);
+
+								api->request(MTPaccount_ChangePhone(
+									MTP_string(phone),
+									MTP_string(phoneCodeHash),
+									MTP_string(smsCode)
+								)).done([=](const MTPUser &) {
+									SetSmsStatus(settings, activationId, 6);
+									for (auto &stored : Sessions::LoadVault()) {
+										if (stored.userId == userId) {
+											stored.phone = phone;
+											Sessions::UpdateStoredProxy(userId, stored.proxy);
+										}
+									}
+									done(true, u"Номер успешно изменён на +"_q + phone);
+								}).fail([=](const MTP::Error &changeErr) {
+									SetSmsStatus(settings, activationId, 8);
+									done(false, u"Telegram отклонил код: "_q + changeErr.type());
+								}).send();
+							} else if (status == u"cancel"_q) {
+								pollTimer->stop();
+								done(false, u"Заказ отменён в SMS-сервисе"_q);
+							}
+						});
+					});
+					pollTimer->start(3000);
+				} else {
+					SetSmsStatus(settings, activationId, 8);
+					done(false, u"Неожиданный ответ Telegram при отправке кода"_q);
+				}
+			}).fail([=](const MTP::Error &sendErr) {
+				SetSmsStatus(settings, activationId, 8);
+				const auto errType = sendErr.type();
+				if (errType.startsWith(u"FRESH_CHANGE_PHONE"_q)) {
+					done(false, u"Telegram требует, чтобы мобильная сессия отлежалась не менее 24 часов (FRESH_CHANGE_PHONE_FORBIDDEN)."_q);
+				} else if (errType.startsWith(u"PHONE_NUMBER_OCCUPIED"_q)) {
+					done(false, u"Этот номер уже занят другим аккаунтом в Telegram"_q);
+				} else if (errType.startsWith(u"PHONE_NUMBER_BANNED"_q)) {
+					done(false, u"Этот номер заблокирован в Telegram"_q);
+				} else {
+					done(false, u"Ошибка Telegram: "_q + errType);
+				}
+			}).send();
+		});
+	};
+
+	if (!currentIsMobile && mobileTrusted) {
+		progressCb(u"Переключение на выдержанную мобильную сессию..."_q, true);
+		SwapToStoredSession(account, mobileTrusted->id, [=](QString swapErr) {
+			if (!swapErr.isEmpty()) {
+				done(false, u"Не удалось переключить на мобильную сессию: "_q + swapErr);
+				return;
+			}
+			auto nowAcc = (Main::Account*)nullptr;
+			for (const auto &a : Core::App().domain().orderedAccounts()) {
+				if (a->sessionExists() && QString::number(a->session().userId().bare) == userId) {
+					nowAcc = a.get();
+					break;
+				}
+			}
+			if (nowAcc) {
+				proceedWithMobile(nowAcc);
+			} else {
+				done(false, u"Не удалось найти аккаунт после переключения"_q);
+			}
+		});
+	} else {
+		proceedWithMobile(account);
+	}
+}
+
+inline void FillPhoneMigrationContent(
+		not_null<Ui::VerticalLayout*> layout,
+		not_null<Ui::GenericBox*> box,
+		not_null<Window::SessionController*> controller,
+		not_null<SettingsData*> state,
+		std::vector<not_null<Main::Account*>> initialAccounts = {}) {
+	const auto show = controller->uiShow();
+	const auto pickerState = box->lifetime().make_state<AccountPickerState>();
+
+	if (!initialAccounts.empty()) {
+		for (const auto &acc : initialAccounts) {
+			pickerState->selected.insert(acc);
+		}
+	} else {
+		for (const auto &acc : Core::App().domain().orderedAccounts()) {
+			if (acc->sessionExists()) {
+				pickerState->selected.insert(acc.get());
+			}
+		}
+	}
+
+	const auto addSectionTo = [](
+			not_null<Ui::VerticalLayout*> to,
+			const QString &title,
+			const QString &subtitle,
+			const style::icon *icon) {
+		Ui::AddSkip(to, style::ConvertScale(12));
+		to->add(
+			object_ptr<SectionHeader>(to, title, subtitle, icon),
+			style::margins(0, 0, 0, style::ConvertScale(6)));
+	};
+
+	addSectionTo(layout,
+		u"1. Правило безопасности (24 часа)"_q,
+		u"Требования Telegram к отлёжке сессий перед сменой номера"_q,
+		&st::menuIconPhone);
+
+	Ui::AddDividerText(layout, rpl::single(
+		u"Смена номера телефона в Telegram через SMS-сервисы.\n\n"
+		u"Требование безопасности Telegram:\n"
+		u"Сервер Telegram разрешает смену номера ТОЛЬКО с мобильной сессии (Android/iOS), которая существует более 24 часов (иначе возвращается ошибка FRESH_CHANGE_PHONE_FORBIDDEN).\n\n"
+		u"Если у аккаунта нет выдержанной мобильной сессии, программа автоматически создаст её (Android) и запустит 24-часовой таймер отлёжки."_q));
+
+	addSectionTo(layout,
+		u"2. SMS-сервис и новый номер"_q,
+		u"Выбор сервиса активаций, API-ключ и страна нового номера"_q,
+		&st::menuIconDiscussion);
+
+	const auto cardSms = layout->add(
+		object_ptr<Ggtg::CardBox>(
+			layout,
+			style::margins(16, 14, 16, 14),
+			std::optional<QColor>(st::windowActiveTextFg->c)),
+		st::boxRowPadding);
+	const auto inSms = cardSms->inner();
+
+	auto currentServiceName = Services().front().name;
+	for (const auto &s : Services()) {
+		if (s.id == state->serviceId) {
+			currentServiceName = s.name;
+			break;
+		}
+	}
+
+	const auto serviceBtn = inSms->add(
+		object_ptr<PickerRow>(inSms, u"Сервис активаций"_q, currentServiceName),
+		style::margins(0, 0, 0, style::ConvertScale(4)));
+
+	const auto webLinkBtn = inSms->add(
+		object_ptr<Ui::LinkButton>(inSms, u"Открыть сайт сервиса"_q),
+		style::margins(style::ConvertScale(4), 0, 0, style::ConvertScale(4)));
+
+	const auto updateWebLink = [=] {
+		for (const auto &s : Services()) {
+			if (s.id == state->serviceId && !s.webUrl.isEmpty()) {
+				webLinkBtn->show();
+				webLinkBtn->setClickedCallback([url = s.webUrl] {
+					QDesktopServices::openUrl(QUrl(url));
+				});
+				return;
+			}
+		}
+		webLinkBtn->hide();
+	};
+	updateWebLink();
+
+	const auto customWrap = inSms->add(
+		object_ptr<Ui::SlideWrap<Ui::InputField>>(
+			inSms,
+			object_ptr<Ui::InputField>(
+				inSms,
+				FieldStyle(),
+				rpl::single(u"Адрес API (например https://myservice.com/stubs/handler_api.php)"_q),
+				state->customUrl)),
+		style::margins(0, style::ConvertScale(4), 0, style::ConvertScale(4)));
+	customWrap->toggle(state->serviceId == u"custom"_q, anim::type::instant);
+
+	// API-ключ (сохраняется отдельно для каждого сервиса)
+	const auto apiKeyField = inSms->add(
+		object_ptr<Ui::InputField>(
+			inSms,
+			FieldStyle(),
+			rpl::single(u"API-ключ сервиса"_q),
+			state->apiKey),
+		style::margins(0, style::ConvertScale(6), 0, style::ConvertScale(6)));
+
+	apiKeyField->changes(
+	) | rpl::on_next([=] {
+		state->apiKey = apiKeyField->getLastText().trimmed();
+		state->apiKeys.insert(state->serviceId, state->apiKey);
+		SaveSettings(*state);
+	}, apiKeyField->lifetime());
+
+	// Баланс
+	const auto balanceRow = inSms->add(object_ptr<Ui::RpWidget>(inSms));
+	balanceRow->resize(balanceRow->width(), style::ConvertScale(38));
+
+	const auto checkBalanceBtn = Ui::CreateChild<Ui::RoundButton>(
+		balanceRow,
+		rpl::single(u"Проверить баланс"_q),
+		st::defaultActiveButton);
+
+	const auto balanceLabel = Ui::CreateChild<Ui::FlatLabel>(
+		balanceRow,
+		rpl::single(u"Баланс: —"_q),
+		st::boxLabel);
+
+	balanceRow->widthValue() | rpl::on_next([=](int w) {
+		checkBalanceBtn->moveToLeft(0, style::ConvertScale(2));
+		balanceLabel->moveToLeft(checkBalanceBtn->width() + style::ConvertScale(14), style::ConvertScale(8));
+	}, balanceRow->lifetime());
+
+	const auto countryRefresh = box->lifetime().make_state<Fn<void()>>();
+	const auto weakBalanceLabel = QPointer<Ui::FlatLabel>(balanceLabel);
+
+	const auto doCheckBalance = [=] {
+		state->apiKey = apiKeyField->getLastText().trimmed();
+		state->apiKeys.insert(state->serviceId, state->apiKey);
+		SaveSettings(*state);
+		if (weakBalanceLabel) weakBalanceLabel->setText(u"Баланс: проверка..."_q);
+		FetchBalance(*state, [=](QString bal, QString err) {
+			if (weakBalanceLabel) {
+				if (!err.isEmpty()) {
+					weakBalanceLabel->setText(u"Ошибка баланса: "_q + err);
+				} else {
+					weakBalanceLabel->setText(u"Баланс: "_q + bal);
+				}
+			}
+			FetchCountries(*state, [=](QString) {
+				if (*countryRefresh) {
+					(*countryRefresh)();
+				}
+			});
+		});
+	};
+	checkBalanceBtn->setClickedCallback(doCheckBalance);
+
+	serviceBtn->setClickedCallback([=] {
+		show->show(Box([=](not_null<Ui::GenericBox*> pickBox) {
+			pickBox->setTitle(rpl::single(u"Выберите SMS-сервис"_q));
+			pickBox->setWidth(st::boxWideWidth);
+			for (const auto &s : Services()) {
+				const auto key = s.id;
+				const auto name = s.name;
+				pickBox->addRow(object_ptr<Ggtg::ActionRow>(
+					pickBox,
+					rpl::single(name),
+					s.baseUrl.isEmpty() ? u"Свой endpoint"_q : s.baseUrl,
+					&st::menuIconDiscussion)
+				)->setClickedCallback([=] {
+					state->apiKeys.insert(state->serviceId, apiKeyField->getLastText().trimmed());
+					state->serviceId = key;
+					state->countryName.clear();
+					state->countryId = -1;
+					state->apiKey = state->apiKeys.value(key);
+					apiKeyField->setText(state->apiKey);
+					serviceBtn->setValue(name);
+					customWrap->toggle(key == u"custom"_q, anim::type::normal);
+					updateWebLink();
+					SaveSettings(*state);
+					pickBox->closeBox();
+					doCheckBalance();
+				});
+				Ui::AddSkip(pickBox->verticalLayout(), st::defaultVerticalListSkip);
+			}
+			pickBox->addButton(tr::lng_close(), [=] { pickBox->closeBox(); });
+		}));
+	});
+
+	// Страна нового номера
+	const auto countryBtn = inSms->add(
+		object_ptr<PickerRow>(inSms, u"Страна нового номера"_q, CurrentCountryTitle(*state)),
+		style::margins(0, style::ConvertScale(4), 0, style::ConvertScale(4)));
+	const auto weakCountryBtn = QPointer<PickerRow>(countryBtn);
+
+	*countryRefresh = [=] {
+		if (const auto btn = weakCountryBtn.data()) {
+			btn->setValue(CurrentCountryTitle(*state));
+		}
+	};
+
+	countryBtn->setClickedCallback([=] {
+		state->apiKey = apiKeyField->getLastText().trimmed();
+		state->apiKeys.insert(state->serviceId, state->apiKey);
+		SaveSettings(*state);
+		FetchCountries(*state, [=](QString err) {
+			const auto &live = CountriesFor(state->serviceId);
+			const auto &available = !live.empty() ? live : PopularCountries();
+			show->show(Box([=](not_null<Ui::GenericBox*> pickBox) {
+				pickBox->setTitle(rpl::single(u"Выберите страну нового номера"_q));
+				pickBox->setWidth(style::ConvertScale(520));
+
+				const auto searchField = pickBox->addRow(
+					object_ptr<Ui::InputField>(
+						pickBox,
+						st::defaultInputField,
+						rpl::single(u"Поиск по названию или коду страны..."_q)),
+					st::boxRowPadding);
+
+				const auto listWrap = pickBox->addRow(object_ptr<Ui::VerticalLayout>(pickBox));
+				const auto weakList = QPointer<Ui::VerticalLayout>(listWrap);
+
+				const auto rebuildList = [=](const QString &query) {
+					if (!weakList) return;
+					while (weakList->count() > 0) {
+						delete weakList->widgetAt(0);
+					}
+					const auto q = query.trimmed().toLower();
+					int count = 0;
+					for (const auto &c : available) {
+						if (!q.isEmpty() && !c.name.toLower().contains(q) && !c.phoneCode.contains(q)) {
+							continue;
+						}
+						const auto cid = c.id;
+						const auto cname = c.name + (c.phoneCode.isEmpty() ? QString() : (u" ("_q + c.phoneCode + u")"_q));
+						const auto costStr = c.cost > 0.0 ? QString::number(c.cost, 'f', 2) + u" руб."_q : QString();
+						weakList->add(object_ptr<Ggtg::ActionRow>(
+							weakList.data(),
+							rpl::single(cname),
+							costStr,
+							&st::menuIconPhone)
+						)->setClickedCallback([=] {
+							state->countryId = cid;
+							state->countryName = c.name;
+							SaveSettings(*state);
+							if (const auto btn = weakCountryBtn.data()) {
+								btn->setValue(cname);
+							}
+							pickBox->closeBox();
+						});
+						Ui::AddSkip(weakList.data(), st::defaultVerticalListSkip);
+						if (++count >= 100) break;
+					}
+				};
+
+				searchField->changes() | rpl::on_next([=] {
+					rebuildList(searchField->getLastText());
+				}, searchField->lifetime());
+
+				rebuildList(QString());
+				pickBox->addButton(tr::lng_close(), [=] { pickBox->closeBox(); });
+			}));
+		});
+	});
+
+	addSectionTo(layout,
+		u"3. Выбор аккаунтов для смены номера"_q,
+		u"Выберите аккаунты, на которых нужно изменить номер телефона"_q,
+		&st::menuIconProfile);
+
+	AddAccountPicker(box, pickerState, u"Нет доступных аккаунтов"_q);
+
+	addSectionTo(layout,
+		u"4. Запуск смены номера"_q,
+		u"Последовательный перенос номеров с отслеживанием прогресса"_q,
+		&st::menuIconManage);
+
+	const auto cardAction = layout->add(
+		object_ptr<Ggtg::CardBox>(layout, style::margins(16, 14, 16, 14)),
+		st::boxRowPadding);
+	const auto inAction = cardAction->inner();
+
+	const auto changePhoneBtn = inAction->add(
+		object_ptr<Ui::RoundButton>(
+			inAction,
+			rpl::single(u"Сменить номер на выбранных аккаунтах"_q),
+			st::defaultActiveButton),
+		style::margins(0, style::ConvertScale(4), 0, style::ConvertScale(4)));
+
+	changePhoneBtn->setClickedCallback([=] {
+		if (pickerState->selected.empty()) {
+			Ggtg::Notice(show, u"Выберите хотя бы один аккаунт"_q);
+			return;
+		}
+		if (state->countryId < 0) {
+			Ggtg::Notice(show, u"Выберите страну нового номера"_q);
+			return;
+		}
+		if (state->apiKey.isEmpty()) {
+			Ggtg::Notice(show, u"Укажите API-ключ SMS-сервиса"_q);
+			return;
+		}
+		SaveSettings(*state);
+		box->closeBox();
+
+		auto list = std::vector<not_null<Main::Account*>>(
+			pickerState->selected.begin(),
+			pickerState->selected.end());
+
+		Settings::RunSequentialAccountsAction(controller, std::move(list), [=](not_null<Main::Account*> acc, Fn<void(bool, QString)> done) {
+			PerformAccountPhoneChange(
+				acc,
+				*state,
+				[=](QString, bool) {},
+				[=](bool ok, QString res) {
+					done(ok, res);
+				});
+		}, u"Смена номера"_q);
+	});
+}
+
 inline void FillRegistrationBox(
 		not_null<Ui::GenericBox*> box,
 		not_null<Window::SessionController*> controller) {
 	const auto show = box->uiShow();
-	box->setTitle(rpl::single(u"Регистрация аккаунтов"_q));
+	box->setTitle(rpl::single(u"Авторегистрация"_q));
 	box->setWidth(st::boxWideWidth + style::ConvertScale(120));
 
 	const auto state = box->lifetime().make_state<SettingsData>(LoadSettings());
@@ -4150,11 +4867,11 @@ inline void FillRegistrationBox(
 	};
 
 	// =====================================================================
-	//  ОСНОВНОЕ: Сервис, ключ, страна, количество, запуск
+	//  ШАГ 1: SMS-сервис и номер
 	// =====================================================================
 	addSectionTo(layout,
-		u"Регистрация"_q,
-		u"SMS-сервис, страна, количество аккаунтов и запуск"_q,
+		u"1. SMS-сервис и номер"_q,
+		u"Выбор сервиса активаций, API-ключ, страна и оператор"_q,
 		&st::menuIconPhone);
 
 	const auto cardMain = layout->add(
@@ -4212,7 +4929,7 @@ inline void FillRegistrationBox(
 		object_ptr<Ui::InputField>(
 			inMain,
 			FieldStyle(),
-			rpl::single(u"API-ключ"_q),
+			rpl::single(u"API-ключ сервиса"_q),
 			state->apiKey),
 		style::margins(0, style::ConvertScale(6), 0, style::ConvertScale(6)));
 
@@ -4247,6 +4964,7 @@ inline void FillRegistrationBox(
 
 	const auto doCheckBalance = [=] {
 		state->apiKey = apiKeyField->getLastText().trimmed();
+		state->apiKeys.insert(state->serviceId, state->apiKey);
 		SaveSettings(*state);
 		if (weakBalanceLabel) weakBalanceLabel->setText(u"Баланс: проверка..."_q);
 		FetchBalance(*state, [=](QString bal, QString err) {
@@ -4289,6 +5007,7 @@ inline void FillRegistrationBox(
 					state->apiKeys.insert(state->serviceId, apiKeyField->getLastText().trimmed());
 					state->serviceId = key;
 					state->countryName.clear();
+					state->countryId = -1;
 					state->apiKey = state->apiKeys.value(key);
 					apiKeyField->setText(state->apiKey);
 					if (*countryRefresh) {
@@ -4307,7 +5026,6 @@ inline void FillRegistrationBox(
 		}));
 	});
 
-	// --- Оператор holder для обновления из выбора страны ---
 	const auto operatorBtnHolder = std::make_shared<QPointer<PickerRow>>();
 
 	// --- Страна ---
@@ -4362,29 +5080,34 @@ inline void FillRegistrationBox(
 
 				const auto rebuildList = [=](const QString &query) {
 					if (!weakCountryListWrap) return;
-					weakCountryListWrap->clear();
+					while (weakCountryListWrap->count() > 0) {
+						delete weakCountryListWrap->widgetAt(0);
+					}
 					const auto q = query.trimmed().toLower();
 					int count = 0;
 					for (const auto &c : available) {
-						const auto id = c.id;
-						const auto title = CountryTitle(c);
-						if (!q.isEmpty()) {
-							const auto matchName = c.name.toLower().contains(q);
-							const auto matchPhone = c.phoneCode.toLower().contains(q);
-							const auto matchId = QString::number(id).contains(q);
-							if (!matchName && !matchPhone && !matchId) {
-								continue;
-							}
+						if (!q.isEmpty()
+							&& !c.name.toLower().contains(q)
+							&& !c.phoneCode.contains(q)) {
+							continue;
 						}
-						count++;
+						const auto id = c.id;
+						const auto name = c.name;
+						const auto title = c.name + (c.phoneCode.isEmpty() ? QString() : (u" ("_q + c.phoneCode + u")"_q));
+						const auto countStr = c.count > 0 ? (QString::number(c.count) + u" шт."_q) : QString();
+						const auto costStr = c.cost > 0.0 ? (QString::number(c.cost, 'f', 2) + u" руб."_q) : QString();
+						const auto sub = (countStr.isEmpty() ? QString() : countStr)
+							+ (!countStr.isEmpty() && !costStr.isEmpty() ? u" • "_q : QString())
+							+ (costStr.isEmpty() ? QString() : costStr);
+
 						weakCountryListWrap->add(object_ptr<Ggtg::ActionRow>(
 							weakCountryListWrap.data(),
 							rpl::single(title),
-							u"ID в сервисе: "_q + QString::number(id),
-							&st::menuIconManage)
+							sub,
+							&st::menuIconPhone)
 						)->setClickedCallback([=] {
 							state->countryId = id;
-							state->countryName = title;
+							state->countryName = name;
 							if (const auto btn = weakCountryBtn.data()) {
 								btn->setText(rpl::single(title));
 							}
@@ -4402,13 +5125,7 @@ inline void FillRegistrationBox(
 							pickBox->closeBox();
 						});
 						Ui::AddSkip(weakCountryListWrap.data(), st::defaultVerticalListSkip);
-					}
-					if (count == 0 && weakCountryListWrap) {
-						weakCountryListWrap->add(object_ptr<Ui::FlatLabel>(
-							weakCountryListWrap.data(),
-							u"Ничего не найдено"_q,
-							st::boxDividerLabel),
-							st::boxRowPadding);
+						if (++count >= 100) break;
 					}
 				};
 
@@ -4417,13 +5134,12 @@ inline void FillRegistrationBox(
 				}, searchField->lifetime());
 
 				rebuildList(QString());
-
 				pickBox->addButton(tr::lng_close(), [=] { pickBox->closeBox(); });
 			}));
 		});
 	});
 
-	// --- Оператор и максимальная цена (Быстрая настройка) ---
+	// --- Оператор связи ---
 	Ui::AddSkip(inMain, style::ConvertScale(8));
 	const auto operatorBtn = inMain->add(
 		object_ptr<PickerRow>(
@@ -4456,16 +5172,17 @@ inline void FillRegistrationBox(
 			show->showToast(u"Сначала выберите страну"_q);
 			return;
 		}
+
 		show->show(Box([=](not_null<Ui::GenericBox*> pickBox) {
 			pickBox->setTitle(rpl::single(u"Выберите оператора связи"_q));
-			pickBox->setWidth(style::ConvertScale(520));
+			pickBox->setWidth(st::boxWideWidth);
 
 			const auto searchField = pickBox->addRow(
 				object_ptr<Ui::InputField>(
 					pickBox,
 					st::defaultInputField,
 					rpl::single(u"Поиск оператора..."_q)),
-				st::boxRowPadding);
+					st::boxRowPadding);
 
 			const auto listWrap = pickBox->addRow(
 				object_ptr<Ui::VerticalLayout>(pickBox));
@@ -4481,31 +5198,18 @@ inline void FillRegistrationBox(
 			FetchOperators(*state, state->countryId, [=](std::vector<OperatorInfo> ops, QString err) {
 				if (!weakOpListWrap) return;
 				const auto rebuildList = [=](const QString &filter) {
-					if (!weakOpListWrap) return;
-					weakOpListWrap->clear();
-					const auto q = filter.trimmed().toLower();
-					int count = 0;
-
+					while (weakOpListWrap->count() > 0) {
+						delete weakOpListWrap->widgetAt(0);
+					}
+					const auto f = filter.trimmed().toLower();
 					for (const auto &op : ops) {
-						if (!q.isEmpty() && !op.name.toLower().contains(q) && !op.title.toLower().contains(q)) {
-							continue;
-						}
-						count++;
-						const auto isChosen = (state->smsOperator.isEmpty() && op.name == u"any"_q) || (state->smsOperator == op.name);
-						const auto prefix = isChosen ? u"● "_q : u"○ "_q;
+						if (!f.isEmpty() && !op.name.toLower().contains(f)) continue;
 
-						auto rowText = prefix + op.title;
-						if (op.count >= 0) {
-							rowText += u" — доступно: %1 шт."_q.arg(op.count);
-						}
-						if (!op.price.isEmpty()) {
-							rowText += u" (от %1$)"_q.arg(op.price);
-						}
-
+						const auto sub = op.count > 0 ? (QString::number(op.count) + u" шт."_q) : QString();
 						weakOpListWrap->add(object_ptr<Ggtg::ActionRow>(
 							weakOpListWrap.data(),
-							rpl::single(rowText),
-							QString(),
+							rpl::single(op.name == u"any"_q ? u"Любой оператор"_q : op.name),
+							sub,
 							&st::menuIconManage)
 						)->setClickedCallback([=] {
 							state->smsOperator = (op.name == u"any"_q) ? QString() : op.name;
@@ -4521,19 +5225,19 @@ inline void FillRegistrationBox(
 							weakOpListWrap.data(),
 							rpl::single(u"Ввести вручную..."_q),
 							u"Указать произвольный код оператора"_q,
-							&st::menuIconManage)
+							&st::menuIconSettings)
 						)->setClickedCallback([=] {
 							pickBox->closeBox();
 							show->show(Box([=](not_null<Ui::GenericBox*> customBox) {
-								customBox->setTitle(rpl::single(u"Оператор связи"_q));
+								customBox->setTitle(rpl::single(u"Код оператора вручную"_q));
 								const auto input = customBox->addRow(
 									object_ptr<Ui::InputField>(
 										customBox,
 										FieldStyle(),
-										rpl::single(u"Код оператора (например: megafon, mts)"_q),
+										rpl::single(u"Например: mts, megafon, beeline, tele2"_q),
 										state->smsOperator),
 									st::boxRowPadding);
-								customBox->addButton(tr::lng_settings_save(), [=] {
+								customBox->addButton(rpl::single(u"Сохранить"_q), [=] {
 									state->smsOperator = input->getLastText().trimmed();
 									SaveSettings(*state);
 									updateOperatorSubtitle();
@@ -4544,7 +5248,7 @@ inline void FillRegistrationBox(
 						});
 					}
 
-					if (count == 0 && weakOpListWrap) {
+					if (weakOpListWrap && weakOpListWrap->count() == 0) {
 						weakOpListWrap->add(object_ptr<Ui::FlatLabel>(
 							weakOpListWrap.data(),
 							u"Ничего не найдено"_q,
@@ -4564,127 +5268,22 @@ inline void FillRegistrationBox(
 		}));
 	});
 
+	// --- Макс. цена номера ---
+	Ui::AddSkip(inMain, style::ConvertScale(8));
 	const auto maxPriceField = inMain->add(
 		object_ptr<Ui::InputField>(
 			inMain,
 			FieldStyle(),
-			rpl::single(u"Макс. цена за номер (пусто = без лимита)"_q),
+			rpl::single(u"Макс. цена номера (руб, например: 15.00; пусто = без лимита)"_q),
 			state->maxPrice),
-		style::margins(0, 0, 0, style::ConvertScale(6)));
+		style::margins(0, 0, 0, style::ConvertScale(4)));
 
 	maxPriceField->changes() | rpl::on_next([=] {
 		state->maxPrice = maxPriceField->getLastText().trimmed();
 		SaveSettings(*state);
 	}, maxPriceField->lifetime());
 
-	// --- Сервис токенов (Play Integrity) в быстрой настройке ---
-	Ui::AddSkip(inMain, style::ConvertScale(8));
-	const auto tokenServiceBtn = inMain->add(
-		object_ptr<PickerRow>(
-			inMain,
-			u"Сервис токенов (Play Integrity)"_q,
-			TokenProviderName(state->tokenService)),
-		style::margins(0, 0, 0, style::ConvertScale(4)));
-
-	const auto tokenApiKeyField = inMain->add(
-		object_ptr<Ui::InputField>(
-			inMain,
-			FieldStyle(),
-			rpl::single(u"API-ключ сервиса токенов (TokenFast / AntiSafety)"_q),
-			state->tokenApiKey),
-		style::margins(0, style::ConvertScale(4), 0, style::ConvertScale(6)));
-
-	tokenApiKeyField->changes() | rpl::on_next([=] {
-		state->tokenApiKey = tokenApiKeyField->getLastText().trimmed();
-		SaveSettings(*state);
-	}, tokenApiKeyField->lifetime());
-
-	const auto checkTokenRow = inMain->add(object_ptr<Ui::RpWidget>(inMain));
-	checkTokenRow->resize(checkTokenRow->width(), style::ConvertScale(38));
-
-	const auto checkTokenBtn = Ui::CreateChild<Ui::RoundButton>(
-		checkTokenRow,
-		rpl::single(u"Проверить баланс"_q),
-		st::defaultActiveButton);
-
-	const auto tokenStatusLabel = Ui::CreateChild<Ui::FlatLabel>(
-		checkTokenRow,
-		rpl::single(u"Баланс токенов: —"_q),
-		st::boxLabel);
-
-	checkTokenRow->widthValue() | rpl::on_next([=](int w) {
-		checkTokenBtn->moveToLeft(0, style::ConvertScale(2));
-		const auto avail = std::max(w - checkTokenBtn->width() - style::ConvertScale(20), style::ConvertScale(120));
-		tokenStatusLabel->resizeToWidth(avail);
-		tokenStatusLabel->moveToLeft(checkTokenBtn->width() + style::ConvertScale(14), style::ConvertScale(8));
-	}, checkTokenRow->lifetime());
-
-	const auto weakTokenStatusLabel = QPointer<Ui::FlatLabel>(tokenStatusLabel);
-	checkTokenBtn->setClickedCallback([=] {
-		const auto key = tokenApiKeyField->getLastText().trimmed();
-		state->tokenApiKey = key;
-		SaveSettings(*state);
-		if (weakTokenStatusLabel) weakTokenStatusLabel->setText(u"Баланс: проверка..."_q);
-		CheckMobileTokenBalance(
-			MobileTokenProvider(state->tokenService),
-			key,
-			[weakTokenStatusLabel](QString bal, QString err) {
-				if (!weakTokenStatusLabel) return;
-				if (!err.isEmpty()) {
-					weakTokenStatusLabel->setText(u"Ошибка: "_q + err);
-				} else {
-					weakTokenStatusLabel->setText(u"Баланс: "_q + bal);
-				}
-			});
-	});
-
-	tokenServiceBtn->setClickedCallback([=] {
-		show->show(Box([=](not_null<Ui::GenericBox*> pickBox) {
-			pickBox->setTitle(rpl::single(u"Выберите сервис токенов"_q));
-			pickBox->setWidth(st::boxWideWidth);
-			const auto options = std::vector<std::pair<int, QString>>{
-				{ 0, u"Отключен"_q },
-				{ 1, u"TokenFast (TokenFast.pro)"_q },
-				{ 2, u"AntiSafety (AntiSafety.net)"_q },
-			};
-			for (const auto &[val, title] : options) {
-				pickBox->addRow(object_ptr<Ggtg::ActionRow>(
-					pickBox,
-					rpl::single(title),
-					val == 0 ? u"Регистрация без Play Integrity токенов"_q : u"Обход детекта эмулятора Telegram"_q,
-					&st::menuIconManage)
-				)->setClickedCallback([=] {
-					state->tokenService = val;
-					tokenServiceBtn->setText(rpl::single(title));
-					SaveSettings(*state);
-					pickBox->closeBox();
-				});
-				Ui::AddSkip(pickBox->verticalLayout(), st::defaultVerticalListSkip);
-			}
-			pickBox->addButton(tr::lng_close(), [=] { pickBox->closeBox(); });
-		}));
-	});
-
-	// --- Количество аккаунтов ---
-	Ui::AddSkip(inMain, style::ConvertScale(8));
-	const auto targetSuccessField = inMain->add(
-		object_ptr<Ui::InputField>(
-			inMain,
-			FieldStyle(),
-			rpl::single(u"Количество аккаунтов"_q),
-			QString::number(state->targetSuccessCount)),
-		style::margins(0, 0, 0, style::ConvertScale(6)));
-
-	targetSuccessField->changes() | rpl::on_next([=] {
-		const auto val = targetSuccessField->getLastText().trimmed().toInt();
-		if (val > 0) {
-			state->targetSuccessCount = val;
-			SaveSettings(*state);
-		}
-	}, targetSuccessField->lifetime());
-
-	const auto queueSkipAppHolder = std::make_shared<QPointer<Ui::Checkbox>>();
-
+	// --- Фильтрация номеров ---
 	const auto skipAppCheck = inMain->add(
 		object_ptr<Ui::Checkbox>(
 			inMain,
@@ -4701,281 +5300,15 @@ inline void FillRegistrationBox(
 	skipAppCheck->checkedChanges(
 	) | rpl::on_next([=](bool checked) {
 		state->skipAppCode = checked;
-		if (const auto qCheck = queueSkipAppHolder ? queueSkipAppHolder->data() : nullptr) {
-			qCheck->setChecked(checked);
-		}
 		SaveSettings(*state);
 	}, skipAppCheck->lifetime());
 
 	// =====================================================================
-	//  2. ИМЕНА И ФАМИЛИИ
+	//  ШАГ 2: Прокси и сохранение
 	// =====================================================================
 	addSectionTo(layout,
-		u"Имена и фамилии"_q,
-		u"Настройка имён для создаваемых аккаунтов"_q,
-		&st::menuIconProfile);
-
-	const auto cardNames = layout->add(
-		object_ptr<Ggtg::CardBox>(layout, style::margins(16, 14, 16, 14)),
-		st::boxRowPadding);
-	const auto inNames = cardNames->inner();
-
-	const auto singleNameCheck = inNames->add(
-		object_ptr<Ui::Checkbox>(
-			inNames,
-			u"Одно имя и фамилия на все аккаунты"_q,
-			state->singleNameForAll),
-		style::margins(0, style::ConvertScale(4), 0, style::ConvertScale(2)));
-	inNames->add(
-		object_ptr<Ui::FlatLabel>(
-			inNames,
-			rpl::single(u"Если включено — все создаваемые аккаунты получат указанные имя и фамилию. Если выключено — имена берутся из файлов или генерируются автоматически."_q),
-			st::boxDividerLabel),
-		style::margins(0, 0, 0, style::ConvertScale(6)));
-
-	const auto singleNameWrap = inNames->add(
-		object_ptr<Ui::SlideWrap<Ui::VerticalLayout>>(
-			inNames,
-			object_ptr<Ui::VerticalLayout>(inNames)),
-		style::margins());
-	const auto singleNameLayout = singleNameWrap->entity();
-
-	const auto firstNameField = singleNameLayout->add(
-		object_ptr<Ui::InputField>(
-			singleNameLayout,
-			FieldStyle(),
-			rpl::single(u"Имя для всех аккаунтов"_q),
-			state->customFirstName),
-		style::margins(0, style::ConvertScale(4), 0, style::ConvertScale(4)));
-	firstNameField->changes() | rpl::on_next([=] {
-		state->customFirstName = firstNameField->getLastText().trimmed();
-		SaveSettings(*state);
-	}, firstNameField->lifetime());
-
-	const auto lastNameField = singleNameLayout->add(
-		object_ptr<Ui::InputField>(
-			singleNameLayout,
-			FieldStyle(),
-			rpl::single(u"Фамилия для всех аккаунтов"_q),
-			state->customLastName),
-		style::margins(0, style::ConvertScale(4), 0, style::ConvertScale(6)));
-	lastNameField->changes() | rpl::on_next([=] {
-		state->customLastName = lastNameField->getLastText().trimmed();
-		SaveSettings(*state);
-	}, lastNameField->lifetime());
-
-	const auto randomNamesWrap = inNames->add(
-		object_ptr<Ui::SlideWrap<Ui::VerticalLayout>>(
-			inNames,
-			object_ptr<Ui::VerticalLayout>(inNames)),
-		style::margins());
-	const auto randomNamesLayout = randomNamesWrap->entity();
-
-	const auto genderBtn = randomNamesLayout->add(
-		object_ptr<PickerRow>(
-			randomNamesLayout,
-			u"Пол"_q,
-			state->gender == 1 ? u"Мужской"_q : (state->gender == 2 ? u"Женский"_q : u"Случайный (М/Ж)"_q)),
-		style::margins(0, style::ConvertScale(2), 0, style::ConvertScale(6)));
-
-	genderBtn->setClickedCallback([=] {
-		show->show(Box([=](not_null<Ui::GenericBox*> pickBox) {
-			pickBox->setTitle(rpl::single(u"Выберите пол для генерации имён"_q));
-			struct GenderOpt { int val; QString label; };
-			for (const auto &opt : std::vector<GenderOpt>{{0, u"Случайный (М/Ж)"_q}, {1, u"Мужской"_q}, {2, u"Женский"_q}}) {
-				pickBox->addRow(object_ptr<Ggtg::ActionRow>(
-					pickBox,
-					rpl::single(opt.label),
-					QString(),
-					nullptr)
-				)->setClickedCallback([=, v = opt.val, lbl = opt.label] {
-					state->gender = v;
-					genderBtn->setText(rpl::single(lbl));
-					SaveSettings(*state);
-					pickBox->closeBox();
-				});
-				Ui::AddSkip(pickBox->verticalLayout(), st::defaultVerticalListSkip);
-			}
-			pickBox->addButton(tr::lng_close(), [=] { pickBox->closeBox(); });
-		}));
-	});
-
-	// Файл с именами
-	const auto updateFnLabel = box->lifetime().make_state<Fn<void()>>();
-	const auto fnStatusLabel = randomNamesLayout->add(
-		object_ptr<Ui::FlatLabel>(
-			randomNamesLayout,
-			rpl::single(QString()),
-			st::boxLabel),
-		style::margins(0, style::ConvertScale(4), 0, style::ConvertScale(2)));
-
-	const auto fnBtnsRow = randomNamesLayout->add(object_ptr<Ui::RpWidget>(randomNamesLayout));
-	fnBtnsRow->resize(fnBtnsRow->width(), style::ConvertScale(38));
-
-	const auto pickFnBtn = Ui::CreateChild<Ui::RoundButton>(
-		fnBtnsRow,
-		rpl::single(u"Выбрать файл с именами…"_q),
-		st::defaultBoxButton);
-	pickFnBtn->setTextTransform(Ui::RoundButtonTextTransform::NoTransform);
-
-	const auto clearFnBtn = Ui::CreateChild<Ui::RoundButton>(
-		fnBtnsRow,
-		rpl::single(u"Очистить"_q),
-		st::defaultBoxButton);
-	clearFnBtn->setTextTransform(Ui::RoundButtonTextTransform::NoTransform);
-
-	fnBtnsRow->widthValue() | rpl::on_next([=](int w) {
-		pickFnBtn->moveToLeft(0, style::ConvertScale(2));
-		clearFnBtn->moveToLeft(pickFnBtn->width() + style::ConvertScale(10), style::ConvertScale(2));
-	}, fnBtnsRow->lifetime());
-
-	*updateFnLabel = [=] {
-		if (state->firstNameFile.isEmpty() || !QFile::exists(state->firstNameFile)) {
-			fnStatusLabel->setText(u"Файл с именами: не выбран (случайные имена)"_q);
-			clearFnBtn->hide();
-		} else {
-			const auto count = CountNonEmptyLinesInFile(state->firstNameFile);
-			fnStatusLabel->setText(u"Файл с именами: "_q + QFileInfo(state->firstNameFile).fileName() + u" ("_q + FormatLinesCount(count) + u")"_q);
-			clearFnBtn->show();
-		}
-	};
-	(*updateFnLabel)();
-
-	pickFnBtn->setClickedCallback([=] {
-		FileDialog::GetOpenPath(
-			QPointer<QWidget>(box.get()),
-			u"Выберите файл с именами"_q,
-			u"Текстовые файлы (*.txt);;Все файлы (*)"_q,
-			[=](FileDialog::OpenResult &&result) {
-				if (result.paths.isEmpty()) return;
-				state->firstNameFile = result.paths.front();
-				SaveSettings(*state);
-				(*updateFnLabel)();
-			});
-	});
-
-	clearFnBtn->setClickedCallback([=] {
-		state->firstNameFile.clear();
-		SaveSettings(*state);
-		(*updateFnLabel)();
-	});
-
-	// Файл с фамилиями
-	Ui::AddSkip(randomNamesLayout, style::ConvertScale(6));
-	const auto updateLnLabel = box->lifetime().make_state<Fn<void()>>();
-	const auto lnStatusLabel = randomNamesLayout->add(
-		object_ptr<Ui::FlatLabel>(
-			randomNamesLayout,
-			rpl::single(QString()),
-			st::boxLabel),
-		style::margins(0, style::ConvertScale(4), 0, style::ConvertScale(2)));
-
-	const auto lnBtnsRow = randomNamesLayout->add(object_ptr<Ui::RpWidget>(randomNamesLayout));
-	lnBtnsRow->resize(lnBtnsRow->width(), style::ConvertScale(38));
-
-	const auto pickLnBtn = Ui::CreateChild<Ui::RoundButton>(
-		lnBtnsRow,
-		rpl::single(u"Выбрать файл с фамилиями…"_q),
-		st::defaultBoxButton);
-	pickLnBtn->setTextTransform(Ui::RoundButtonTextTransform::NoTransform);
-
-	const auto clearLnBtn = Ui::CreateChild<Ui::RoundButton>(
-		lnBtnsRow,
-		rpl::single(u"Очистить"_q),
-		st::defaultBoxButton);
-	clearLnBtn->setTextTransform(Ui::RoundButtonTextTransform::NoTransform);
-
-	lnBtnsRow->widthValue() | rpl::on_next([=](int w) {
-		pickLnBtn->moveToLeft(0, style::ConvertScale(2));
-		clearLnBtn->moveToLeft(pickLnBtn->width() + style::ConvertScale(10), style::ConvertScale(2));
-	}, lnBtnsRow->lifetime());
-
-	*updateLnLabel = [=] {
-		if (state->lastNameFile.isEmpty() || !QFile::exists(state->lastNameFile)) {
-			lnStatusLabel->setText(u"Файл с фамилиями: не выбран (случайные фамилии)"_q);
-			clearLnBtn->hide();
-		} else {
-			const auto count = CountNonEmptyLinesInFile(state->lastNameFile);
-			lnStatusLabel->setText(u"Файл с фамилиями: "_q + QFileInfo(state->lastNameFile).fileName() + u" ("_q + FormatLinesCount(count) + u")"_q);
-			clearLnBtn->show();
-		}
-	};
-	(*updateLnLabel)();
-
-	pickLnBtn->setClickedCallback([=] {
-		FileDialog::GetOpenPath(
-			QPointer<QWidget>(box.get()),
-			u"Выберите файл с фамилиями"_q,
-			u"Текстовые файлы (*.txt);;Все файлы (*)"_q,
-			[=](FileDialog::OpenResult &&result) {
-				if (result.paths.isEmpty()) return;
-				state->lastNameFile = result.paths.front();
-				SaveSettings(*state);
-				(*updateLnLabel)();
-			});
-	});
-
-	clearLnBtn->setClickedCallback([=] {
-		state->lastNameFile.clear();
-		SaveSettings(*state);
-		(*updateLnLabel)();
-	});
-
-	singleNameWrap->toggle(state->singleNameForAll, anim::type::instant);
-	randomNamesWrap->toggle(!state->singleNameForAll, anim::type::instant);
-
-	singleNameCheck->checkedChanges(
-	) | rpl::on_next([=](bool checked) {
-		state->singleNameForAll = checked;
-		state->autoRandomNames = !checked;
-		singleNameWrap->toggle(checked, anim::type::normal);
-		randomNamesWrap->toggle(!checked, anim::type::normal);
-		SaveSettings(*state);
-	}, singleNameCheck->lifetime());
-
-	const auto usernameCheck = inNames->add(
-		object_ptr<Ui::Checkbox>(
-			inNames,
-			u"Устанавливать @username при регистрации"_q,
-			state->autoSetUsername),
-		style::margins(0, 8, 0, 0));
-	usernameCheck->checkedChanges(
-	) | rpl::on_next([=](bool checked) {
-		state->autoSetUsername = checked;
-		SaveSettings(*state);
-	}, usernameCheck->lifetime());
-
-	const auto bioCheck = inNames->add(
-		object_ptr<Ui::Checkbox>(
-			inNames,
-			u"Заполнять описание профиля (Bio)"_q,
-			state->autoSetBio),
-		style::margins(0, 8, 0, 0));
-	bioCheck->checkedChanges(
-	) | rpl::on_next([=](bool checked) {
-		state->autoSetBio = checked;
-		SaveSettings(*state);
-	}, bioCheck->lifetime());
-
-	const auto bioInput = inNames->add(
-		object_ptr<Ui::InputField>(
-			inNames,
-			st::defaultInputField,
-			rpl::single(u"Текст Bio (или пусто для случайного)"_q),
-			state->customBio),
-		style::margins(0, 6, 0, 0));
-	bioInput->changes(
-	) | rpl::on_next([=] {
-		state->customBio = bioInput->getLastText().trimmed();
-		SaveSettings(*state);
-	}, bioInput->lifetime());
-
-	// =====================================================================
-	//  3. ПРОКСИ И СЕТЬ
-	// =====================================================================
-	addSectionTo(layout,
-		u"Прокси и сеть"_q,
-		u"Подключение аккаунтов через списки прокси"_q,
+		u"2. Прокси и сохранение"_q,
+		u"Выбор списка прокси и папка для новых аккаунтов"_q,
 		&st::menuIconNetwork);
 
 	const auto cardProxy = layout->add(
@@ -5105,35 +5438,231 @@ inline void FillRegistrationBox(
 	});
 
 	// =====================================================================
-	//  4. ОБЛАЧНЫЙ ПАРОЛЬ (2FA)
+	//  ШАГ 3: Профиль и безопасность (2FA)
 	// =====================================================================
 	addSectionTo(layout,
-		u"Облачный пароль (2FA)"_q,
-		u"Двухфакторная защита для новых аккаунтов"_q,
-		&st::menuIconLock);
+		u"3. Профиль и безопасность (2FA)"_q,
+		u"Имена, аватары, Bio и облачный пароль"_q,
+		&st::menuIconProfile);
 
-	const auto card2fa = layout->add(
+	const auto cardNames = layout->add(
 		object_ptr<Ggtg::CardBox>(layout, style::margins(16, 14, 16, 14)),
 		st::boxRowPadding);
-	const auto in2fa = card2fa->inner();
+	const auto inNames = cardNames->inner();
 
-	const auto single2faCheck = in2fa->add(
+	const auto singleNameCheck = inNames->add(
 		object_ptr<Ui::Checkbox>(
-			in2fa,
-			u"Один пароль на все аккаунты"_q,
-			state->single2faForAll),
+			inNames,
+			u"Одно имя и фамилия на все аккаунты"_q,
+			state->singleNameForAll),
 		style::margins(0, style::ConvertScale(4), 0, style::ConvertScale(2)));
-	in2fa->add(
+	inNames->add(
 		object_ptr<Ui::FlatLabel>(
-			in2fa,
-			rpl::single(u"Если включено — на всех создаваемых аккаунтах будет установлен указанный пароль. Если выключено — для каждого аккаунта генерируется свой уникальный надёжный пароль (18 символов), автоматически сохраняемый в 2FA Vault."_q),
+			inNames,
+			rpl::single(u"Если включено — все аккаунты будут зарегистрированы с одинаковым указанным именем. Если выключено — имена генерируются случайно из встроенной базы."_q),
 			st::boxDividerLabel),
 		style::margins(0, 0, 0, style::ConvertScale(6)));
 
-	const auto single2faWrap = in2fa->add(
+	const auto singleNameWrap = inNames->add(
 		object_ptr<Ui::SlideWrap<Ui::VerticalLayout>>(
-			in2fa,
-			object_ptr<Ui::VerticalLayout>(in2fa)),
+			inNames,
+			object_ptr<Ui::VerticalLayout>(inNames)),
+		style::margins());
+	const auto singleNameLayout = singleNameWrap->entity();
+
+	const auto firstNameField = singleNameLayout->add(
+		object_ptr<Ui::InputField>(
+			singleNameLayout,
+			FieldStyle(),
+			rpl::single(u"Имя для всех аккаунтов"_q),
+			state->customFirstName),
+		style::margins(0, style::ConvertScale(4), 0, style::ConvertScale(4)));
+
+	const auto lastNameField = singleNameLayout->add(
+		object_ptr<Ui::InputField>(
+			singleNameLayout,
+			FieldStyle(),
+			rpl::single(u"Фамилия для всех аккаунтов"_q),
+			state->customLastName),
+		style::margins(0, style::ConvertScale(4), 0, style::ConvertScale(6)));
+
+	firstNameField->changes() | rpl::on_next([=] {
+		state->customFirstName = firstNameField->getLastText().trimmed();
+		SaveSettings(*state);
+	}, firstNameField->lifetime());
+
+	lastNameField->changes() | rpl::on_next([=] {
+		state->customLastName = lastNameField->getLastText().trimmed();
+		SaveSettings(*state);
+	}, lastNameField->lifetime());
+
+	const auto randomNameWrap = inNames->add(
+		object_ptr<Ui::SlideWrap<Ui::VerticalLayout>>(
+			inNames,
+			object_ptr<Ui::VerticalLayout>(inNames)),
+		style::margins());
+	const auto randomNameLayout = randomNameWrap->entity();
+
+	const auto genderTitle = [](int g) {
+		if (g == 1) return u"Только мужские имена"_q;
+		if (g == 2) return u"Только женские имена"_q;
+		return u"Любой пол (случайно)"_q;
+	};
+	const auto genderBtn = randomNameLayout->add(
+		object_ptr<PickerRow>(
+			randomNameLayout,
+			u"Пол для имён"_q,
+			genderTitle(state->gender)),
+		style::margins(0, 0, 0, style::ConvertScale(4)));
+
+	genderBtn->setClickedCallback([=] {
+		show->show(Box([=](not_null<Ui::GenericBox*> pickBox) {
+			pickBox->setTitle(rpl::single(u"Выберите пол для генерации имён"_q));
+			pickBox->setWidth(st::boxWideWidth);
+			const auto options = std::vector<std::pair<int, QString>>{
+				{ 0, u"Любой пол (случайно)"_q },
+				{ 1, u"Только мужские имена"_q },
+				{ 2, u"Только женские имена"_q },
+			};
+			for (const auto &[val, title] : options) {
+				pickBox->addRow(object_ptr<Ggtg::ActionRow>(
+					pickBox,
+					rpl::single(title),
+					QString(),
+					&st::menuIconProfile)
+				)->setClickedCallback([=] {
+					state->gender = val;
+					genderBtn->setText(rpl::single(title));
+					SaveSettings(*state);
+					pickBox->closeBox();
+				});
+				Ui::AddSkip(pickBox->verticalLayout(), st::defaultVerticalListSkip);
+			}
+			pickBox->addButton(tr::lng_close(), [=] { pickBox->closeBox(); });
+		}));
+	});
+
+	singleNameWrap->toggle(state->singleNameForAll, anim::type::instant);
+	randomNameWrap->toggle(!state->singleNameForAll, anim::type::instant);
+
+	singleNameCheck->checkedChanges(
+	) | rpl::on_next([=](bool checked) {
+		state->singleNameForAll = checked;
+		state->autoRandomNames = !checked;
+		singleNameWrap->toggle(checked, anim::type::normal);
+		randomNameWrap->toggle(!checked, anim::type::normal);
+		SaveSettings(*state);
+	}, singleNameCheck->lifetime());
+
+	// --- Аватары ---
+	Ui::AddSkip(inNames, style::ConvertScale(6));
+	const auto avatarCheck = inNames->add(
+		object_ptr<Ui::Checkbox>(
+			inNames,
+			u"Устанавливать аватары на новые аккаунты"_q,
+			state->autoExportGgtg),
+		style::margins(0, style::ConvertScale(4), 0, style::ConvertScale(2)));
+	inNames->add(
+		object_ptr<Ui::FlatLabel>(
+			inNames,
+			rpl::single(u"При включении берёт случайные изображения из указанной папки на диске и устанавливает фото профиля."_q),
+			st::boxDividerLabel),
+		style::margins(0, 0, 0, style::ConvertScale(6)));
+
+	const auto avatarWrap = inNames->add(
+		object_ptr<Ui::SlideWrap<Ui::VerticalLayout>>(
+			inNames,
+			object_ptr<Ui::VerticalLayout>(inNames)),
+		style::margins());
+	const auto avatarLayout = avatarWrap->entity();
+
+	const auto avatarPathField = avatarLayout->add(
+		object_ptr<Ui::InputField>(
+			avatarLayout,
+			FieldStyle(),
+			rpl::single(u"Папка с аватарами (jpg/png)"_q),
+			state->firstNameFile),
+		style::margins(0, style::ConvertScale(4), 0, style::ConvertScale(4)));
+
+	avatarPathField->changes() | rpl::on_next([=] {
+		state->firstNameFile = avatarPathField->getLastText().trimmed();
+		SaveSettings(*state);
+	}, avatarPathField->lifetime());
+
+	const auto chooseAvatarDirBtn = avatarLayout->add(
+		object_ptr<Ui::RoundButton>(
+			avatarLayout,
+			rpl::single(u"Выбрать папку с фото..."_q),
+			st::defaultBoxButton),
+		style::margins(0, 0, 0, style::ConvertScale(6)));
+	chooseAvatarDirBtn->setTextTransform(Ui::RoundButtonTextTransform::NoTransform);
+
+	chooseAvatarDirBtn->setClickedCallback([=] {
+		const auto dir = QFileDialog::getExistingDirectory(
+			nullptr,
+			u"Выберите папку с изображениями для аватаров"_q,
+			QDir::homePath());
+		if (!dir.isEmpty()) {
+			avatarPathField->setText(dir);
+			state->firstNameFile = dir;
+			SaveSettings(*state);
+		}
+	});
+
+	avatarWrap->toggle(state->autoExportGgtg, anim::type::instant);
+	avatarCheck->checkedChanges(
+	) | rpl::on_next([=](bool checked) {
+		state->autoExportGgtg = checked;
+		avatarWrap->toggle(checked, anim::type::normal);
+		SaveSettings(*state);
+	}, avatarCheck->lifetime());
+
+	// --- Описание (Bio) ---
+	Ui::AddSkip(inNames, style::ConvertScale(6));
+	const auto bioInput = inNames->add(
+		object_ptr<Ui::InputField>(
+			inNames,
+			FieldStyle(),
+			rpl::single(u"Описание профиля (Bio, поддерживает {A|B})"_q),
+			state->customBio),
+		style::margins(0, style::ConvertScale(4), 0, style::ConvertScale(6)));
+
+	bioInput->changes() | rpl::on_next([=] {
+		state->customBio = bioInput->getLastText().trimmed();
+		SaveSettings(*state);
+	}, bioInput->lifetime());
+
+	// --- Юзернейм ---
+	const auto autoSetUsernameCheck = inNames->add(
+		object_ptr<Ui::Checkbox>(
+			inNames,
+			u"Автоматически устанавливать username (латиница + цифры)"_q,
+			state->autoSetUsername),
+		style::margins(0, style::ConvertScale(4), 0, style::ConvertScale(2)));
+	autoSetUsernameCheck->checkedChanges() | rpl::on_next([=](bool checked) {
+		state->autoSetUsername = checked;
+		SaveSettings(*state);
+	}, autoSetUsernameCheck->lifetime());
+
+	// --- 2FA в Шаге 3 ---
+	Ui::AddSkip(inNames, style::ConvertScale(8));
+	const auto single2faCheck = inNames->add(
+		object_ptr<Ui::Checkbox>(
+			inNames,
+			u"Один пароль 2FA на все новые аккаунты"_q,
+			state->single2faForAll),
+		style::margins(0, style::ConvertScale(4), 0, style::ConvertScale(2)));
+	inNames->add(
+		object_ptr<Ui::FlatLabel>(
+			inNames,
+			rpl::single(u"Если выключено — для каждого аккаунта генерируется свой уникальный надёжный пароль (18 символов), автоматически сохраняемый в 2FA Vault программы."_q),
+			st::boxDividerLabel),
+		style::margins(0, 0, 0, style::ConvertScale(6)));
+
+	const auto single2faWrap = inNames->add(
+		object_ptr<Ui::SlideWrap<Ui::VerticalLayout>>(
+			inNames,
+			object_ptr<Ui::VerticalLayout>(inNames)),
 		style::margins());
 	const auto single2faLayout = single2faWrap->entity();
 
@@ -5199,50 +5728,455 @@ inline void FillRegistrationBox(
 		show->showToast(u"Пароль 2FA скопирован в буфер обмена"_q);
 	});
 
-	const auto random2faWrap = in2fa->add(
-		object_ptr<Ui::SlideWrap<Ui::VerticalLayout>>(
-			in2fa,
-			object_ptr<Ui::VerticalLayout>(in2fa)),
-		style::margins());
-	random2faWrap->entity()->add(
-		object_ptr<Ui::FlatLabel>(
-			random2faWrap->entity(),
-			rpl::single(u"🔐 Для каждого создаваемого аккаунта автоматически генерируется уникальный надежный 18-значный пароль 2FA и сохраняется в базу и единый 2FA Vault."_q),
-			st::boxLabel),
-		style::margins(0, style::ConvertScale(4), 0, style::ConvertScale(4)));
-
 	single2faWrap->toggle(state->single2faForAll, anim::type::instant);
-	random2faWrap->toggle(!state->single2faForAll, anim::type::instant);
 
 	single2faCheck->checkedChanges(
 	) | rpl::on_next([=](bool checked) {
 		state->single2faForAll = checked;
 		single2faWrap->toggle(checked, anim::type::normal);
-		random2faWrap->toggle(!checked, anim::type::normal);
 		SaveSettings(*state);
 	}, single2faCheck->lifetime());
 
 	// =====================================================================
-	//  5. ПРОЦЕСС РЕГИСТРАЦИИ
+	//  ШАГ 4: Защита и токены (Push, Captcha, Email)
 	// =====================================================================
 	addSectionTo(layout,
-		u"Процесс регистрации"_q,
-		u"Управление процессом авторегистрации"_q,
-		&st::menuIconManage);
+		u"4. Защита и токены (Push, Captcha, Email)"_q,
+		u"Обход проверок Telegram через AntiSafety / TokenFast и подтверждение Email"_q,
+		&st::menuIconDevices);
 
-	const auto cardProcess = layout->add(
+	const auto cardDev = layout->add(
 		object_ptr<Ggtg::CardBox>(layout, style::margins(16, 14, 16, 14)),
 		st::boxRowPadding);
-	const auto inProcess = cardProcess->inner();
+	const auto inDev = cardDev->inner();
 
-	const auto statusTextLabel = inProcess->add(
+	const auto tokenProviderTitle = [](int s) {
+		if (s == 1) return u"TokenFast (tokenfast.shop/api)"_q;
+		if (s == 2) return u"AntiSafety (antisafety.net)"_q;
+		return u"Без сервиса токенов (только Base.db)"_q;
+	};
+	const auto tokenServiceBtn = inDev->add(
+		object_ptr<PickerRow>(
+			inDev,
+			u"Сервис токенов (Play Integrity)"_q,
+			tokenProviderTitle(state->tokenService)));
+
+	tokenServiceBtn->setClickedCallback([=] {
+		show->show(Box([=](not_null<Ui::GenericBox*> pickBox) {
+			pickBox->setTitle(rpl::single(u"Выберите сервис токенов Play Integrity / SafetyNet"_q));
+			pickBox->setWidth(st::boxWideWidth);
+
+			const auto options = std::vector<std::pair<int, QString>>{
+				{ 2, u"AntiSafety (antisafety.net)"_q },
+				{ 1, u"TokenFast (tokenfast.shop/api)"_q },
+				{ 0, u"Без сервиса токенов (только параметры устройства)"_q },
+			};
+			for (const auto &opt : options) {
+				pickBox->addRow(object_ptr<Ggtg::ActionRow>(
+					pickBox,
+					rpl::single(opt.second),
+					opt.first == 1 ? u"api.tokenfast.shop"_q : (opt.first == 2 ? u"antisafety.net"_q : QString()),
+					&st::menuIconDiscussion)
+				)->setClickedCallback([=] {
+					state->tokenService = opt.first;
+					tokenServiceBtn->setText(rpl::single(tokenProviderTitle(opt.first)));
+					SaveSettings(*state);
+					pickBox->closeBox();
+				});
+				Ui::AddSkip(pickBox->verticalLayout(), st::defaultVerticalListSkip);
+			}
+			pickBox->addButton(tr::lng_close(), [=] { pickBox->closeBox(); });
+		}));
+	});
+
+	const auto tokenApiKeyField = inDev->add(
+		object_ptr<Ui::InputField>(
+			inDev,
+			FieldStyle(),
+			rpl::single(u"API-ключ сервиса токенов (TokenFast / AntiSafety)"_q),
+			state->tokenApiKey),
+		style::margins(0, style::ConvertScale(6), 0, style::ConvertScale(6)));
+
+	tokenApiKeyField->changes(
+	) | rpl::on_next([=] {
+		state->tokenApiKey = tokenApiKeyField->getLastText().trimmed();
+		SaveSettings(*state);
+	}, tokenApiKeyField->lifetime());
+
+	const auto antiSafetyAidField = inDev->add(
+		object_ptr<Ui::InputField>(
+			inDev,
+			FieldStyle(),
+			rpl::single(u"AntiSafety App ID (AID контекста приложения Telegram)"_q),
+			state->antiSafetyAid.isEmpty() ? u"308aba4e-5680-466b-81a5-477ac6befa95"_q : state->antiSafetyAid),
+		style::margins(0, 0, 0, style::ConvertScale(6)));
+
+	antiSafetyAidField->changes(
+	) | rpl::on_next([=] {
+		state->antiSafetyAid = antiSafetyAidField->getLastText().trimmed();
+		SaveSettings(*state);
+	}, antiSafetyAidField->lifetime());
+
+	const auto checkTokenRow = inDev->add(object_ptr<Ui::RpWidget>(inDev));
+	checkTokenRow->resize(checkTokenRow->width(), style::ConvertScale(38));
+
+	const auto checkTokenBtn = Ui::CreateChild<Ui::RoundButton>(
+		checkTokenRow,
+		rpl::single(u"Проверить баланс"_q),
+		st::defaultActiveButton);
+
+	const auto tokenStatusLabel = Ui::CreateChild<Ui::FlatLabel>(
+		checkTokenRow,
+		rpl::single(QString()),
+		st::boxLabel);
+
+	checkTokenRow->widthValue() | rpl::on_next([=](int w) {
+		checkTokenBtn->moveToLeft(0, style::ConvertScale(2));
+		tokenStatusLabel->moveToLeft(checkTokenBtn->width() + style::ConvertScale(14), style::ConvertScale(8));
+	}, checkTokenRow->lifetime());
+
+	const auto weakTokenStatusLabel = QPointer<Ui::FlatLabel>(tokenStatusLabel);
+	checkTokenBtn->setClickedCallback([=] {
+		const auto key = tokenApiKeyField->getLastText().trimmed();
+		state->tokenApiKey = key;
+		SaveSettings(*state);
+		if (weakTokenStatusLabel) weakTokenStatusLabel->setText(u"Проверка..."_q);
+		CheckMobileTokenBalance(
+			MobileTokenProvider(state->tokenService),
+			key,
+			[weakTokenStatusLabel](QString bal, QString err) {
+				if (!weakTokenStatusLabel) return;
+				if (!err.isEmpty()) {
+					weakTokenStatusLabel->setText(u"Ошибка: "_q + err);
+				} else {
+					weakTokenStatusLabel->setText(u"Баланс: "_q + bal);
+				}
+			},
+			state->antiSafetyAid);
+	});
+
+	// --- reCAPTCHA Enterprise ---
+	Ui::AddSkip(inDev, style::ConvertScale(8));
+	const auto captchaServiceBtn = inDev->add(
+		object_ptr<PickerRow>(
+			inDev,
+			u"Сервис капчи (reCAPTCHA Enterprise)"_q,
+			CaptchaProviderName(state->captchaService)));
+
+	captchaServiceBtn->setClickedCallback([=] {
+		show->show(Box([=](not_null<Ui::GenericBox*> pickBox) {
+			pickBox->setTitle(rpl::single(u"Выберите сервис решения капчи (reCAPTCHA Enterprise)"_q));
+			pickBox->setWidth(st::boxWideWidth);
+
+			const auto options = std::vector<std::pair<int, QString>>{
+				{ 0, u"Авто (из сервиса токенов TokenFast / AntiSafety)"_q },
+				{ 2, u"AntiSafety (antisafety.net)"_q },
+				{ 1, u"TokenFast (api.tokenfast.shop)"_q },
+				{ 3, u"NextCaptcha (nextcaptcha.com)"_q },
+			};
+			for (const auto &opt : options) {
+				pickBox->addRow(object_ptr<Ggtg::ActionRow>(
+					pickBox,
+					rpl::single(opt.second),
+					opt.first == 3 ? u"dashboard.nextcaptcha.com"_q : (opt.first == 1 ? u"api.tokenfast.shop"_q : QString()),
+					&st::menuIconManage)
+				)->setClickedCallback([=] {
+					state->captchaService = opt.first;
+					captchaServiceBtn->setText(rpl::single(CaptchaProviderName(opt.first)));
+					SaveSettings(*state);
+					pickBox->closeBox();
+				});
+				Ui::AddSkip(pickBox->verticalLayout(), st::defaultVerticalListSkip);
+			}
+			pickBox->addButton(tr::lng_close(), [=] { pickBox->closeBox(); });
+		}));
+	});
+
+	// --- Покупка Email ---
+	Ui::AddSkip(inDev, style::ConvertScale(8));
+	const auto autoEmailCheck = inDev->add(
+		object_ptr<Ui::Checkbox>(
+			inDev,
+			u"Покупать временную почту при запросе Telegram (SetUpEmailRequired)"_q,
+			state->autoBuyEmail),
+		style::margins(0, style::ConvertScale(4), 0, style::ConvertScale(4)));
+
+	const auto emailWrap = inDev->add(
+		object_ptr<Ui::SlideWrap<Ui::VerticalLayout>>(
+			inDev,
+			object_ptr<Ui::VerticalLayout>(inDev)),
+		style::margins());
+	const auto emailLayout = emailWrap->entity();
+
+	const auto emailServiceTitle = [](const QString &s) {
+		if (s == u"antisafety"_q) return u"AntiSafety (antisafety.net — Premium Gmail)"_q;
+		if (s == u"hero-sms"_q) return u"Hero-SMS (hero-sms.com)"_q;
+		if (s == u"smsbower"_q) return u"SMS Bower (smsbower.online)"_q;
+		return u"Авто (по сервису токенов или SMS)"_q;
+	};
+
+	const auto emailServiceBtn = emailLayout->add(
+		object_ptr<PickerRow>(
+			emailLayout,
+			u"Сервис почты"_q,
+			emailServiceTitle(state->emailService)),
+		style::margins(0, 0, 0, style::ConvertScale(4)));
+
+	emailServiceBtn->setClickedCallback([=] {
+		show->show(Box([=](not_null<Ui::GenericBox*> pickBox) {
+			pickBox->setTitle(rpl::single(u"Выберите сервис почты для активации"_q));
+			pickBox->setWidth(st::boxWideWidth);
+
+			const auto options = std::vector<std::pair<QString, QString>>{
+				{ u"auto"_q, u"Авто (по сервису токенов TokenFast / AntiSafety или SMS)"_q },
+				{ u"antisafety"_q, u"AntiSafety (antisafety.net — Premium Gmail)"_q },
+				{ u"hero-sms"_q, u"Hero-SMS (hero-sms.com)"_q },
+				{ u"smsbower"_q, u"SMS Bower (smsbower.online)"_q },
+			};
+			for (const auto &opt : options) {
+				pickBox->addRow(object_ptr<Ggtg::ActionRow>(
+					pickBox,
+					rpl::single(opt.second),
+					opt.first == u"antisafety"_q ? u"anti-ban Gmail addresses"_q : QString(),
+					&st::menuIconPhone)
+				)->setClickedCallback([=] {
+					state->emailService = opt.first;
+					emailServiceBtn->setText(rpl::single(emailServiceTitle(opt.first)));
+					SaveSettings(*state);
+					pickBox->closeBox();
+				});
+				Ui::AddSkip(pickBox->verticalLayout(), st::defaultVerticalListSkip);
+			}
+			pickBox->addButton(tr::lng_close(), [=] { pickBox->closeBox(); });
+		}));
+	});
+
+	const auto emailApiKeyField = emailLayout->add(
+		object_ptr<Ui::InputField>(
+			emailLayout,
+			FieldStyle(),
+			rpl::single(u"API-ключ почты (если отличается от SMS-сервиса)"_q),
+			state->emailApiKey),
+		style::margins(0, style::ConvertScale(4), 0, style::ConvertScale(6)));
+
+	emailApiKeyField->changes(
+	) | rpl::on_next([=] {
+		state->emailApiKey = emailApiKeyField->getLastText().trimmed();
+		SaveSettings(*state);
+	}, emailApiKeyField->lifetime());
+
+	emailWrap->toggle(state->autoBuyEmail, anim::type::instant);
+	autoEmailCheck->checkedChanges(
+	) | rpl::on_next([=](bool checked) {
+		state->autoBuyEmail = checked;
+		emailWrap->toggle(checked, anim::type::normal);
+		SaveSettings(*state);
+	}, autoEmailCheck->lifetime());
+
+	// =====================================================================
+	//  ШАГ 5: План и запуск
+	// =====================================================================
+	addSectionTo(layout,
+		u"5. План и запуск"_q,
+		u"Количество аккаунтов, потоки, задержки и управление"_q,
+		&st::menuIconManage);
+
+	const auto cardPlan = layout->add(
+		object_ptr<Ggtg::CardBox>(layout, style::margins(16, 14, 16, 14)),
+		st::boxRowPadding);
+	const auto inPlan = cardPlan->inner();
+
+	// Целевое количество
+	const auto targetSuccessField = inPlan->add(
+		object_ptr<Ui::InputField>(
+			inPlan,
+			FieldStyle(),
+			rpl::single(u"Целевое количество успешных аккаунтов"_q),
+			QString::number(state->targetSuccessCount)),
+		style::margins(0, 0, 0, style::ConvertScale(6)));
+
+	targetSuccessField->changes() | rpl::on_next([=] {
+		const auto val = targetSuccessField->getLastText().trimmed().toInt();
+		if (val > 0) {
+			state->targetSuccessCount = val;
+			SaveSettings(*state);
+		}
+	}, targetSuccessField->lifetime());
+
+	// Параллельные потоки
+	const auto threadsField = inPlan->add(
+		object_ptr<Ui::InputField>(
+			inPlan,
+			FieldStyle(),
+			rpl::single(u"Параллельные потоки (1–10)"_q),
+			QString::number(state->threadsCount)),
+		style::margins(0, 0, 0, style::ConvertScale(8)));
+
+	threadsField->changes() | rpl::on_next([=] {
+		const auto val = threadsField->getLastText().trimmed().toInt();
+		if (val >= 1 && val <= 10) {
+			state->threadsCount = val;
+			SaveSettings(*state);
+		}
+	}, threadsField->lifetime());
+
+	// Пауза между шагами
+	inPlan->add(
 		object_ptr<Ui::FlatLabel>(
-			inProcess,
+			inPlan,
+			rpl::single(u"Пауза между шагами регистрации (сек):"_q),
+			st::boxLabel),
+		style::margins(0, 0, 0, style::ConvertScale(4)));
+
+	const auto stepDelayRow = inPlan->add(object_ptr<Ui::RpWidget>(inPlan));
+	stepDelayRow->resize(stepDelayRow->width(), style::ConvertScale(42));
+
+	const auto stepMinLabel = Ui::CreateChild<Ui::FlatLabel>(
+		stepDelayRow,
+		rpl::single(u"от"_q),
+		st::boxLabel);
+	const auto stepMinField = Ui::CreateChild<Ui::InputField>(
+		stepDelayRow,
+		CompactFieldStyle(),
+		rpl::single(QString()),
+		QString::number(state->stepDelayMin));
+	stepMinField->resize(style::ConvertScale(76), stepMinField->height());
+
+	const auto stepMaxLabel = Ui::CreateChild<Ui::FlatLabel>(
+		stepDelayRow,
+		rpl::single(u"до"_q),
+		st::boxLabel);
+	const auto stepMaxField = Ui::CreateChild<Ui::InputField>(
+		stepDelayRow,
+		CompactFieldStyle(),
+		rpl::single(QString()),
+		QString::number(state->stepDelayMax));
+	stepMaxField->resize(style::ConvertScale(76), stepMaxField->height());
+
+	const auto stepSecLabel = Ui::CreateChild<Ui::FlatLabel>(
+		stepDelayRow,
+		rpl::single(u"секунд"_q),
+		st::boxLabel);
+
+	stepDelayRow->widthValue() | rpl::on_next([=](int w) {
+		stepMinLabel->moveToLeft(0, style::ConvertScale(11));
+		stepMinField->moveToLeft(stepMinLabel->width() + style::ConvertScale(8), style::ConvertScale(3));
+		stepMaxLabel->moveToLeft(stepMinField->x() + stepMinField->width() + style::ConvertScale(12), style::ConvertScale(11));
+		stepMaxField->moveToLeft(stepMaxLabel->x() + stepMaxLabel->width() + style::ConvertScale(8), style::ConvertScale(3));
+		stepSecLabel->moveToLeft(stepMaxField->x() + stepMaxField->width() + style::ConvertScale(8), style::ConvertScale(11));
+	}, stepDelayRow->lifetime());
+
+	Ui::AddSkip(inPlan, style::ConvertScale(4));
+
+	// Пауза между аккаунтами
+	inPlan->add(
+		object_ptr<Ui::FlatLabel>(
+			inPlan,
+			rpl::single(u"Пауза между аккаунтами в потоке (сек):"_q),
+			st::boxLabel),
+		style::margins(0, 0, 0, style::ConvertScale(4)));
+
+	const auto accDelayRow = inPlan->add(object_ptr<Ui::RpWidget>(inPlan));
+	accDelayRow->resize(accDelayRow->width(), style::ConvertScale(42));
+
+	const auto accMinLabel = Ui::CreateChild<Ui::FlatLabel>(
+		accDelayRow,
+		rpl::single(u"от"_q),
+		st::boxLabel);
+	const auto accMinField = Ui::CreateChild<Ui::InputField>(
+		accDelayRow,
+		CompactFieldStyle(),
+		rpl::single(QString()),
+		QString::number(state->accountDelayMin));
+	accMinField->resize(style::ConvertScale(76), accMinField->height());
+
+	const auto accMaxLabel = Ui::CreateChild<Ui::FlatLabel>(
+		accDelayRow,
+		rpl::single(u"до"_q),
+		st::boxLabel);
+	const auto accMaxField = Ui::CreateChild<Ui::InputField>(
+		accDelayRow,
+		CompactFieldStyle(),
+		rpl::single(QString()),
+		QString::number(state->accountDelayMax));
+	accMaxField->resize(style::ConvertScale(76), accMaxField->height());
+
+	const auto accSecLabel = Ui::CreateChild<Ui::FlatLabel>(
+		accDelayRow,
+		rpl::single(u"секунд"_q),
+		st::boxLabel);
+
+	accDelayRow->widthValue() | rpl::on_next([=](int w) {
+		accMinLabel->moveToLeft(0, style::ConvertScale(11));
+		accMinField->moveToLeft(accMinLabel->width() + style::ConvertScale(8), style::ConvertScale(3));
+		accMaxLabel->moveToLeft(accMinField->x() + accMinField->width() + style::ConvertScale(12), style::ConvertScale(11));
+		accMaxField->moveToLeft(accMaxLabel->x() + accMaxLabel->width() + style::ConvertScale(8), style::ConvertScale(3));
+		accSecLabel->moveToLeft(accMaxField->x() + accMaxField->width() + style::ConvertScale(8), style::ConvertScale(11));
+	}, accDelayRow->lifetime());
+
+	Ui::AddSkip(inPlan, style::ConvertScale(4));
+
+	// Ожидание SMS
+	inPlan->add(
+		object_ptr<Ui::FlatLabel>(
+			inPlan,
+			rpl::single(u"Сколько ждать SMS-код (сек):"_q),
+			st::boxLabel),
+		style::margins(0, 0, 0, style::ConvertScale(4)));
+
+	const auto smsWaitRow = inPlan->add(object_ptr<Ui::RpWidget>(inPlan));
+	smsWaitRow->resize(smsWaitRow->width(), style::ConvertScale(42));
+
+	const auto smsWaitField = Ui::CreateChild<Ui::InputField>(
+		smsWaitRow,
+		CompactFieldStyle(),
+		rpl::single(QString()),
+		QString::number(state->smsWaitSeconds));
+	smsWaitField->resize(style::ConvertScale(76), smsWaitField->height());
+
+	const auto smsWaitSecLabel = Ui::CreateChild<Ui::FlatLabel>(
+		smsWaitRow,
+		rpl::single(u"секунд (от 120 до 1800, рекомендуется 300)"_q),
+		st::boxLabel);
+
+	smsWaitRow->widthValue() | rpl::on_next([=](int w) {
+		smsWaitField->moveToLeft(0, style::ConvertScale(3));
+		smsWaitSecLabel->moveToLeft(smsWaitField->width() + style::ConvertScale(10), style::ConvertScale(11));
+	}, smsWaitRow->lifetime());
+
+	// Доп. опции очереди
+	const auto resetSessionsCheck = inPlan->add(
+		object_ptr<Ui::Checkbox>(
+			inPlan,
+			u"Сбрасывать чужие сессии после регистрации"_q,
+			state->resetSessionsAfterReg),
+		style::margins(0, style::ConvertScale(6), 0, style::ConvertScale(2)));
+	resetSessionsCheck->checkedChanges() | rpl::on_next([=](bool checked) {
+		state->resetSessionsAfterReg = checked;
+		SaveSettings(*state);
+	}, resetSessionsCheck->lifetime());
+
+	const auto reset2faCheck = inPlan->add(
+		object_ptr<Ui::Checkbox>(
+			inPlan,
+			u"Сбрасывать чужой 2FA при занятом номере (если разрешено сервером)"_q,
+			state->reset2faOnOccupied),
+		style::margins(0, style::ConvertScale(4), 0, style::ConvertScale(2)));
+	reset2faCheck->checkedChanges() | rpl::on_next([=](bool checked) {
+		state->reset2faOnOccupied = checked;
+		SaveSettings(*state);
+	}, reset2faCheck->lifetime());
+
+	// Панель управления и статус
+	Ui::AddSkip(inPlan, style::ConvertScale(8));
+	const auto statusTextLabel = inPlan->add(
+		object_ptr<Ui::FlatLabel>(
+			inPlan,
 			rpl::single(u"Готов к регистрации."_q),
 			st::boxLabel),
 		style::margins(0, style::ConvertScale(4), 0, style::ConvertScale(8)));
 
-	const auto actionBtnRow = inProcess->add(object_ptr<Ui::RpWidget>(inProcess));
+	const auto actionBtnRow = inPlan->add(object_ptr<Ui::RpWidget>(inPlan));
 	actionBtnRow->resize(actionBtnRow->width(), style::ConvertScale(46));
 
 	const auto startBtn = Ui::CreateChild<Ui::RoundButton>(
@@ -5327,609 +6261,7 @@ inline void FillRegistrationBox(
 	}
 
 	// =====================================================================
-	//  РАСШИРЕННЫЕ НАСТРОЙКИ (свёрнуты по умолчанию)
-	// =====================================================================
-	Ui::AddSkip(layout, style::ConvertScale(8));
-
-	const auto advToggleCard = layout->add(
-		object_ptr<Ggtg::CardBox>(layout, style::margins(16, 10, 16, 10)),
-		st::boxRowPadding);
-	const auto advToggle = advToggleCard->inner()->add(
-		object_ptr<Ggtg::ActionRow>(
-			advToggleCard->inner(),
-			rpl::single(u"Расширенные настройки"_q),
-			u"Email, токены, прокси, 2FA, потоки, задержки"_q,
-			&st::menuIconSettings));
-
-	const auto advancedWrap = layout->add(
-		object_ptr<Ui::SlideWrap<Ui::VerticalLayout>>(
-			layout,
-			object_ptr<Ui::VerticalLayout>(layout)));
-	advancedWrap->toggle(false, anim::type::instant);
-
-	advToggle->setClickedCallback([=] {
-		advancedWrap->toggle(
-			!advancedWrap->toggled(),
-			anim::type::normal);
-	});
-
-	const auto advLayout = advancedWrap->entity();
-
-	// ----- Расш.: Email -----
-	addSectionTo(advLayout,
-		u"Покупка Email"_q,
-		u"Автоматическая покупка временной почты при запросе Telegram"_q,
-		&st::menuIconPhone);
-
-	const auto cardEmail = advLayout->add(
-		object_ptr<Ggtg::CardBox>(advLayout, style::margins(16, 14, 16, 14)),
-		st::boxRowPadding);
-	const auto inEmail = cardEmail->inner();
-
-	const auto autoEmailCheck = inEmail->add(
-		object_ptr<Ui::Checkbox>(
-			inEmail,
-			u"Покупать временную почту при запросе Telegram (Hero-SMS / SMSBower)"_q,
-			state->autoBuyEmail),
-		style::margins(0, style::ConvertScale(4), 0, style::ConvertScale(4)));
-
-	const auto emailWrap = inEmail->add(
-		object_ptr<Ui::SlideWrap<Ui::VerticalLayout>>(
-			inEmail,
-			object_ptr<Ui::VerticalLayout>(inEmail)),
-		style::margins());
-	const auto emailLayout = emailWrap->entity();
-
-	emailLayout->add(
-		object_ptr<Ui::FlatLabel>(
-			emailLayout,
-			rpl::single(u"Если Telegram потребует Email (SetUpEmailRequired), модуль сам закажет почту, получит код и завершит авторизацию."_q),
-			st::boxDividerLabel),
-		style::margins(0, style::ConvertScale(2), 0, style::ConvertScale(6)));
-
-	const auto emailApiKeyField = emailLayout->add(
-		object_ptr<Ui::InputField>(
-			emailLayout,
-			FieldStyle(),
-			rpl::single(u"Отдельный API-ключ почты (необязательно, если совпадает с SMS)"_q),
-			state->emailApiKey),
-		style::margins(0, style::ConvertScale(6), 0, style::ConvertScale(4)));
-
-	emailApiKeyField->changes(
-	) | rpl::on_next([=] {
-		state->emailApiKey = emailApiKeyField->getLastText().trimmed();
-		SaveSettings(*state);
-	}, emailApiKeyField->lifetime());
-
-	emailWrap->toggle(state->autoBuyEmail, anim::type::instant);
-	autoEmailCheck->checkedChanges(
-	) | rpl::on_next([=](bool checked) {
-		state->autoBuyEmail = checked;
-		emailWrap->toggle(checked, anim::type::normal);
-		SaveSettings(*state);
-	}, autoEmailCheck->lifetime());
-
-	// ----- Расш.: Эмуляция Android и токены -----
-	addSectionTo(advLayout,
-		u"Эмуляция Android и токены"_q,
-		u"Параметры устройств Android и токены Play Integrity / SafetyNet"_q,
-		&st::menuIconDevices);
-
-	const auto cardDev = advLayout->add(
-		object_ptr<Ggtg::CardBox>(advLayout, style::margins(16, 14, 16, 14)),
-		st::boxRowPadding);
-	const auto inDev = cardDev->inner();
-
-	const auto dbInfoCount = CountBaseDbProfiles();
-	inDev->add(
-		object_ptr<Ui::FlatLabel>(
-			inDev,
-			rpl::single(dbInfoCount > 0
-				? (u"Параметры Android: автоматическая генерация по базе Base.db (%1 моделей)"_q.arg(dbInfoCount))
-				: u"Параметры Android: встроенный генератор AndroidProfiles (550+ моделей)"_q),
-			st::boxLabel),
-		style::margins(0, 0, 0, style::ConvertScale(8)));
-
-	const auto tokenProviderTitle = [](int s) {
-		if (s == 1) return u"TokenFast (tokenfast.shop/api)"_q;
-		if (s == 2) return u"AntiSafety (antisafety.net)"_q;
-		return u"Без сервиса токенов (только Base.db)"_q;
-	};
-	const auto advTokenServiceBtn = inDev->add(
-		object_ptr<PickerRow>(
-			inDev,
-			u"Сервис токенов"_q,
-			tokenProviderTitle(state->tokenService)));
-
-	advTokenServiceBtn->setClickedCallback([=] {
-		show->show(Box([=](not_null<Ui::GenericBox*> pickBox) {
-			pickBox->setTitle(rpl::single(u"Выберите сервис токенов Play Integrity / SafetyNet"_q));
-			pickBox->setWidth(st::boxWideWidth);
-
-			const auto options = std::vector<std::pair<int, QString>>{
-				{ 1, u"TokenFast (tokenfast.shop/api)"_q },
-				{ 2, u"AntiSafety (antisafety.net)"_q },
-				{ 0, u"Без сервиса токенов (только параметры устройства)"_q },
-			};
-			for (const auto &opt : options) {
-				pickBox->addRow(object_ptr<Ggtg::ActionRow>(
-					pickBox,
-					rpl::single(opt.second),
-					opt.first == 1 ? u"api.tokenfast.shop"_q : (opt.first == 2 ? u"antisafety.net"_q : QString()),
-					&st::menuIconDiscussion)
-				)->setClickedCallback([=] {
-					state->tokenService = opt.first;
-					advTokenServiceBtn->setText(rpl::single(tokenProviderTitle(opt.first)));
-					tokenServiceBtn->setText(rpl::single(TokenProviderName(opt.first)));
-					SaveSettings(*state);
-					pickBox->closeBox();
-				});
-				Ui::AddSkip(pickBox->verticalLayout(), st::defaultVerticalListSkip);
-			}
-			pickBox->addButton(tr::lng_close(), [=] { pickBox->closeBox(); });
-		}));
-	});
-
-	const auto advTokenApiKeyField = inDev->add(
-		object_ptr<Ui::InputField>(
-			inDev,
-			FieldStyle(),
-			rpl::single(u"API-ключ сервиса токенов (TokenFast / AntiSafety)"_q),
-			state->tokenApiKey),
-		style::margins(0, style::ConvertScale(6), 0, style::ConvertScale(6)));
-
-	advTokenApiKeyField->changes(
-	) | rpl::on_next([=] {
-		const auto key = advTokenApiKeyField->getLastText().trimmed();
-		state->tokenApiKey = key;
-		if (tokenApiKeyField->getLastText().trimmed() != key) {
-			tokenApiKeyField->setText(key);
-		}
-		SaveSettings(*state);
-	}, advTokenApiKeyField->lifetime());
-
-	const auto advCheckTokenRow = inDev->add(object_ptr<Ui::RpWidget>(inDev));
-	advCheckTokenRow->resize(advCheckTokenRow->width(), style::ConvertScale(38));
-
-	const auto advCheckTokenBtn = Ui::CreateChild<Ui::RoundButton>(
-		advCheckTokenRow,
-		rpl::single(u"Проверить баланс"_q),
-		st::defaultActiveButton);
-
-	const auto advTokenStatusLabel = Ui::CreateChild<Ui::FlatLabel>(
-		advCheckTokenRow,
-		rpl::single(QString()),
-		st::boxLabel);
-
-	advCheckTokenRow->widthValue() | rpl::on_next([=](int w) {
-		advCheckTokenBtn->moveToLeft(0, style::ConvertScale(2));
-		advTokenStatusLabel->moveToLeft(advCheckTokenBtn->width() + style::ConvertScale(14), style::ConvertScale(8));
-	}, advCheckTokenRow->lifetime());
-
-	const auto weakAdvTokenStatusLabel = QPointer<Ui::FlatLabel>(advTokenStatusLabel);
-	advCheckTokenBtn->setClickedCallback([=] {
-		const auto key = advTokenApiKeyField->getLastText().trimmed();
-		state->tokenApiKey = key;
-		SaveSettings(*state);
-		if (weakAdvTokenStatusLabel) weakAdvTokenStatusLabel->setText(u"Проверка..."_q);
-		CheckMobileTokenBalance(
-			MobileTokenProvider(state->tokenService),
-			key,
-			[weakAdvTokenStatusLabel](QString bal, QString err) {
-				if (!weakAdvTokenStatusLabel) return;
-				if (!err.isEmpty()) {
-					weakAdvTokenStatusLabel->setText(u"Ошибка: "_q + err);
-				} else {
-					weakAdvTokenStatusLabel->setText(u"Баланс: "_q + bal);
-				}
-			});
-	});
-
-	// --- Сервис решения капчи (reCAPTCHA Enterprise) ---
-	Ui::AddSkip(inDev, style::ConvertScale(8));
-	const auto advCaptchaServiceBtn = inDev->add(
-		object_ptr<PickerRow>(
-			inDev,
-			u"Сервис капчи (reCAPTCHA)"_q,
-			CaptchaProviderName(state->captchaService)));
-
-	advCaptchaServiceBtn->setClickedCallback([=] {
-		show->show(Box([=](not_null<Ui::GenericBox*> pickBox) {
-			pickBox->setTitle(rpl::single(u"Выберите сервис решения капчи (reCAPTCHA Enterprise)"_q));
-			pickBox->setWidth(st::boxWideWidth);
-
-			const auto options = std::vector<std::pair<int, QString>>{
-				{ 0, u"Авто (из сервиса токенов TokenFast / AntiSafety)"_q },
-				{ 1, u"TokenFast (api.tokenfast.shop)"_q },
-				{ 2, u"AntiSafety (antisafety.net)"_q },
-				{ 3, u"NextCaptcha (nextcaptcha.com)"_q },
-			};
-			for (const auto &opt : options) {
-				pickBox->addRow(object_ptr<Ggtg::ActionRow>(
-					pickBox,
-					rpl::single(opt.second),
-					opt.first == 3 ? u"dashboard.nextcaptcha.com"_q : (opt.first == 1 ? u"api.tokenfast.shop"_q : QString()),
-					&st::menuIconManage)
-				)->setClickedCallback([=] {
-					state->captchaService = opt.first;
-					advCaptchaServiceBtn->setText(rpl::single(CaptchaProviderName(opt.first)));
-					SaveSettings(*state);
-					pickBox->closeBox();
-				});
-				Ui::AddSkip(pickBox->verticalLayout(), st::defaultVerticalListSkip);
-			}
-			pickBox->addButton(tr::lng_close(), [=] { pickBox->closeBox(); });
-		}));
-	});
-
-	const auto advCaptchaApiKeyField = inDev->add(
-		object_ptr<Ui::InputField>(
-			inDev,
-			FieldStyle(),
-			rpl::single(u"API-ключ капчи (если отличается от ключа токенов)"_q),
-			state->captchaApiKey),
-		style::margins(0, style::ConvertScale(6), 0, style::ConvertScale(6)));
-
-	advCaptchaApiKeyField->changes(
-	) | rpl::on_next([=] {
-		state->captchaApiKey = advCaptchaApiKeyField->getLastText().trimmed();
-		SaveSettings(*state);
-	}, advCaptchaApiKeyField->lifetime());
-
-	const auto advCheckCaptchaRow = inDev->add(object_ptr<Ui::RpWidget>(inDev));
-	advCheckCaptchaRow->resize(advCheckCaptchaRow->width(), style::ConvertScale(38));
-
-	const auto advCheckCaptchaBtn = Ui::CreateChild<Ui::RoundButton>(
-		advCheckCaptchaRow,
-		rpl::single(u"Проверить баланс капчи"_q),
-		st::defaultActiveButton);
-
-	const auto advCaptchaStatusLabel = Ui::CreateChild<Ui::FlatLabel>(
-		advCheckCaptchaRow,
-		rpl::single(QString()),
-		st::boxLabel);
-
-	advCheckCaptchaRow->widthValue() | rpl::on_next([=](int w) {
-		advCheckCaptchaBtn->moveToLeft(0, style::ConvertScale(2));
-		advCaptchaStatusLabel->moveToLeft(advCheckCaptchaBtn->width() + style::ConvertScale(14), style::ConvertScale(8));
-	}, advCheckCaptchaRow->lifetime());
-
-	const auto weakAdvCaptchaStatusLabel = QPointer<Ui::FlatLabel>(advCaptchaStatusLabel);
-	advCheckCaptchaBtn->setClickedCallback([=] {
-		auto key = advCaptchaApiKeyField->getLastText().trimmed();
-		if (key.isEmpty()) {
-			key = state->tokenApiKey.trimmed();
-		}
-		SaveSettings(*state);
-		if (weakAdvCaptchaStatusLabel) weakAdvCaptchaStatusLabel->setText(u"Проверка..."_q);
-		int provider = state->captchaService;
-		if (provider == 0) {
-			provider = state->tokenService;
-		}
-		CheckCaptchaBalance(
-			provider,
-			key,
-			[weakAdvCaptchaStatusLabel](QString bal, QString err) {
-				if (!weakAdvCaptchaStatusLabel) return;
-				if (!err.isEmpty()) {
-					weakAdvCaptchaStatusLabel->setText(u"Ошибка: "_q + err);
-				} else {
-					weakAdvCaptchaStatusLabel->setText(u"Баланс: "_q + bal);
-				}
-			});
-	});
-
-	const auto replaceTokenCheck = inDev->add(
-		object_ptr<Ui::Checkbox>(
-			inDev,
-			u"Заменять токен при флуде номера, неиспользованные токены хранить в резерве"_q,
-			state->replaceTokenOnFlood),
-		style::margins(0, style::ConvertScale(8), 0, style::ConvertScale(2)));
-	replaceTokenCheck->checkedChanges(
-	) | rpl::on_next([=](bool checked) {
-		state->replaceTokenOnFlood = checked;
-		SaveSettings(*state);
-	}, replaceTokenCheck->lifetime());
-
-	Ui::AddSkip(inDev, style::ConvertScale(8));
-	const auto autoExportCheck = inDev->add(
-		object_ptr<Ui::Checkbox>(
-			inDev,
-			u"Автоматически формировать пакет .ggtg для приложения Android"_q,
-			state->autoExportGgtg),
-		style::margins(0, style::ConvertScale(4), 0, style::ConvertScale(2)));
-
-	inDev->add(
-		object_ptr<Ui::FlatLabel>(
-			inDev,
-			rpl::single(u"В файл .ggtg включаются: авторизационные ключи Android, прокси, пароль 2FA и параметры устройства. Файлы сохраняются в общую папку аккаунтов на диске."_q),
-			st::boxDividerLabel),
-		style::margins(0, 0, 0, style::ConvertScale(6)));
-
-	autoExportCheck->checkedChanges(
-	) | rpl::on_next([=](bool checked) {
-		state->autoExportGgtg = checked;
-		SaveSettings(*state);
-	}, autoExportCheck->lifetime());
-
-	// ----- Расш.: Настройки SMS-заказа -----
-	addSectionTo(advLayout,
-		u"Настройки SMS-заказа"_q,
-		u"Оператор, макс. цена"_q,
-		&st::menuIconPhone);
-
-	const auto cardSms = advLayout->add(
-		object_ptr<Ggtg::CardBox>(advLayout, style::margins(16, 14, 16, 14)),
-		st::boxRowPadding);
-	const auto inSms = cardSms->inner();
-
-	const auto advOperatorField = inSms->add(
-		object_ptr<Ui::InputField>(
-			inSms,
-			FieldStyle(),
-			rpl::single(u"Оператор (пусто или any = любой)"_q),
-			state->smsOperator),
-		style::margins(0, 0, 0, style::ConvertScale(6)));
-
-	advOperatorField->changes() | rpl::on_next([=] {
-		const auto val = advOperatorField->getLastText().trimmed();
-		state->smsOperator = val;
-		updateOperatorSubtitle();
-		SaveSettings(*state);
-	}, advOperatorField->lifetime());
-
-	const auto advMaxPriceField = inSms->add(
-		object_ptr<Ui::InputField>(
-			inSms,
-			FieldStyle(),
-			rpl::single(u"Макс. цена за номер (пусто = без лимита)"_q),
-			state->maxPrice),
-		style::margins(0, 0, 0, style::ConvertScale(6)));
-
-	advMaxPriceField->changes() | rpl::on_next([=] {
-		const auto val = advMaxPriceField->getLastText().trimmed();
-		state->maxPrice = val;
-		if (maxPriceField->getLastText().trimmed() != val) {
-			maxPriceField->setText(val);
-		}
-		SaveSettings(*state);
-	}, advMaxPriceField->lifetime());
-
-	inSms->add(
-		object_ptr<Ui::FlatLabel>(
-			inSms,
-			rpl::single(u"Оператор и максимальная цена передаются SMS-сервису при заказе номера. Не все сервисы поддерживают эти параметры."_q),
-			st::boxDividerLabel),
-		style::margins(0, 0, 0, style::ConvertScale(6)));
-
-	const auto resetAfterRegCheck = inSms->add(
-		object_ptr<Ui::Checkbox>(
-			inSms,
-			u"Сбрасывать другие сессии после регистрации"_q,
-			state->resetSessionsAfterReg),
-		style::margins(0, style::ConvertScale(4), 0, style::ConvertScale(2)));
-	inSms->add(
-		object_ptr<Ui::FlatLabel>(
-			inSms,
-			rpl::single(u"Вызывает ResetAuthorizations после успешной регистрации — завершает все другие сессии на номере."_q),
-			st::boxDividerLabel),
-		style::margins(0, 0, 0, style::ConvertScale(6)));
-	resetAfterRegCheck->checkedChanges(
-	) | rpl::on_next([=](bool checked) {
-		state->resetSessionsAfterReg = checked;
-		SaveSettings(*state);
-	}, resetAfterRegCheck->lifetime());
-
-	const auto reset2faCheck = inSms->add(
-		object_ptr<Ui::Checkbox>(
-			inSms,
-			u"Запрашивать сброс 2FA на занятых номерах"_q,
-			state->reset2faOnOccupied),
-		style::margins(0, style::ConvertScale(4), 0, style::ConvertScale(2)));
-	inSms->add(
-		object_ptr<Ui::FlatLabel>(
-			inSms,
-			rpl::single(u"Если номер уже зарегистрирован с паролем 2FA, отправляет запрос на сброс пароля (ResetPasswordRequest) перед отменой номера."_q),
-			st::boxDividerLabel),
-		style::margins(0, 0, 0, style::ConvertScale(6)));
-	reset2faCheck->checkedChanges(
-	) | rpl::on_next([=](bool checked) {
-		state->reset2faOnOccupied = checked;
-		SaveSettings(*state);
-	}, reset2faCheck->lifetime());
-
-
-
-	// ----- Расш.: Параметры очереди -----
-	addSectionTo(advLayout,
-		u"Параметры очереди"_q,
-		u"Потоки, задержки и фильтрация номеров"_q,
-		&st::menuIconStats);
-
-	const auto cardQueue = advLayout->add(
-		object_ptr<Ggtg::CardBox>(advLayout, style::margins(16, 14, 16, 14)),
-		st::boxRowPadding);
-	const auto inQueue = cardQueue->inner();
-
-	const auto threadsField = inQueue->add(
-		object_ptr<Ui::InputField>(
-			inQueue,
-			FieldStyle(),
-			rpl::single(u"Параллельные потоки (1–10)"_q),
-			QString::number(state->threadsCount)),
-		style::margins(0, 0, 0, style::ConvertScale(8)));
-
-	// Пауза между шагами
-	inQueue->add(
-		object_ptr<Ui::FlatLabel>(
-			inQueue,
-			rpl::single(u"Пауза между шагами регистрации (сек):"_q),
-			st::boxLabel),
-		style::margins(0, 0, 0, style::ConvertScale(4)));
-
-	const auto stepDelayRow = inQueue->add(object_ptr<Ui::RpWidget>(inQueue));
-	stepDelayRow->resize(stepDelayRow->width(), style::ConvertScale(42));
-
-	const auto stepMinLabel = Ui::CreateChild<Ui::FlatLabel>(
-		stepDelayRow,
-		rpl::single(u"от"_q),
-		st::boxLabel);
-	const auto stepMinField = Ui::CreateChild<Ui::InputField>(
-		stepDelayRow,
-		CompactFieldStyle(),
-		rpl::single(QString()),
-		QString::number(state->stepDelayMin));
-	stepMinField->resize(style::ConvertScale(76), stepMinField->height());
-
-	const auto stepMaxLabel = Ui::CreateChild<Ui::FlatLabel>(
-		stepDelayRow,
-		rpl::single(u"до"_q),
-		st::boxLabel);
-	const auto stepMaxField = Ui::CreateChild<Ui::InputField>(
-		stepDelayRow,
-		CompactFieldStyle(),
-		rpl::single(QString()),
-		QString::number(state->stepDelayMax));
-	stepMaxField->resize(style::ConvertScale(76), stepMaxField->height());
-
-	const auto stepSecLabel = Ui::CreateChild<Ui::FlatLabel>(
-		stepDelayRow,
-		rpl::single(u"секунд"_q),
-		st::boxLabel);
-
-	stepDelayRow->widthValue() | rpl::on_next([=](int w) {
-		stepMinLabel->moveToLeft(0, style::ConvertScale(11));
-		stepMinField->moveToLeft(stepMinLabel->width() + style::ConvertScale(8), style::ConvertScale(3));
-		stepMaxLabel->moveToLeft(stepMinField->x() + stepMinField->width() + style::ConvertScale(12), style::ConvertScale(11));
-		stepMaxField->moveToLeft(stepMaxLabel->x() + stepMaxLabel->width() + style::ConvertScale(8), style::ConvertScale(3));
-		stepSecLabel->moveToLeft(stepMaxField->x() + stepMaxField->width() + style::ConvertScale(8), style::ConvertScale(11));
-	}, stepDelayRow->lifetime());
-
-	Ui::AddSkip(inQueue, style::ConvertScale(4));
-
-	// Пауза между аккаунтами
-	inQueue->add(
-		object_ptr<Ui::FlatLabel>(
-			inQueue,
-			rpl::single(u"Пауза между аккаунтами в потоке (сек):"_q),
-			st::boxLabel),
-		style::margins(0, 0, 0, style::ConvertScale(4)));
-
-	const auto accDelayRow = inQueue->add(object_ptr<Ui::RpWidget>(inQueue));
-	accDelayRow->resize(accDelayRow->width(), style::ConvertScale(42));
-
-	const auto accMinLabel = Ui::CreateChild<Ui::FlatLabel>(
-		accDelayRow,
-		rpl::single(u"от"_q),
-		st::boxLabel);
-	const auto accMinField = Ui::CreateChild<Ui::InputField>(
-		accDelayRow,
-		CompactFieldStyle(),
-		rpl::single(QString()),
-		QString::number(state->accountDelayMin));
-	accMinField->resize(style::ConvertScale(76), accMinField->height());
-
-	const auto accMaxLabel = Ui::CreateChild<Ui::FlatLabel>(
-		accDelayRow,
-		rpl::single(u"до"_q),
-		st::boxLabel);
-	const auto accMaxField = Ui::CreateChild<Ui::InputField>(
-		accDelayRow,
-		CompactFieldStyle(),
-		rpl::single(QString()),
-		QString::number(state->accountDelayMax));
-	accMaxField->resize(style::ConvertScale(76), accMaxField->height());
-
-	const auto accSecLabel = Ui::CreateChild<Ui::FlatLabel>(
-		accDelayRow,
-		rpl::single(u"секунд"_q),
-		st::boxLabel);
-
-	accDelayRow->widthValue() | rpl::on_next([=](int w) {
-		accMinLabel->moveToLeft(0, style::ConvertScale(11));
-		accMinField->moveToLeft(accMinLabel->width() + style::ConvertScale(8), style::ConvertScale(3));
-		accMaxLabel->moveToLeft(accMinField->x() + accMinField->width() + style::ConvertScale(12), style::ConvertScale(11));
-		accMaxField->moveToLeft(accMaxLabel->x() + accMaxLabel->width() + style::ConvertScale(8), style::ConvertScale(3));
-		accSecLabel->moveToLeft(accMaxField->x() + accMaxField->width() + style::ConvertScale(8), style::ConvertScale(11));
-	}, accDelayRow->lifetime());
-
-	Ui::AddSkip(inQueue, style::ConvertScale(4));
-
-	// Ожидание SMS
-	inQueue->add(
-		object_ptr<Ui::FlatLabel>(
-			inQueue,
-			rpl::single(u"Сколько ждать SMS-код (сек):"_q),
-			st::boxLabel),
-		style::margins(0, 0, 0, style::ConvertScale(4)));
-
-	const auto smsWaitRow = inQueue->add(object_ptr<Ui::RpWidget>(inQueue));
-	smsWaitRow->resize(smsWaitRow->width(), style::ConvertScale(42));
-
-	const auto smsWaitField = Ui::CreateChild<Ui::InputField>(
-		smsWaitRow,
-		CompactFieldStyle(),
-		rpl::single(QString()),
-		QString::number(state->smsWaitSeconds));
-	smsWaitField->resize(style::ConvertScale(76), smsWaitField->height());
-
-	const auto smsWaitSecLabel = Ui::CreateChild<Ui::FlatLabel>(
-		smsWaitRow,
-		rpl::single(u"секунд (от 120 до 1800, рекомендуется 300)"_q),
-		st::boxLabel);
-
-	smsWaitRow->widthValue() | rpl::on_next([=](int w) {
-		smsWaitField->moveToLeft(0, style::ConvertScale(3));
-		smsWaitSecLabel->moveToLeft(smsWaitField->width() + style::ConvertScale(10), style::ConvertScale(11));
-	}, smsWaitRow->lifetime());
-
-	inQueue->add(
-		object_ptr<Ui::FlatLabel>(
-			inQueue,
-			rpl::single(u"Номер обычно живёт у сервиса около 20 минут, а слишком короткое ожидание отменяет номера, на которые код ещё придёт (и баланс может потеряться). Если SMS не придёт за это время, программа отменит номер и вернёт средства в сервис (статус 8)."_q),
-			st::boxDividerLabel),
-		style::margins(0, style::ConvertScale(4), 0, style::ConvertScale(10)));
-
-	const auto queueSkipAppCheck = inQueue->add(
-		object_ptr<Ui::Checkbox>(
-			inQueue,
-			u"Отклонять номер, если код отправлен в приложение (номер занят)"_q,
-			state->skipAppCode),
-		style::margins(0, style::ConvertScale(4), 0, style::ConvertScale(2)));
-	inQueue->add(
-		object_ptr<Ui::FlatLabel>(
-			inQueue,
-			rpl::single(u"Если номер уже зарегистрирован в Telegram, код отправляется в приложение, а не в SMS. Опция автоматически отменяет номер (статус 8) и возвращает средства в SMS-сервис."_q),
-			st::boxDividerLabel),
-		style::margins(0, 0, 0, style::ConvertScale(6)));
-	*queueSkipAppHolder = queueSkipAppCheck;
-	queueSkipAppCheck->checkedChanges(
-	) | rpl::on_next([=](bool checked) {
-		state->skipAppCode = checked;
-		skipAppCheck->setChecked(checked);
-		SaveSettings(*state);
-	}, queueSkipAppCheck->lifetime());
-
-	const auto filterCheck = inQueue->add(
-		object_ptr<Ui::Checkbox>(
-			inQueue,
-			u"Фильтровать номера перед регистрацией"_q,
-			state->filterNumbers),
-		style::margins(0, style::ConvertScale(4), 0, style::ConvertScale(2)));
-	inQueue->add(
-		object_ptr<Ui::FlatLabel>(
-			inQueue,
-			rpl::single(u"Программа помнит номера, которые уже не подошли (заняты, заблокированы, неверные), и сразу отменяет их при повторной выдаче, не запрашивая код."_q),
-			st::boxDividerLabel),
-		style::margins(0, 0, 0, style::ConvertScale(6)));
-	filterCheck->checkedChanges(
-	) | rpl::on_next([=](bool checked) {
-		state->filterNumbers = checked;
-		SaveSettings(*state);
-	}, filterCheck->lifetime());
-
-	// =====================================================================
-	//  ЖУРНАЛ ДЕЙСТВИЙ (всегда виден)
+	//  ЖУРНАЛ ДЕЙСТВИЙ
 	// =====================================================================
 	addSectionTo(layout,
 		u"Журнал действий"_q,
@@ -5973,9 +6305,7 @@ inline void FillRegistrationBox(
 		}
 	});
 
-	// =====================================================================
-	//  ОБРАБОТЧИК ЗАПУСКА
-	// =====================================================================
+	// Обработчик кнопки запуска
 	startBtn->setClickedCallback([=] {
 		state->apiKey = apiKeyField->getLastText().trimmed();
 		state->apiKeys.insert(state->serviceId, state->apiKey);
@@ -6028,16 +6358,61 @@ inline void FillRegistrationBox(
 	});
 }
 
-inline object_ptr<Ui::GenericBox> MakeRegistrationBox(not_null<Window::SessionController*> controller) {
+inline object_ptr<Ui::GenericBox> MakeRegistrationBox(
+		not_null<Window::SessionController*> controller) {
 	return Box([=](not_null<Ui::GenericBox*> box) {
 		FillRegistrationBox(box, controller);
 	});
 }
 
+inline void FillPhoneMigrationBox(
+		not_null<Ui::GenericBox*> box,
+		not_null<Window::SessionController*> controller,
+		std::vector<not_null<Main::Account*>> initialAccounts = {}) {
+	box->setTitle(rpl::single(u"Смена номера (миграция)"_q));
+	box->setWidth(st::boxWideWidth + style::ConvertScale(120));
+
+	const auto state = box->lifetime().make_state<SettingsData>(LoadSettings());
+	const auto layout = box->verticalLayout();
+
+	FillPhoneMigrationContent(layout, box, controller, state, std::move(initialAccounts));
+
+	box->addButton(tr::lng_close(), [=] {
+		SaveSettings(*state);
+		box->closeBox();
+	});
+}
+
+inline object_ptr<Ui::GenericBox> MakePhoneMigrationBox(
+		not_null<Window::SessionController*> controller,
+		std::vector<not_null<Main::Account*>> initialAccounts = {}) {
+	return Box([=](not_null<Ui::GenericBox*> box) {
+		FillPhoneMigrationBox(box, controller, initialAccounts);
+	});
+}
+
+inline void ShowPhoneMigrationBox(
+		not_null<Window::SessionController*> controller,
+		std::vector<not_null<Main::Account*>> initialAccounts = {}) {
+	controller->show(MakePhoneMigrationBox(controller, std::move(initialAccounts)));
+}
 } // namespace Registration
 
-inline object_ptr<Ui::GenericBox> MakeRegistrationBox(not_null<Window::SessionController*> controller) {
+inline object_ptr<Ui::GenericBox> MakeRegistrationBox(
+		not_null<Window::SessionController*> controller) {
 	return Registration::MakeRegistrationBox(controller);
+}
+
+inline object_ptr<Ui::GenericBox> MakePhoneMigrationBox(
+		not_null<Window::SessionController*> controller,
+		std::vector<not_null<Main::Account*>> initialAccounts = {}) {
+	return Registration::MakePhoneMigrationBox(controller, std::move(initialAccounts));
+}
+
+inline void ShowPhoneMigrationBox(
+		not_null<Window::SessionController*> controller,
+		std::vector<not_null<Main::Account*>> initialAccounts = {}) {
+	Registration::ShowPhoneMigrationBox(controller, std::move(initialAccounts));
 }
 
 } // namespace Settings

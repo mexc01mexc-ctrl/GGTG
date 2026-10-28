@@ -51,6 +51,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "settings/ggtg_export.h"
 #include "settings/ggtg_session_json.h"
 #include "core/ggtg_sessions.h"
+#include "settings/ggtg_registration.h"
 #include "main/main_domain.h"
 #include "main/session_duplicate.h"
 #include "main/main_session.h"
@@ -728,14 +729,9 @@ void BuildBulkProgressBox(
 	}));
 }
 
-// What differs between the kinds of bulk run: the process name and the
-// pause between accounts (the spam check is far lighter than editing a
-// profile, so it goes faster).
 struct BulkOptions {
 	QString title = u"Массовое действие"_q;
 	Fn<crl::time()> pause;
-	// What a failed row says before the reason ("" for a verdict that is
-	// not an error: the spam check calls a limited account a result).
 	QString failPrefix = u"ошибка: "_q;
 };
 
@@ -1098,6 +1094,97 @@ void StepSwapToBackup(
 				? (u"на резервной от "_q + created
 					+ u", прежняя стала резервной"_q)
 				: error);
+	});
+}
+
+void StepAntiTheftProtection(
+		not_null<Main::Account*> account,
+		StepDone done) {
+	namespace Sessions = Core::GgtgSessions;
+	if (!Main::AccountIsLive(account)) {
+		done(false, u"нет активной сессии"_q);
+		return;
+	}
+	const auto userId = QString::number(account->session().userId().bare);
+	const auto vault = Sessions::LoadVault();
+	auto backups = std::vector<Sessions::StoredSession>();
+	for (const auto &entry : Sessions::StoredForUser(vault, userId)) {
+		if ((entry.role == u"backup"_q || entry.role == u"anti_theft_backup"_q)
+			&& QDir(Sessions::VaultFolder(entry) + u"/tdata"_q).exists()
+			&& entry.state != u"revoked"_q) {
+			backups.push_back(entry);
+		}
+	}
+
+	done = GuardedDone(done).done;
+
+	if (backups.empty()) {
+		CreateBackupSessionWith(
+			account,
+			u"резервная (анти-угон)"_q,
+			MakeSessionPasswordPrompt(account),
+			[=](QString err, QString id) {
+				if (!err.isEmpty()) {
+					done(false, u"ошибка создания сессии: "_q + err);
+					return;
+				}
+				done(true, u"Резервная сессия создана. Запущен таймер 24ч отлёжки (Telegram блокирует сброс чужих сессий)."_q);
+			});
+		return;
+	}
+
+	std::sort(backups.begin(), backups.end(), [](const auto &a, const auto &b) {
+		return a.createdAt < b.createdAt;
+	});
+	const auto oldest = backups.front();
+
+	if (!Sessions::IsSessionTrusted(oldest)) {
+		const auto countdown = Sessions::TrustCountdownString(oldest);
+		done(false, u"Сессия на отлёжке (%1). Сброс сессий продавца пока заблокирован Telegram."_q.arg(countdown));
+		return;
+	}
+
+	auto purchasedIds = std::vector<QString>();
+	for (const auto &entry : Sessions::StoredForUser(vault, userId)) {
+		if (entry.role == u"purchased"_q || entry.role == u"imported"_q) {
+			purchasedIds.push_back(entry.id);
+		}
+	}
+
+	SwapToStoredSession(account, oldest.id, [=](QString swapErr) {
+		if (!swapErr.isEmpty()) {
+			done(false, u"не удалось переключить сессию: "_q + swapErr);
+			return;
+		}
+
+		auto nowAcc = (Main::Account*)nullptr;
+		for (const auto &a : Core::App().domain().orderedAccounts()) {
+			if (a->sessionExists() && QString::number(a->session().userId().bare) == userId) {
+				nowAcc = a.get();
+				break;
+			}
+		}
+		if (!nowAcc) {
+			done(true, u"Сессия переключена на резервную"_q);
+			return;
+		}
+
+		TerminateOtherSessions(nowAcc, [=](QString termErr, QString report) {
+			for (const auto &pid : purchasedIds) {
+				Sessions::RemoveStored(pid);
+			}
+
+			CreateBackupSession(nowAcc, u"резервная копия"_q, [=](QString backupErr) {
+				auto msg = u"Защита от угона завершена: сессия продавца разорвана и удалена"_q;
+				if (!report.isEmpty()) {
+					msg += u" ("_q + report + u")"_q;
+				}
+				if (backupErr.isEmpty()) {
+					msg += u", создан свежий бэкап"_q;
+				}
+				done(true, msg);
+			});
+		});
 	});
 }
 
@@ -1683,6 +1770,179 @@ void ShowBulkSwapToBackupBox(
 			});
 		});
 		Ggtg::AddBackButton(box);
+	}));
+}
+
+void ShowBulkAntiTheftBox(
+		not_null<Window::SessionController*> controller,
+		Accounts accounts) {
+	namespace Sessions = Core::GgtgSessions;
+	const auto vault = Sessions::LoadVault();
+
+	int needBackup = 0;
+	int waitingCooldown = 0;
+	int readyToProtect = 0;
+
+	for (const auto &account : accounts) {
+		if (!Main::AccountIsLive(account)) {
+			continue;
+		}
+		const auto userId = QString::number(account->session().userId().bare);
+		auto backups = std::vector<Sessions::StoredSession>();
+		for (const auto &entry : Sessions::StoredForUser(vault, userId)) {
+			if ((entry.role == u"backup"_q || entry.role == u"anti_theft_backup"_q)
+				&& QDir(Sessions::VaultFolder(entry) + u"/tdata"_q).exists()
+				&& entry.state != u"revoked"_q) {
+				backups.push_back(entry);
+			}
+		}
+		if (backups.empty()) {
+			++needBackup;
+		} else {
+			bool anyTrusted = false;
+			for (const auto &b : backups) {
+				if (Sessions::IsSessionTrusted(b)) {
+					anyTrusted = true;
+					break;
+				}
+			}
+			if (anyTrusted) {
+				++readyToProtect;
+			} else {
+				++waitingCooldown;
+			}
+		}
+	}
+
+	controller->show(Box([=](not_null<Ui::GenericBox*> box) {
+		box->setTitle(rpl::single(u"Защита от угона (Анти-угон)"_q));
+		box->setWidth(style::ConvertScale(480));
+
+		auto infoText = u"Защита купленных аккаунтов (TData / Сессия+JSON) от доступа продавца и третьих лиц.\n\n"
+			u"Как работает механизм защиты:\n"
+			u"1. Программа создаёт чистую резервную сессию со своим ключом авторизации.\n"
+			u"2. По правилам безопасности Telegram новая сессия должна отлежаться 24 часа. Сброс чужих сессий заблокирован сервером Telegram на 24 часа (ошибка FRESH_RESET_AUTHORISATION_FORBIDDEN).\n"
+			u"3. Спустя 24 часа программа переключает аккаунт на выдержанную сессию, завершает сессию продавца и все чужие сессии, удаляет старую сессию и создаёт свежий бэкап.\n\n"
+			u"Статус выбранных аккаунтов (%1):\n"
+			u"• Без резервной сессии: %2 (требуется создать сессию и запустить таймер 24ч)\n"
+			u"• На 24-часовой отлёжке: %3 (ожидание доверия Telegram)\n"
+			u"• Готовы к полной защите: %4 (выдержаны > 24ч, можно сбросить продавца)"_q
+			.arg(accounts.size())
+			.arg(needBackup)
+			.arg(waitingCooldown)
+			.arg(readyToProtect);
+
+		Ui::AddDividerText(box->verticalLayout(), rpl::single(infoText));
+
+		if (readyToProtect > 0) {
+			box->addButton(rpl::single(u"Защитить готовые (%1)"_q.arg(readyToProtect)), [=] {
+				box->closeBox();
+				RunBulkAction(controller, accounts, [=](not_null<Main::Account*> account, StepDone done) {
+					StepAntiTheftProtection(account, done);
+				});
+			});
+		}
+		if (needBackup > 0) {
+			box->addButton(rpl::single(u"Создать сессии и запустить таймер (%1)"_q.arg(needBackup)), [=] {
+				box->closeBox();
+				RunBulkAction(controller, accounts, [=](not_null<Main::Account*> account, StepDone done) {
+					StepAntiTheftProtection(account, done);
+				});
+			});
+		}
+		if (readyToProtect == 0 && needBackup == 0 && waitingCooldown > 0) {
+			box->addButton(rpl::single(u"Проверить статус отлёжки"_q), [=] {
+				box->closeBox();
+				RunBulkAction(controller, accounts, [=](not_null<Main::Account*> account, StepDone done) {
+					StepAntiTheftProtection(account, done);
+				});
+			});
+		}
+		Ggtg::AddBackButton(box);
+	}));
+}
+
+void ShowAccountAntiTheftBox(
+		std::shared_ptr<Ui::Show> show,
+		not_null<Main::Account*> account) {
+	namespace Sessions = Core::GgtgSessions;
+	if (!Main::AccountIsLive(account)) {
+		Ggtg::Notice(show, u"Аккаунт не в сети"_q);
+		return;
+	}
+	const auto userId = QString::number(account->session().userId().bare);
+	const auto vault = Sessions::LoadVault();
+	auto backups = std::vector<Sessions::StoredSession>();
+	for (const auto &entry : Sessions::StoredForUser(vault, userId)) {
+		if ((entry.role == u"backup"_q || entry.role == u"anti_theft_backup"_q)
+			&& QDir(Sessions::VaultFolder(entry) + u"/tdata"_q).exists()
+			&& entry.state != u"revoked"_q) {
+			backups.push_back(entry);
+		}
+	}
+	std::sort(backups.begin(), backups.end(), [](const auto &a, const auto &b) {
+		return a.createdAt < b.createdAt;
+	});
+
+	show->showBox(Box([=](not_null<Ui::GenericBox*> box) {
+		box->setTitle(rpl::single(u"Защита от угона (Анти-угон)"_q));
+		box->setWidth(style::ConvertScale(460));
+
+		const auto phone = account->session().user()->phone();
+		auto desc = u"Аккаунт: +%1\n\n"
+			u"Защита купленных аккаунтов исключает риск возврата доступа продавцом или сторонними лицами.\n\n"
+			u"Механизм защиты:\n"
+			u"1. Создание чистой резервной сессии программы.\n"
+			u"2. 24-часовая отлёжка (требование сервера Telegram для разрешения сброса чужих сессий).\n"
+			u"3. Переключение на выдержанную сессию, завершение сессии продавца, удаление её из программы и создание свежего бэкапа.\n\n"_q
+			.arg(phone);
+
+		if (backups.empty()) {
+			desc += u"Статус: Резервная сессия ещё не создана. Нажмите «Создать сессию», чтобы запустить 24-часовой таймер отлёжки."_q;
+		} else {
+			const auto &b = backups.front();
+			const auto createdStr = QDateTime::fromSecsSinceEpoch(b.createdAt).toString(u"dd.MM.yyyy hh:mm"_q);
+			const auto countdown = Sessions::TrustCountdownString(b);
+			desc += u"Резервная сессия: создана %1\nСтатус отлёжки: %2\n\n"_q
+				.arg(createdStr)
+				.arg(countdown);
+
+			if (Sessions::IsSessionTrusted(b)) {
+				desc += u"Сессия набрала необходимый возраст (> 24 часов) и готова к полной защите аккаунта."_q;
+			} else {
+				desc += u"Telegram вернёт ошибку FRESH_RESET_AUTHORISATION_FORBIDDEN при попытке сброса других сессий до истечения 24 часов. Дождитесь окончания таймера."_q;
+			}
+		}
+
+		Ui::AddDividerText(box->verticalLayout(), rpl::single(desc));
+
+		if (backups.empty()) {
+			box->addButton(rpl::single(u"Создать сессию и запустить таймер"_q), [=] {
+				box->closeBox();
+				Ggtg::Notice(show, u"Создаём резервную сессию..."_q);
+				CreateBackupSessionWith(
+					account,
+					u"резервная (анти-угон)"_q,
+					MakeSessionPasswordPrompt(account),
+					[=](QString err, QString) {
+						if (!err.isEmpty()) {
+							Ggtg::Notice(show, u"Ошибка: "_q + err);
+						} else {
+							Ggtg::Notice(show, u"Резервная сессия создана. Таймер 24ч отлёжки запущен."_q);
+						}
+					});
+			});
+		} else if (Sessions::IsSessionTrusted(backups.front())) {
+			box->addButton(rpl::single(u"Защитить аккаунт (Перейти и сбросить)"_q), [=] {
+				box->closeBox();
+				Ggtg::Notice(show, u"Выполняем защиту аккаунта..."_q);
+				StepAntiTheftProtection(account, [=](bool ok, QString text) {
+					Ggtg::Notice(show, ok ? text : (u"Ошибка: "_q + text));
+				});
+			});
+		}
+
+		box->addButton(tr::lng_close(), [=] { box->closeBox(); });
 	}));
 }
 
@@ -4905,6 +5165,17 @@ object_ptr<Ui::BoxContent> MakeBulkActionsChooserBox(
 			ShowBulkSwapToBackupBox(controller, accounts);
 		});
 		box->addRow(object_ptr<Ui::SettingsButton>(
+			box, rpl::single(u"Защита от угона (Анти-угон)"_q))
+		)->setClickedCallback([=] {
+			ShowBulkAntiTheftBox(controller, accounts);
+		});
+		box->addRow(object_ptr<Ui::SettingsButton>(
+			box, rpl::single(u"Сменить номер (миграция)..."_q))
+		)->setClickedCallback([=] {
+			box->closeBox();
+			Settings::ShowPhoneMigrationBox(controller, accounts);
+		});
+		box->addRow(object_ptr<Ui::SettingsButton>(
 			box, rpl::single(u"Проверить SpamBot"_q))
 		)->setClickedCallback([=] {
 			// The same live window as every bulk action: a row per account
@@ -7847,6 +8118,19 @@ void AddSessionsSection(
 			}
 			ShowStoredSessionPicker(box->uiShow(), account, stored);
 		});
+
+		wrap->add(
+			object_ptr<Ui::LinkButton>(
+				wrap,
+				u"Защита от угона (Анти-угон)..."_q),
+			style::margins(
+				st::boxRowPadding.left(),
+				0,
+				st::boxRowPadding.right(),
+				st::defaultVerticalListSkip)
+		)->setClickedCallback([=] {
+			ShowAccountAntiTheftBox(box->uiShow(), account);
+		});
 	};
 	*fillAgain = [=] { fill(authorizations->list()); };
 	fill(authorizations->list());
@@ -8716,7 +9000,7 @@ void ShowAccountProfileBox(
 		const auto ggr = Settings::CalculateAccountGgr(account);
 		lines.emplace_back(
 			u"Рейтинг GGR"_q,
-			QString::number(ggr.score, 'f', 1) + u" (" + ggr.tier + u")");
+			QString::number(ggr.score, 'f', 1) + u" ("_q + ggr.tier + u")"_q);
 		const auto history = Sessions::ForUser(Sessions::Load(), userId);
 		if (history.empty()) {
 			lines.emplace_back(u"Разрывы сессии"_q, u"не было"_q);
@@ -10580,14 +10864,17 @@ void CreateBackupSessionWith(
 		const QString &note,
 		Fn<void(Fn<void(QString password)> submit, Fn<void()> cancel)>
 			requestPassword,
-		Fn<void(QString error, QString id)> done) {
+		Fn<void(QString error, QString id)> done,
+		bool asAndroid) {
 	namespace Sessions = Core::GgtgSessions;
 	if (!Main::AccountIsLive(account)) {
 		done(u"аккаунт не в сети"_q, QString());
 		return;
 	}
 	const auto weak = base::make_weak(account.get());
-	auto device = RandomDeviceOverrideForAccount(weak.get());
+	auto device = asAndroid
+		? DeviceOverrideFromJson(RandomAndroidDeviceJson(account->deviceOverride()))
+		: RandomDeviceOverrideForAccount(weak.get());
 	const auto phone = account->sessionExists()
 		? account->session().user()->phone()
 		: QString();
@@ -10612,8 +10899,8 @@ void CreateBackupSessionWith(
 		auto entry = Sessions::StoredSession();
 		FillStoredMeta(entry, weak.get());
 		entry.device = DeviceOverrideToJson(device);
-		entry.role = u"backup"_q;
-		entry.source = u"duplicate"_q;
+		entry.role = asAndroid ? u"android"_q : u"backup"_q;
+		entry.source = asAndroid ? u"duplicate_android"_q : u"duplicate"_q;
 		entry.note = note;
 		entry.hash = hash;
 		entry.state = hash ? u"ok"_q : QString();
@@ -10630,11 +10917,29 @@ void CreateBackupSessionWith(
 		Sessions::WriteSessionVaultSidecar(entry);
 		Core::GgtgLog::Info(
 			u"Сессии"_q,
-			u"Создана резервная сессия: +%1 %2"_q
+			u"Создана %1 сессия: +%2 %3"_q
+				.arg(asAndroid ? u"мобильная Android"_q : u"резервная"_q)
 				.arg(entry.phone)
 				.arg(entry.name));
 		done(QString(), entry.id);
-	}, device);
+	}, device, asAndroid);
+}
+
+void CreateMobileSessionWith(
+		not_null<Main::Account*> account,
+		const QString &note,
+		Fn<void(Fn<void(QString password)> submit, Fn<void()> cancel)>
+			requestPassword,
+		Fn<void(QString error, QString id)> done) {
+	CreateBackupSessionWith(account, note, requestPassword, done, /*asAndroid=*/true);
+}
+
+void RunSequentialAccountsAction(
+		not_null<Window::SessionController*> controller,
+		std::vector<not_null<Main::Account*>> accounts,
+		Fn<void(not_null<Main::Account*> account, Fn<void(bool success, QString message)> done)> step,
+		const QString &title) {
+	RunBulkAction(controller, std::move(accounts), std::move(step), BulkOptions{ .title = title });
 }
 
 QString StoreSessionKey(

@@ -5637,8 +5637,8 @@ void RunSmsCampaignNow(
 						u"спит до %1:00 (ночь по гео: %2)"_q.arg(wakeHour).arg(localTime));
 					if (state->process) {
 						state->process->log(AccountLabel(candidate)
-							+ u": ночной сон по гео (местное время " + localTime
-							+ u", до " + QString::number(wakeHour) + u":00)");
+							+ u": ночной сон по гео (местное время "_q + localTime
+							+ u", до "_q + QString::number(wakeHour) + u":00)"_q);
 					}
 					continue;
 				}

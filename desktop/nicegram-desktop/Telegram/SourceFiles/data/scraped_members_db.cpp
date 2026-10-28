@@ -1066,8 +1066,8 @@ void ScrapeChannelMembers(
 				state->historyOffsetId = lowestId;
 				appendLogLine(
 					u"История (стр. "_q + QString::number(state->historyPage)
-						+ u"/" + QString::number(maxHistoryPages)
-						+ u"): +" + QString::number(added)
+						+ u"/"_q + QString::number(maxHistoryPages)
+						+ u"): +"_q + QString::number(added)
 						+ u" (сообщений "_q + QString::number(state->offset)
 						+ u", всего участников "_q + QString::number(collected->size())
 						+ ')');

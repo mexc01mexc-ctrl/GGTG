@@ -665,7 +665,7 @@ inline void TrainDetectorFromMarked(
 				text += u"Новых повторяющихся паттернов не обнаружено (все известные правила уже учтены).\n\n"_q;
 			}
 			if (!explanation.isEmpty()) {
-				text += u"ИИ-заключение:\n"_q + explanation + u"\n\n";
+				text += u"ИИ-заключение:\n"_q + explanation + u"\n\n"_q;
 			}
 			text += u"Все новые критерии сохранены и применяются при фильтрации и в рассылках."_q;
 
@@ -684,7 +684,7 @@ inline void TrainDetectorFromMarked(
 	const auto ai = Core::GgtgAi::CachedSettings();
 	if (ai.enabled) {
 		const auto sampleFakes = fakesList.mid(0, 40).join(u", "_q);
-		const auto prompt = u"Проанализируй список спам-ботов и фейковых Telegram-юзернеймов, помеченных пользователем:\n"
+		const auto prompt = u"Проанализируй список спам-ботов и фейковых Telegram-юзернеймов, помеченных пользователем:\n"_q
 			+ sampleFakes + u"\n\nВыяви общие спам-шаблоны и назови 3-7 характерных ключевых слов или подозрительных корней слов. "
 			"Ответь в формате JSON:\n{\n  \"keywords\": [\"слово1\", \"слово2\"],\n  \"summary\": \"краткое описание шаблонов ботов\"\n}"_q;
 
