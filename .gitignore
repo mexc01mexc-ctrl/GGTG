@@ -47,4 +47,5 @@ android/Telegram-GGTG/**/*.iml
 
 # Local session data
 **/tdata/
+!**/src/**/tdata/
 **/ggtg_db/
