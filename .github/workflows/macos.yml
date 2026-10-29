@@ -33,7 +33,9 @@ jobs:
           sudo ln -sfn "$SDK_PATH" "$SDK_DIR/MacOSX27.0.sdk"
 
           sudo mkdir -p /opt/homebrew/Frameworks/Python.framework/Versions/3.15/bin
-          sudo ln -sfn "$(which python3)" /opt/homebrew/Frameworks/Python.framework/Versions/3.15/bin/python3.15
+          sudo rm -f /opt/homebrew/Frameworks/Python.framework/Versions/3.15/bin/python3.15
+          printf '#!/bin/bash\nexec /usr/bin/python3 "$@"\n' | sudo tee /opt/homebrew/Frameworks/Python.framework/Versions/3.15/bin/python3.15 > /dev/null
+          sudo chmod +x /opt/homebrew/Frameworks/Python.framework/Versions/3.15/bin/python3.15
 
           echo "=== 2. Checkout complete dependencies (16 chunks) from macos-deps-storage ==="
           git clone --depth 1 --branch macos-deps-storage "https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }}.git" /tmp/deps-repo
@@ -56,6 +58,9 @@ jobs:
 
           echo "Bypassing ReRunCMake in CI..."
           printf 'all:\n\t@echo "Skipping CMake regeneration in CI"\n' > "$GITHUB_WORKSPACE/desktop/nicegram-desktop/out/CMakeScripts/ReRunCMake.make"
+
+          echo "Sanitizing Python and tool paths in project files..."
+          find "$GITHUB_WORKSPACE/desktop/nicegram-desktop/out" \( -name "*.sh" -o -name "project.pbxproj" \) -type f -exec sed -i '' 's|/opt/homebrew/Frameworks/Python.framework/Versions/3.15/bin/python3.15|/usr/bin/python3|g' {} +
           ls -la "$GITHUB_WORKSPACE/desktop/Libraries"
           ls -la "$GITHUB_WORKSPACE/desktop/nicegram-desktop/out"
 
