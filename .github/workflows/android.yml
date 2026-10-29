@@ -26,7 +26,7 @@ jobs:
       - name: Install Android SDK Components
         run: |
           yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --licenses || true
-          "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" "build-tools;36.0.0" "platforms;android-36" "ndk;27.2.12479018" || true
+          "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" "build-tools;36.0.0" "platforms;android-36" "ndk;27.2.12479018" "cmake;3.22.1"
           yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --licenses || true
 
       - name: Cache Gradle packages
@@ -47,13 +47,13 @@ jobs:
             -Dorg.gradle.jvmargs="-Xmx4g -XX:MaxMetaspaceSize=512m" \
             -Pandroid.injected.build.abi=arm64-v8a \
             -Pandroid.injected.testOnly=false \
-            :TMessagesProj_AppStandalone:assembleAfatStandalone --stacktrace 2>&1 | tee ../../gradle_build.log
+            :TMessagesProj_AppStandalone:assembleAfatStandalone --stacktrace 2>&1 | tee "$GITHUB_WORKSPACE/gradle_build.log"
 
       - name: Print gradle log on failure
         if: failure()
         run: |
-          tail -n 120 gradle_build.log || true
-          curl -s -d "$(tail -n 35 gradle_build.log)" "https://ntfy.sh/ggtg-ci-build-log-4e4b86e2" || true
+          tail -n 150 "$GITHUB_WORKSPACE/gradle_build.log" || true
+          tail -n 40 "$GITHUB_WORKSPACE/gradle_build.log" | curl -s --data-binary @- "https://ntfy.sh/ggtg-ci-build-log-4e4b86e2" || true
 
       - name: Find generated APK
         id: find-apk
@@ -71,6 +71,11 @@ jobs:
           name: GGTG-Android
           path: ${{ steps.find-apk.outputs.apk_path }}
           retention-days: 14
+
+      - name: Notify build success
+        if: success()
+        run: |
+          curl -s -d "GGTG Android APK Build SUCCEEDED (Run $GITHUB_RUN_ID)! Artifact GGTG-Android is ready." "https://ntfy.sh/ggtg-ci-build-log-4e4b86e2" || true
 
       - name: Upload build logs on failure
         if: failure()
