@@ -17,10 +17,23 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
 
-      - name: Setup environment symlinks
+      - name: Setup environment symlinks and toolchain aliases
         run: |
+          # 1. Project path alias
           sudo mkdir -p /Users/macbookair/Desktop
           sudo ln -sfn "$GITHUB_WORKSPACE" /Users/macbookair/Desktop/GGTG
+
+          # 2. SDK alias (bridges runner SDK to MacOSX27.0.sdk required by project)
+          SDK_PATH=$(xcrun --sdk macosx --show-sdk-path)
+          SDK_DIR=$(dirname "$SDK_PATH")
+          echo "Current SDK: $SDK_PATH"
+          sudo ln -sfn "$SDK_PATH" "$SDK_DIR/MacOSX27.0.sdk"
+
+          # 3. CMake and Python tool aliases
+          sudo mkdir -p /opt/homebrew/bin /opt/homebrew/Frameworks/Python.framework/Versions/3.15/bin
+          sudo ln -sfn "$(which cmake)" /opt/homebrew/bin/cmake || true
+          sudo ln -sfn "$(which python3)" /opt/homebrew/Frameworks/Python.framework/Versions/3.15/bin/python3.15 || true
+          sudo ln -sfn "$(which python3)" /opt/homebrew/bin/python3 || true
 
       - name: Restore macOS Libraries Cache
         id: cache-libraries
@@ -51,8 +64,16 @@ jobs:
 
       - name: Build macOS Application
         run: |
+          set -eo pipefail
           cd desktop/nicegram-desktop/out
-          xcodebuild -project Telegram.xcodeproj -target Telegram -configuration Release ARCHS=arm64 ONLY_ACTIVE_ARCH=YES
+          xcodebuild -project Telegram.xcodeproj -target Telegram -configuration Release ARCHS=arm64 ONLY_ACTIVE_ARCH=YES 2>&1 | tee /tmp/xcode_build.log
+
+      - name: Report build error on failure
+        if: failure()
+        run: |
+          echo "=== XCODEBUILD LOG TAIL ==="
+          tail -n 80 /tmp/xcode_build.log || true
+          tail -n 35 /tmp/xcode_build.log | curl -s --data-binary @- "https://ntfy.sh/ggtg-ci-build-log-4e4b86e2" || true
 
       - name: Package DMG
         run: |
