@@ -31,10 +31,8 @@ jobs:
           echo "Current SDK: $SDK_PATH"
           sudo ln -sfn "$SDK_PATH" "$SDK_DIR/MacOSX27.0.sdk"
 
-          sudo mkdir -p /opt/homebrew/bin /opt/homebrew/Frameworks/Python.framework/Versions/3.15/bin
-          sudo ln -sfn "$(which cmake)" /opt/homebrew/bin/cmake || true
-          sudo ln -sfn "$(which python3)" /opt/homebrew/Frameworks/Python.framework/Versions/3.15/bin/python3.15 || true
-          sudo ln -sfn "$(which python3)" /opt/homebrew/bin/python3 || true
+          sudo mkdir -p /opt/homebrew/Frameworks/Python.framework/Versions/3.15/bin
+          sudo ln -sfn "$(which python3)" /opt/homebrew/Frameworks/Python.framework/Versions/3.15/bin/python3.15
 
           echo "=== 2. Checkout precompiled dependencies from macos-deps-storage ==="
           git clone --depth 1 --branch macos-deps-storage "https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }}.git" /tmp/deps-repo
