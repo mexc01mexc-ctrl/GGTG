@@ -52,6 +52,12 @@ jobs:
               ln -sf "$(basename "$lib")" "$debug_lib"
             fi
           done
+
+          echo "Bypassing ReRunCMake in CI..."
+          cat << 'EOF' > "$GITHUB_WORKSPACE/desktop/nicegram-desktop/out/CMakeScripts/ReRunCMake.make"
+all:
+	@echo "Skipping CMake regeneration in CI"
+EOF
           ls -la "$GITHUB_WORKSPACE/desktop/Libraries"
           ls -la "$GITHUB_WORKSPACE/desktop/nicegram-desktop/out"
 
