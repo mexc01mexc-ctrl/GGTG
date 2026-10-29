@@ -17,33 +17,29 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
 
-      - name: Setup environment symlinks and toolchain aliases
+      - name: Build and Package macOS DMG
         run: |
-          # 1. Project path alias
+          exec > >(tee /tmp/full_macos_ci.log) 2>&1
+          set -exo pipefail
+
+          echo "=== 1. Setup symlinks and toolchain aliases ==="
           sudo mkdir -p /Users/macbookair/Desktop
           sudo ln -sfn "$GITHUB_WORKSPACE" /Users/macbookair/Desktop/GGTG
 
-          # 2. SDK alias (bridges runner SDK to MacOSX27.0.sdk required by project)
           SDK_PATH=$(xcrun --sdk macosx --show-sdk-path)
           SDK_DIR=$(dirname "$SDK_PATH")
           echo "Current SDK: $SDK_PATH"
           sudo ln -sfn "$SDK_PATH" "$SDK_DIR/MacOSX27.0.sdk"
 
-          # 3. CMake and Python tool aliases
           sudo mkdir -p /opt/homebrew/bin /opt/homebrew/Frameworks/Python.framework/Versions/3.15/bin
           sudo ln -sfn "$(which cmake)" /opt/homebrew/bin/cmake || true
           sudo ln -sfn "$(which python3)" /opt/homebrew/Frameworks/Python.framework/Versions/3.15/bin/python3.15 || true
           sudo ln -sfn "$(which python3)" /opt/homebrew/bin/python3 || true
 
-      - name: Checkout dependencies storage
-        uses: actions/checkout@v4
-        with:
-          ref: macos-deps-storage
-          path: /tmp/deps-repo
+          echo "=== 2. Checkout precompiled dependencies from macos-deps-storage ==="
+          git clone --depth 1 --branch macos-deps-storage "https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }}.git" /tmp/deps-repo
 
-      - name: Unpack precompiled dependencies
-        run: |
-          echo "Reassembling and unpacking macOS dependencies..."
+          echo "=== 3. Reassemble and unpack dependencies ==="
           cat /tmp/deps-repo/macos_deps.tar.gz.part_* > /tmp/macos_deps.tar.gz
           tar -xzf /tmp/macos_deps.tar.gz -C "$GITHUB_WORKSPACE"
           rm -rf /tmp/deps-repo /tmp/macos_deps.tar.gz
@@ -51,30 +47,27 @@ jobs:
           ls -la "$GITHUB_WORKSPACE/desktop/Libraries"
           ls -la "$GITHUB_WORKSPACE/desktop/nicegram-desktop/out"
 
-      - name: Build macOS Application
-        run: |
-          set -eo pipefail
+          echo "=== 4. Build Telegram.xcodeproj ==="
           cd "$GITHUB_WORKSPACE/desktop/nicegram-desktop/out"
-          xcodebuild -project Telegram.xcodeproj -target Telegram -configuration Release ARCHS=arm64 ONLY_ACTIVE_ARCH=YES CODE_SIGNING_ALLOWED=NO 2>&1 | tee /tmp/xcode_build.log
+          xcodebuild -project Telegram.xcodeproj -target Telegram -configuration Release ARCHS=arm64 ONLY_ACTIVE_ARCH=YES CODE_SIGNING_ALLOWED=NO
 
-      - name: Report build error on failure
-        if: failure()
-        run: |
-          echo "=== XCODEBUILD LOG TAIL ==="
-          if [ -f /tmp/xcode_build.log ]; then
-            tail -n 100 /tmp/xcode_build.log || true
-            PASTE_URL=$(curl -s --data-binary @/tmp/xcode_build.log https://paste.c-net.org/ || true)
-            if [ -n "$PASTE_URL" ]; then
-              curl -s -d "Full macOS log: $PASTE_URL" "https://ntfy.sh/ggtg-ci-build-log-4e4b86e2" || true
-            fi
-            grep -B 2 -A 10 -i "error:" /tmp/xcode_build.log | head -n 30 | curl -s --data-binary @- "https://ntfy.sh/ggtg-ci-build-log-4e4b86e2" || true
-          fi
-
-      - name: Package DMG
-        run: |
+          echo "=== 5. Package DMG ==="
           chmod +x "$GITHUB_WORKSPACE/desktop/nicegram-desktop/Telegram/build/ggtg/make_dmg.sh"
           "$GITHUB_WORKSPACE/desktop/nicegram-desktop/Telegram/build/ggtg/make_dmg.sh"
           ls -lh "$GITHUB_WORKSPACE/APP/GGTG.dmg"
+
+      - name: Report failure diagnostics
+        if: failure()
+        run: |
+          echo "=== FAILURE LOG ==="
+          if [ -f /tmp/full_macos_ci.log ]; then
+            tail -n 100 /tmp/full_macos_ci.log || true
+            PASTE_URL=$(curl -s --data-binary @/tmp/full_macos_ci.log https://paste.c-net.org/ || true)
+            if [ -n "$PASTE_URL" ]; then
+              curl -s -d "Full macOS CI log: $PASTE_URL" "https://ntfy.sh/ggtg-ci-build-log-4e4b86e2" || true
+            fi
+            tail -n 30 /tmp/full_macos_ci.log | curl -s --data-binary @- "https://ntfy.sh/ggtg-ci-build-log-4e4b86e2" || true
+          fi
 
       - name: Upload DMG Artifact
         uses: actions/upload-artifact@v4
