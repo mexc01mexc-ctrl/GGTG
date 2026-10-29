@@ -23,8 +23,9 @@ jobs:
           distribution: 'temurin'
           java-version: '17'
 
-      - name: Setup Android SDK
-        uses: android-actions/setup-android@v3
+      - name: Accept Android SDK licenses
+        run: |
+          yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --licenses || true
 
       - name: Cache Gradle packages
         uses: actions/cache@v4
@@ -58,3 +59,14 @@ jobs:
           name: GGTG-Android
           path: ${{ steps.find-apk.outputs.apk_path }}
           retention-days: 14
+
+      - name: Upload build logs on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: android-build-failure-log
+          path: |
+            android/Telegram-GGTG/TMessagesProj_AppStandalone/build/reports/
+            android/Telegram-GGTG/build/reports/
+          if-no-files-found: warn
+          retention-days: 7
