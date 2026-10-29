@@ -42,6 +42,16 @@ jobs:
           tar -xzf /tmp/macos_deps.tar.gz -C "$GITHUB_WORKSPACE"
           rm -rf /tmp/deps-repo /tmp/macos_deps.tar.gz
           echo "Dependencies unpacked successfully."
+
+          echo "Creating compatibility symlinks for debug static library references..."
+          find "$GITHUB_WORKSPACE/desktop/Libraries" -name "*.a" ! -name "*_debug.a" | while read -r lib; do
+            dir=$(dirname "$lib")
+            base=$(basename "$lib" .a)
+            debug_lib="$dir/${base}_debug.a"
+            if [ ! -e "$debug_lib" ]; then
+              ln -sf "$(basename "$lib")" "$debug_lib"
+            fi
+          done
           ls -la "$GITHUB_WORKSPACE/desktop/Libraries"
           ls -la "$GITHUB_WORKSPACE/desktop/nicegram-desktop/out"
 
