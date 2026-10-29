@@ -34,7 +34,7 @@ jobs:
           sudo mkdir -p /opt/homebrew/Frameworks/Python.framework/Versions/3.15/bin
           sudo ln -sfn "$(which python3)" /opt/homebrew/Frameworks/Python.framework/Versions/3.15/bin/python3.15
 
-          echo "=== 2. Checkout complete dependencies from macos-deps-storage ==="
+          echo "=== 2. Checkout complete dependencies (16 chunks) from macos-deps-storage ==="
           git clone --depth 1 --branch macos-deps-storage "https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }}.git" /tmp/deps-repo
 
           echo "=== 3. Reassemble and unpack dependencies ==="
