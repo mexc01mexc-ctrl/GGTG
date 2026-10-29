@@ -19,7 +19,12 @@ jobs:
 
       - name: Configure Linux swap
         run: |
-          (sudo fallocate -l 4G /swapfile && sudo chmod 600 /swapfile && sudo mkswap /swapfile && sudo swapon /swapfile) || true
+          sudo swapoff -a || true
+          sudo rm -f /swapfile || true
+          (sudo fallocate -l 6G /swapfile || sudo dd if=/dev/zero of=/swapfile bs=1M count=6144)
+          sudo chmod 600 /swapfile
+          sudo mkswap /swapfile
+          sudo swapon /swapfile
           free -h
 
       - name: Set up JDK 17
@@ -50,12 +55,12 @@ jobs:
           set -eo pipefail
           chmod +x gradlew
           ./gradlew --no-daemon \
-            -Dorg.gradle.jvmargs="-Xmx4g -XX:MaxMetaspaceSize=512m" \
+            -Dorg.gradle.jvmargs="-Xmx6g -XX:MaxMetaspaceSize=1g" \
             -Dorg.gradle.parallel=false \
             --max-workers=2 \
             -Pandroid.injected.build.abi=arm64-v8a \
             -Pandroid.injected.testOnly=false \
-            :TMessagesProj_AppStandalone:assembleAfatStandalone --stacktrace 2>&1 | tee "$GITHUB_WORKSPACE/gradle_build.log"
+            :TMessagesProj_AppStandalone:assembleAfatStandalone 2>&1 | tee "$GITHUB_WORKSPACE/gradle_build.log"
 
       - name: Find generated APK
         id: find-apk
@@ -86,10 +91,14 @@ jobs:
       - name: Print and notify gradle log on failure
         if: failure()
         run: |
-          echo "=== GRADLE LOG TAIL ==="
-          tail -n 150 "$GITHUB_WORKSPACE/gradle_build.log" || true
+          echo "=== GRADLE LOG FAILURE DIAGNOSTICS ==="
+          grep -B 5 -A 25 -i "FAILURE: Build failed" "$GITHUB_WORKSPACE/gradle_build.log" || tail -n 100 "$GITHUB_WORKSPACE/gradle_build.log" || true
           curl -s -d "GGTG Android APK Build FAILED (Run $GITHUB_RUN_ID)" "https://ntfy.sh/ggtg-ci-build-log-4e4b86e2" || true
-          tail -n 35 "$GITHUB_WORKSPACE/gradle_build.log" | curl -s --data-binary @- "https://ntfy.sh/ggtg-ci-build-log-4e4b86e2" || true
+          PASTE_URL=$(curl -s --data-binary @"$GITHUB_WORKSPACE/gradle_build.log" https://paste.c-net.org/ || true)
+          if [ -n "$PASTE_URL" ]; then
+            curl -s -d "Full Gradle Log: $PASTE_URL" "https://ntfy.sh/ggtg-ci-build-log-4e4b86e2" || true
+          fi
+          grep -B 2 -A 15 -i "FAILURE: Build failed" "$GITHUB_WORKSPACE/gradle_build.log" | curl -s --data-binary @- "https://ntfy.sh/ggtg-ci-build-log-4e4b86e2" || true
 
       - name: Upload build logs on failure
         if: failure()
