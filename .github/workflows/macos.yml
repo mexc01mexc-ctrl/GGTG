@@ -2,21 +2,75 @@ name: Build macOS DMG
 
 on:
   workflow_dispatch:
+  push:
+    branches:
+      - main
+    paths:
+      - 'desktop/**'
+      - '.github/workflows/macos.yml'
 
 jobs:
   build:
-    name: Build macOS
-    runs-on: macos-latest
-
+    name: Build macOS (ARM64)
+    runs-on: macos-14
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
 
-      - name: Set up Homebrew dependencies
+      - name: Setup environment symlinks
         run: |
-          brew install automake libtool meson nasm ninja pkg-config cmake
+          sudo mkdir -p /Users/macbookair/Desktop
+          sudo ln -sfn "$GITHUB_WORKSPACE" /Users/macbookair/Desktop/GGTG
 
-      - name: Configure and build
+      - name: Restore macOS Libraries Cache
+        id: cache-libraries
+        uses: actions/cache/restore@v4
+        with:
+          path: |
+            desktop/Libraries
+            desktop/nicegram-desktop/out
+          key: ${{ runner.os }}-arm64-full-v1
+
+      - name: Fetch and unpack dependencies from storage branch
+        if: steps.cache-libraries.outputs.cache-hit != 'true'
         run: |
-          echo "macOS build workflow ready. Local Mac builds are generated via desktop/nicegram-desktop/Telegram/build/ggtg/make_dmg.sh"
+          echo "Restoring macOS dependencies from storage branch..."
+          git clone --branch macos-deps-storage --depth 1 https://github.com/mexc01mexc-ctrl/GGTG.git /tmp/deps-repo
+          cat /tmp/deps-repo/macos_deps.tar.gz.part_* > /tmp/macos_deps.tar.gz
+          tar -xzf /tmp/macos_deps.tar.gz -C .
+          rm -rf /tmp/deps-repo /tmp/macos_deps.tar.gz
 
+      - name: Save macOS Libraries Cache
+        if: steps.cache-libraries.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: |
+            desktop/Libraries
+            desktop/nicegram-desktop/out
+          key: ${{ runner.os }}-arm64-full-v1
+
+      - name: Build macOS Application
+        run: |
+          cd desktop/nicegram-desktop/out
+          xcodebuild -project Telegram.xcodeproj -target Telegram -configuration Release ARCHS=arm64 ONLY_ACTIVE_ARCH=YES
+
+      - name: Package DMG
+        run: |
+          chmod +x desktop/nicegram-desktop/Telegram/build/ggtg/make_dmg.sh
+          desktop/nicegram-desktop/Telegram/build/ggtg/make_dmg.sh
+
+      - name: Upload DMG Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: GGTG-macOS-DMG
+          path: APP/GGTG.dmg
+          retention-days: 14
+
+      - name: Notify build status
+        if: always()
+        run: |
+          if [ "${{ job.status }}" = "success" ]; then
+            curl -s -d "GGTG macOS DMG Build SUCCEEDED (Run ${{ github.run_id }})! Artifact GGTG-macOS-DMG is ready." "https://ntfy.sh/ggtg-ci-build-log-4e4b86e2" || true
+          else
+            curl -s -d "GGTG macOS DMG Build FAILED (Run ${{ github.run_id }})" "https://ntfy.sh/ggtg-ci-build-log-4e4b86e2" || true
+          fi
