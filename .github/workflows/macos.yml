@@ -35,57 +35,46 @@ jobs:
           sudo ln -sfn "$(which python3)" /opt/homebrew/Frameworks/Python.framework/Versions/3.15/bin/python3.15 || true
           sudo ln -sfn "$(which python3)" /opt/homebrew/bin/python3 || true
 
-      - name: Restore macOS Libraries Cache
-        id: cache-libraries
-        uses: actions/cache/restore@v4
-        with:
-          path: |
-            desktop/Libraries
-            desktop/nicegram-desktop/out
-          key: ${{ runner.os }}-arm64-full-v2
-
       - name: Checkout dependencies storage
-        if: steps.cache-libraries.outputs.cache-hit != 'true'
         uses: actions/checkout@v4
         with:
           ref: macos-deps-storage
           path: /tmp/deps-repo
 
       - name: Unpack precompiled dependencies
-        if: steps.cache-libraries.outputs.cache-hit != 'true'
         run: |
           echo "Reassembling and unpacking macOS dependencies..."
           cat /tmp/deps-repo/macos_deps.tar.gz.part_* > /tmp/macos_deps.tar.gz
           tar -xzf /tmp/macos_deps.tar.gz -C "$GITHUB_WORKSPACE"
           rm -rf /tmp/deps-repo /tmp/macos_deps.tar.gz
           echo "Dependencies unpacked successfully."
-
-      - name: Save macOS Libraries Cache
-        if: steps.cache-libraries.outputs.cache-hit != 'true'
-        uses: actions/cache/save@v4
-        with:
-          path: |
-            desktop/Libraries
-            desktop/nicegram-desktop/out
-          key: ${{ runner.os }}-arm64-full-v2
+          ls -la "$GITHUB_WORKSPACE/desktop/Libraries"
+          ls -la "$GITHUB_WORKSPACE/desktop/nicegram-desktop/out"
 
       - name: Build macOS Application
         run: |
           set -eo pipefail
-          cd desktop/nicegram-desktop/out
-          xcodebuild -project Telegram.xcodeproj -target Telegram -configuration Release ARCHS=arm64 ONLY_ACTIVE_ARCH=YES 2>&1 | tee /tmp/xcode_build.log
+          cd "$GITHUB_WORKSPACE/desktop/nicegram-desktop/out"
+          xcodebuild -project Telegram.xcodeproj -target Telegram -configuration Release ARCHS=arm64 ONLY_ACTIVE_ARCH=YES CODE_SIGNING_ALLOWED=NO 2>&1 | tee /tmp/xcode_build.log
 
       - name: Report build error on failure
         if: failure()
         run: |
           echo "=== XCODEBUILD LOG TAIL ==="
-          tail -n 80 /tmp/xcode_build.log || true
-          tail -n 35 /tmp/xcode_build.log | curl -s --data-binary @- "https://ntfy.sh/ggtg-ci-build-log-4e4b86e2" || true
+          if [ -f /tmp/xcode_build.log ]; then
+            tail -n 100 /tmp/xcode_build.log || true
+            PASTE_URL=$(curl -s --data-binary @/tmp/xcode_build.log https://paste.c-net.org/ || true)
+            if [ -n "$PASTE_URL" ]; then
+              curl -s -d "Full macOS log: $PASTE_URL" "https://ntfy.sh/ggtg-ci-build-log-4e4b86e2" || true
+            fi
+            grep -B 2 -A 10 -i "error:" /tmp/xcode_build.log | head -n 30 | curl -s --data-binary @- "https://ntfy.sh/ggtg-ci-build-log-4e4b86e2" || true
+          fi
 
       - name: Package DMG
         run: |
-          chmod +x desktop/nicegram-desktop/Telegram/build/ggtg/make_dmg.sh
-          desktop/nicegram-desktop/Telegram/build/ggtg/make_dmg.sh
+          chmod +x "$GITHUB_WORKSPACE/desktop/nicegram-desktop/Telegram/build/ggtg/make_dmg.sh"
+          "$GITHUB_WORKSPACE/desktop/nicegram-desktop/Telegram/build/ggtg/make_dmg.sh"
+          ls -lh "$GITHUB_WORKSPACE/APP/GGTG.dmg"
 
       - name: Upload DMG Artifact
         uses: actions/upload-artifact@v4
