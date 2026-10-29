@@ -821,15 +821,18 @@ object GgtgSessions {
                 return Result.failure(orderResult.exceptionOrNull() ?: Exception("Ошибка заказа номера"))
             }
             val (activationId, rawPhone) = orderResult.getOrThrow()
-            val newPhone = rawPhone.filter { it.isDigit() }
+            val newPhone = GgtgRegistration.cleanPhoneForTelegram(rawPhone)
+            val orderedAt = System.currentTimeMillis()
 
             // 1. Human delay: simulate checking number before requesting SMS
             val prepDelay = kotlin.random.Random.nextLong(2500, 4000)
             onProgress("Номер получен: +$newPhone. Подготовка запроса к Telegram (пауза ${prepDelay / 1000}с)...")
             delay(prepDelay)
 
-            var mobileToken = ""
-            if (config.tokenService != 0 && config.tokenApiKey.isNotBlank()) {
+            var mobileToken = GgtgRegistration.popReservedToken().orEmpty()
+            if (mobileToken.isNotEmpty()) {
+                onProgress("Push-токен Play Integrity взят из резерва")
+            } else if (config.tokenService != 0 && config.tokenApiKey.isNotBlank()) {
                 onProgress("Запрос Push-токена (${GgtgRegistration.tokenServiceName(config.tokenService)}) для +$newPhone...")
                 val tokRes = GgtgRegistration.fetchMobileToken(config.tokenService, config.tokenApiKey, newPhone, config.antiSafetyAid)
                 if (tokRes.isSuccess && !tokRes.getOrNull().isNullOrEmpty()) {
@@ -865,7 +868,11 @@ object GgtgSessions {
             }
 
             if (sentCode == null) {
-                GgtgRegistration.setSmsStatus(config, activationId, 8)
+                if (mobileToken.isNotEmpty()) {
+                    GgtgRegistration.reserveToken(mobileToken)
+                    mobileToken = ""
+                }
+                GgtgRegistration.enqueueRefund(config, activationId, newPhone, orderedAt)
                 val fullErr = sendErrorText.orEmpty().uppercase()
 
                 // Session-level blocks (do NOT retry another phone number)
@@ -900,10 +907,41 @@ object GgtgSessions {
             }
 
             val phoneCodeHash = sentCode.phone_code_hash
-            onProgress("Код отправлен на +$newPhone. Ожидание SMS...")
+            val codeType = sentCode.type
+            val isSms = (codeType is TLRPC.TL_auth_sentCodeTypeSms) ||
+                        (codeType is TLRPC.TL_auth_sentCodeTypeSmsWord) ||
+                        (codeType is TLRPC.TL_auth_sentCodeTypeSmsPhrase) ||
+                        (codeType is TLRPC.TL_auth_sentCodeTypeFirebaseSms)
+
+            if (!isSms) {
+                val reason = when (codeType) {
+                    is TLRPC.TL_auth_sentCodeTypeApp -> "в приложение на других устройствах"
+                    is TLRPC.TL_auth_sentCodeTypeCall, is TLRPC.TL_auth_sentCodeTypeMissedCall, is TLRPC.TL_auth_sentCodeTypeFlashCall -> "звонком"
+                    else -> "не по SMS"
+                }
+                if (mobileToken.isNotEmpty()) {
+                    GgtgRegistration.reserveToken(mobileToken)
+                    mobileToken = ""
+                }
+                GgtgRegistration.enqueueRefund(config, activationId, newPhone, orderedAt)
+                if (attempt < maxAttempts) {
+                    val retryPause = kotlin.random.Random.nextLong(4000, 6000)
+                    onProgress("Telegram отправил код $reason вместо SMS. Отмена номера и подбор нового (попытка ${attempt + 1} из $maxAttempts, пауза ${retryPause / 1000}с)...")
+                    delay(retryPause)
+                    continue
+                }
+                return Result.failure(Exception("Telegram не отправляет SMS на выданные номера (отправляет $reason). Попробуйте позже."))
+            }
+
+            val codeDesc = when (codeType) {
+                is TLRPC.TL_auth_sentCodeTypeSms -> "Telegram подтвердил отправку сотового SMS на +$newPhone (длина: ${codeType.length} цифр)."
+                is TLRPC.TL_auth_sentCodeTypeSmsWord, is TLRPC.TL_auth_sentCodeTypeSmsPhrase -> "Telegram подтвердил отправку сотового SMS на +$newPhone."
+                else -> "Telegram отправил SMS через Push Firebase (Play Integrity)."
+            }
+            onProgress("$codeDesc Ожидание SMS-кода...")
 
             var smsCode: String? = null
-            for (i in 1..35) {
+            for (i in 1..70) {
                 delay(3000)
                 onProgress("Ожидание SMS-кода (+${newPhone}, ${i * 3}с)...")
                 val (status, code, _) = GgtgRegistration.pollSmsCode(config, activationId)
@@ -916,14 +954,18 @@ object GgtgSessions {
             }
 
             if (smsCode == null) {
-                GgtgRegistration.setSmsStatus(config, activationId, 8)
+                if (mobileToken.isNotEmpty()) {
+                    GgtgRegistration.reserveToken(mobileToken)
+                    mobileToken = ""
+                }
+                GgtgRegistration.enqueueRefund(config, activationId, newPhone, orderedAt)
                 if (attempt < maxAttempts) {
                     val retryPause = kotlin.random.Random.nextLong(5000, 8000)
-                    onProgress("SMS не поступило. Отменяем номер и пробуем другой (попытка ${attempt + 1} из $maxAttempts, пауза ${retryPause / 1000}с)...")
+                    onProgress("SMS не поступило за 3.5 мин. Запрос возврата средств и подбор нового (попытка ${attempt + 1} из $maxAttempts, пауза ${retryPause / 1000}с)...")
                     delay(retryPause)
                     continue
                 }
-                return Result.failure(Exception("Время ожидания SMS истекло после $maxAttempts попыток. Номер отменён, средства сохранены. Попробуйте позже."))
+                return Result.failure(Exception("Время ожидания SMS истекло после $maxAttempts попыток. Запрос возврата средств оформлен. Попробуйте позже."))
             }
 
             // 2. Human delay: simulate reading SMS and entering code
@@ -952,7 +994,11 @@ object GgtgSessions {
             }
 
             if (changeUser == null) {
-                GgtgRegistration.setSmsStatus(config, activationId, 8)
+                if (mobileToken.isNotEmpty()) {
+                    GgtgRegistration.reserveToken(mobileToken)
+                    mobileToken = ""
+                }
+                GgtgRegistration.enqueueRefund(config, activationId, newPhone, orderedAt)
                 val fullErr = changeErrorText.orEmpty().uppercase()
                 if ((fullErr.contains("PHONE_CODE_EXPIRED") || fullErr.contains("PHONE_CODE_INVALID")) && attempt < maxAttempts) {
                     val retryPause = kotlin.random.Random.nextLong(5000, 8000)

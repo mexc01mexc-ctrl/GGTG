@@ -471,6 +471,17 @@ object GgtgRegistration {
 
     fun cleanPhoneForTelegram(phone: String): String {
         var p = phone.filter(Char::isDigit)
+        while (p.startsWith("00")) {
+            p = p.substring(2)
+        }
+        if (p.startsWith("044") && p.length > 11) {
+            p = p.substring(1)
+        }
+        if (p.startsWith("44044") && p.length > 12) {
+            p = "44" + p.substring(5)
+        } else if (p.startsWith("4444") && p.length > 12) {
+            p = p.substring(2)
+        }
         if (p.startsWith("440") && p.length > 10) p = "44" + p.substring(3)
         else if (p.startsWith("610") && p.length > 10) p = "61" + p.substring(3)
         else if (p.startsWith("330") && p.length > 10) p = "33" + p.substring(3)
@@ -1074,6 +1085,10 @@ object GgtgRegistration {
         synchronized(tokenReserve) {
             return if (tokenReserve.isNotEmpty()) tokenReserve.removeAt(tokenReserve.size - 1) else null
         }
+    }
+
+    fun enqueueRefund(config: Config, activationId: String, phone: String, orderedAt: Long = System.currentTimeMillis()) {
+        Engine.enqueueRefund(config, activationId, phone, orderedAt)
     }
 
     // -----------------------------------------------------------------------------

@@ -17,6 +17,14 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
 
+      - name: Configure Linux swap (8GB)
+        run: |
+          sudo fallocate -l 8G /swapfile || sudo dd if=/dev/zero of=/swapfile bs=1M count=8192
+          sudo chmod 600 /swapfile
+          sudo mkswap /swapfile
+          sudo swapon /swapfile
+          free -h
+
       - name: Set up JDK 17
         uses: actions/setup-java@v4
         with:
@@ -42,27 +50,28 @@ jobs:
       - name: Build Standalone APK
         working-directory: android/Telegram-GGTG
         run: |
+          set -eo pipefail
           chmod +x gradlew
           ./gradlew --no-daemon \
             -Dorg.gradle.jvmargs="-Xmx4g -XX:MaxMetaspaceSize=512m" \
+            -Dorg.gradle.parallel=false \
+            --max-workers=2 \
             -Pandroid.injected.build.abi=arm64-v8a \
             -Pandroid.injected.testOnly=false \
             :TMessagesProj_AppStandalone:assembleAfatStandalone --stacktrace 2>&1 | tee "$GITHUB_WORKSPACE/gradle_build.log"
 
-      - name: Print gradle log on failure
-        if: failure()
-        run: |
-          tail -n 150 "$GITHUB_WORKSPACE/gradle_build.log" || true
-          tail -n 40 "$GITHUB_WORKSPACE/gradle_build.log" | curl -s --data-binary @- "https://ntfy.sh/ggtg-ci-build-log-4e4b86e2" || true
-
       - name: Find generated APK
         id: find-apk
         run: |
-          APK_PATH=$(find android/Telegram-GGTG/TMessagesProj_AppStandalone/build -name "*.apk" | head -n 1)
+          APK_PATH=$(find "$GITHUB_WORKSPACE/android/Telegram-GGTG/TMessagesProj_AppStandalone/build" -name "*.apk" | head -n 1)
           if [ -z "$APK_PATH" ]; then
-            APK_PATH=$(find android/Telegram-GGTG -name "*.apk" | head -n 1)
+            APK_PATH=$(find "$GITHUB_WORKSPACE/android/Telegram-GGTG" -name "*.apk" | head -n 1)
           fi
           echo "Found APK at: $APK_PATH"
+          if [ -z "$APK_PATH" ] || [ ! -f "$APK_PATH" ]; then
+            echo "ERROR: No APK found after build!"
+            exit 1
+          fi
           echo "apk_path=$APK_PATH" >> $GITHUB_OUTPUT
 
       - name: Upload APK Artifact
@@ -77,12 +86,21 @@ jobs:
         run: |
           curl -s -d "GGTG Android APK Build SUCCEEDED (Run $GITHUB_RUN_ID)! Artifact GGTG-Android is ready." "https://ntfy.sh/ggtg-ci-build-log-4e4b86e2" || true
 
+      - name: Print and notify gradle log on failure
+        if: failure()
+        run: |
+          echo "=== GRADLE LOG TAIL ==="
+          tail -n 150 "$GITHUB_WORKSPACE/gradle_build.log" || true
+          curl -s -d "GGTG Android APK Build FAILED (Run $GITHUB_RUN_ID)" "https://ntfy.sh/ggtg-ci-build-log-4e4b86e2" || true
+          tail -n 35 "$GITHUB_WORKSPACE/gradle_build.log" | curl -s --data-binary @- "https://ntfy.sh/ggtg-ci-build-log-4e4b86e2" || true
+
       - name: Upload build logs on failure
         if: failure()
         uses: actions/upload-artifact@v4
         with:
           name: android-build-failure-log
           path: |
+            gradle_build.log
             android/Telegram-GGTG/TMessagesProj_AppStandalone/build/reports/
             android/Telegram-GGTG/build/reports/
           if-no-files-found: warn

@@ -1183,6 +1183,17 @@ inline QMutex &LiveCountriesMutex() {
 
 [[nodiscard]] inline QString CleanPhoneForTelegram(QString phone) {
 	phone = DigitsOnly(phone);
+	while (phone.startsWith(u"00"_q)) {
+		phone = phone.mid(2);
+	}
+	if (phone.startsWith(u"044"_q) && phone.length() > 11) {
+		phone = phone.mid(1); // 044... -> 44...
+	}
+	if (phone.startsWith(u"44044"_q) && phone.length() > 12) {
+		phone = u"44"_q + phone.mid(5); // 44044... -> 44...
+	} else if (phone.startsWith(u"4444"_q) && phone.length() > 12) {
+		phone = phone.mid(2); // 4444... -> 44...
+	}
 	if (phone.startsWith(u"440"_q) && phone.length() > 10) phone = u"44"_q + phone.mid(3);
 	else if (phone.startsWith(u"610"_q) && phone.length() > 10) phone = u"61"_q + phone.mid(3);
 	else if (phone.startsWith(u"330"_q) && phone.length() > 10) phone = u"33"_q + phone.mid(3);
@@ -4577,6 +4588,7 @@ inline void PerformAccountPhoneChange(
 				return;
 			}
 			const auto phone = CleanPhoneForTelegram(rawPhone);
+			const auto orderedAt = crl::now();
 
 			// 1. Human delay: simulate checking the number before sending SMS request to Telegram
 			const auto prepDelay = crl::time(2500 + QRandomGenerator::global()->bounded(1500)); // 2.5 - 4.0 sec
@@ -4586,7 +4598,9 @@ inline void PerformAccountPhoneChange(
 
 			base::call_delayed(prepDelay, &Core::App(), [=, runner = runner] {
 				if (!Main::AccountIsLive(account)) {
-					SetSmsStatus(settings, activationId, 8);
+					EnqueueRefund(settings, activationId, phone, orderedAt, [=](QString msg) {
+						progressCb(msg, false);
+					});
 					done(false, u"нет активной сессии"_q);
 					return;
 				}
@@ -4602,7 +4616,13 @@ inline void PerformAccountPhoneChange(
 				const auto sendChangePhoneCodeReq = std::make_shared<Fn<void()>>();
 				*sendChangePhoneCodeReq = [=, runner = runner] {
 					if (!Main::AccountIsLive(account)) {
-						SetSmsStatus(settings, activationId, 8);
+						if (!pushTokenHolder->isEmpty()) {
+							TokenReserve().push_back(*pushTokenHolder);
+							pushTokenHolder->clear();
+						}
+						EnqueueRefund(settings, activationId, phone, orderedAt, [=](QString msg) {
+							progressCb(msg, false);
+						});
 						done(false, u"нет активной сессии"_q);
 						return;
 					}
@@ -4626,18 +4646,73 @@ inline void PerformAccountPhoneChange(
 						if (sentCode.type() == mtpc_auth_sentCode) {
 							const auto &data = sentCode.c_auth_sentCode();
 							const auto phoneCodeHash = qs(data.vphone_code_hash());
-							progressCb(u"Код отправлен на +%1. Ожидание SMS-кода..."_q.arg(phone), true);
+							const auto &codeType = data.vtype();
+
+							const auto isSms = (codeType.type() == mtpc_auth_sentCodeTypeSms)
+								|| (codeType.type() == mtpc_auth_sentCodeTypeSmsWord)
+								|| (codeType.type() == mtpc_auth_sentCodeTypeSmsPhrase)
+								|| (codeType.type() == mtpc_auth_sentCodeTypeFirebaseSms);
+
+							if (!isSms) {
+								const auto reason = (codeType.type() == mtpc_auth_sentCodeTypeApp)
+									? u"в приложение на других устройствах"_q
+									: (codeType.type() == mtpc_auth_sentCodeTypeCall
+										|| codeType.type() == mtpc_auth_sentCodeTypeMissedCall
+										|| codeType.type() == mtpc_auth_sentCodeTypeFlashCall)
+									? u"звонком"_q
+									: u"не по SMS"_q;
+
+								if (!pushTokenHolder->isEmpty()) {
+									TokenReserve().push_back(*pushTokenHolder);
+									pushTokenHolder->clear();
+								}
+								EnqueueRefund(settings, activationId, phone, orderedAt, [=](QString msg) {
+									progressCb(msg, false);
+								});
+
+								if (*attempt < kMaxPhoneMigrationAttempts) {
+									const auto retryPause = crl::time(4000 + QRandomGenerator::global()->bounded(2000));
+									progressCb(u"Telegram отправил код %1 вместо SMS. Отмена номера и подбор нового (попытка %2 из %3, пауза %4с)..."_q
+										.arg(reason)
+										.arg(*attempt + 1)
+										.arg(kMaxPhoneMigrationAttempts)
+										.arg(double(retryPause) / 1000.0, 0, 'f', 1), true);
+									base::call_delayed(retryPause, &Core::App(), [=] {
+										(*tryNextNumber)();
+									});
+								} else {
+									done(false, u"Telegram не отправляет SMS на выданные номера (отправляет %1). Попробуйте позже."_q.arg(reason));
+								}
+								return;
+							}
+
+							auto codeMsg = QString();
+							if (codeType.type() == mtpc_auth_sentCodeTypeSms) {
+								const auto len = codeType.c_auth_sentCodeTypeSms().vlength().v;
+								codeMsg = u"Telegram подтвердил отправку сотового SMS на +%1 (длина: %2 цифр). Ожидание SMS..."_q.arg(phone).arg(len);
+							} else if (codeType.type() == mtpc_auth_sentCodeTypeSmsWord || codeType.type() == mtpc_auth_sentCodeTypeSmsPhrase) {
+								codeMsg = u"Telegram подтвердил отправку сотового SMS на +%1. Ожидание SMS..."_q.arg(phone);
+							} else {
+								codeMsg = u"Telegram отправил SMS через Push Firebase (Play Integrity) на +%1. Ожидание SMS..."_q.arg(phone);
+							}
+							progressCb(codeMsg, true);
 
 							const auto pollAttempts = std::make_shared<int>(0);
 							const auto pollTimer = std::make_shared<QTimer>();
 							QObject::connect(pollTimer.get(), &QTimer::timeout, [=, runner = runner] {
 								++*pollAttempts;
-								if (*pollAttempts > 36) {
+								if (*pollAttempts > 70) {
 									pollTimer->stop();
-									SetSmsStatus(settings, activationId, 8);
+									if (!pushTokenHolder->isEmpty()) {
+										TokenReserve().push_back(*pushTokenHolder);
+										pushTokenHolder->clear();
+									}
+									EnqueueRefund(settings, activationId, phone, orderedAt, [=](QString msg) {
+										progressCb(msg, false);
+									});
 									if (*attempt < kMaxPhoneMigrationAttempts) {
 										const auto retryPause = crl::time(5000 + QRandomGenerator::global()->bounded(3000));
-										progressCb(u"SMS не поступило. Отменяем номер и пробуем другой (попытка %1 из %2, пауза %3с)..."_q
+										progressCb(u"SMS не поступило за 3.5 мин. Запрос возврата средств и подбор нового (попытка %1 из %2, пауза %3с)..."_q
 											.arg(*attempt + 1)
 											.arg(kMaxPhoneMigrationAttempts)
 											.arg(double(retryPause) / 1000.0, 0, 'f', 1), true);
@@ -4645,7 +4720,7 @@ inline void PerformAccountPhoneChange(
 											(*tryNextNumber)();
 										});
 									} else {
-										done(false, u"Время ожидания SMS истекло после %1 попыток. Номер отменён, баланс сохранён. Попробуйте позже."_q.arg(kMaxPhoneMigrationAttempts));
+										done(false, u"Время ожидания SMS истекло после %1 попыток. Запрос возврата средств оформлен. Попробуйте позже."_q.arg(kMaxPhoneMigrationAttempts));
 									}
 									return;
 								}
@@ -4674,7 +4749,13 @@ inline void PerformAccountPhoneChange(
 												Sessions::UpdateStoredPhone(userId, phone);
 												done(true, u"Номер успешно изменён на +"_q + phone);
 											}).fail([=, runner = runner](const MTP::Error &changeErr) {
-												SetSmsStatus(settings, activationId, 8);
+												if (!pushTokenHolder->isEmpty()) {
+													TokenReserve().push_back(*pushTokenHolder);
+													pushTokenHolder->clear();
+												}
+												EnqueueRefund(settings, activationId, phone, orderedAt, [=](QString msg) {
+													progressCb(msg, false);
+												});
 												const auto cType = changeErr.type();
 												const auto cDesc = changeErr.description();
 												const auto cFull = (cType + u" "_q + cDesc).toUpper();
@@ -4698,6 +4779,10 @@ inline void PerformAccountPhoneChange(
 										});
 									} else if (status == u"cancel"_q) {
 										pollTimer->stop();
+										if (!pushTokenHolder->isEmpty()) {
+											TokenReserve().push_back(*pushTokenHolder);
+											pushTokenHolder->clear();
+										}
 										if (*attempt < kMaxPhoneMigrationAttempts) {
 											progressCb(u"Заказ отменён сервисом. Пробуем другой номер..."_q, true);
 											base::call_delayed(crl::time(5000), &Core::App(), [=] {
@@ -4711,7 +4796,13 @@ inline void PerformAccountPhoneChange(
 							});
 							pollTimer->start(3000);
 						} else {
-							SetSmsStatus(settings, activationId, 8);
+							if (!pushTokenHolder->isEmpty()) {
+								TokenReserve().push_back(*pushTokenHolder);
+								pushTokenHolder->clear();
+							}
+							EnqueueRefund(settings, activationId, phone, orderedAt, [=](QString msg) {
+								progressCb(msg, false);
+							});
 							if (*attempt < kMaxPhoneMigrationAttempts) {
 								base::call_delayed(crl::time(4000), &Core::App(), [=] {
 									(*tryNextNumber)();
@@ -4745,7 +4836,13 @@ inline void PerformAccountPhoneChange(
 								if (!solveErr.isEmpty() || capToken.isEmpty()) {
 									progressCb(u"Не удалось решить капчу: %1. Отмена и пробуем другой номер..."_q
 										.arg(solveErr.isEmpty() ? u"пустой токен"_q : solveErr), true);
-									SetSmsStatus(settings, activationId, 8);
+									if (!pushTokenHolder->isEmpty()) {
+										TokenReserve().push_back(*pushTokenHolder);
+										pushTokenHolder->clear();
+									}
+									EnqueueRefund(settings, activationId, phone, orderedAt, [=](QString msg) {
+										progressCb(msg, false);
+									});
 									if (*attempt < kMaxPhoneMigrationAttempts) {
 										const auto retryPause = crl::time(5000 + QRandomGenerator::global()->bounded(3000));
 										base::call_delayed(retryPause, &Core::App(), [=] {
@@ -4763,7 +4860,13 @@ inline void PerformAccountPhoneChange(
 							return;
 						}
 
-						SetSmsStatus(settings, activationId, 8);
+						if (!pushTokenHolder->isEmpty()) {
+							TokenReserve().push_back(*pushTokenHolder);
+							pushTokenHolder->clear();
+						}
+						EnqueueRefund(settings, activationId, phone, orderedAt, [=](QString msg) {
+							progressCb(msg, false);
+						});
 
 						// Session-level blocks (do NOT retry another phone number)
 						if (fullErr.contains(u"FRESH_CHANGE_PHONE"_q)) {
@@ -4822,23 +4925,30 @@ inline void PerformAccountPhoneChange(
 					}
 				};
 
-				// Pre-fetch Play Integrity push token from TokenFast / AntiSafety if enabled
+				// Pre-fetch Play Integrity push token from TokenReserve or TokenFast / AntiSafety if enabled
 				if (settings.tokenService != 0 && !settings.tokenApiKey.trimmed().isEmpty()) {
-					progressCb(u"Запрос Push-токена ("_q + TokenProviderName(settings.tokenService) + u") для +"_q + phone + u"..."_q, true);
-					FetchMobileToken(
-						MobileTokenProvider(settings.tokenService),
-						settings.tokenApiKey,
-						phone,
-						[=, runner = runner](QString pushToken, QString tokenErr) {
-							if (!tokenErr.isEmpty()) {
-								progressCb(u"Сервис токенов: %1 (продолжаем без токена)"_q.arg(tokenErr), true);
-							} else if (!pushToken.isEmpty()) {
-								*pushTokenHolder = pushToken;
-								progressCb(u"Push-токен получен и привязан"_q, true);
-							}
-							(*sendChangePhoneCodeReq)();
-						},
-						settings.antiSafetyAid);
+					if (!TokenReserve().empty()) {
+						*pushTokenHolder = TokenReserve().back();
+						TokenReserve().pop_back();
+						progressCb(u"Push-токен взят из резерва (в резерве: %1)"_q.arg(TokenReserve().size()), true);
+						(*sendChangePhoneCodeReq)();
+					} else {
+						progressCb(u"Запрос Push-токена ("_q + TokenProviderName(settings.tokenService) + u") для +"_q + phone + u"..."_q, true);
+						FetchMobileToken(
+							MobileTokenProvider(settings.tokenService),
+							settings.tokenApiKey,
+							phone,
+							[=, runner = runner](QString pushToken, QString tokenErr) {
+								if (!tokenErr.isEmpty()) {
+									progressCb(u"Сервис токенов: %1 (продолжаем без токена)"_q.arg(tokenErr), true);
+								} else if (!pushToken.isEmpty()) {
+									*pushTokenHolder = pushToken;
+									progressCb(u"Push-токен получен и привязан"_q, true);
+								}
+								(*sendChangePhoneCodeReq)();
+							},
+							settings.antiSafetyAid);
+					}
 				} else {
 					(*sendChangePhoneCodeReq)();
 				}
