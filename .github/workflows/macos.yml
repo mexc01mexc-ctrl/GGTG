@@ -18,6 +18,12 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
 
+      - name: Setup ccache for Clang C++
+        uses: hendrikmuhs/ccache-action@v1.2
+        with:
+          key: ${{ runner.os }}-macos-ccache
+          max-size: 5G
+
       - name: Build and Package macOS DMG
         run: |
           exec > >(tee /tmp/full_macos_ci.log) 2>&1
@@ -64,9 +70,19 @@ jobs:
           ls -la "$GITHUB_WORKSPACE/desktop/Libraries"
           ls -la "$GITHUB_WORKSPACE/desktop/nicegram-desktop/out"
 
-          echo "=== 4. Build Telegram.xcodeproj ==="
+          echo "=== 3.5 Setup ccache wrappers for Xcode ==="
+          WRAPPER_DIR="/tmp/ccache_wrappers"
+          mkdir -p "$WRAPPER_DIR"
+          printf '#!/bin/bash\nexec ccache /usr/bin/clang "$@"\n' > "$WRAPPER_DIR/clang"
+          printf '#!/bin/bash\nexec ccache /usr/bin/clang++ "$@"\n' > "$WRAPPER_DIR/clang++"
+          chmod +x "$WRAPPER_DIR/clang" "$WRAPPER_DIR/clang++"
+
+          echo "=== 4. Build Telegram.xcodeproj with ccache ==="
           cd "$GITHUB_WORKSPACE/desktop/nicegram-desktop/out"
-          xcodebuild -project Telegram.xcodeproj -target Telegram -configuration Release ARCHS=arm64 ONLY_ACTIVE_ARCH=YES CODE_SIGNING_ALLOWED=NO
+          xcodebuild -project Telegram.xcodeproj -target Telegram -configuration Release ARCHS=arm64 ONLY_ACTIVE_ARCH=YES CODE_SIGNING_ALLOWED=NO CC="$WRAPPER_DIR/clang" CXX="$WRAPPER_DIR/clang++"
+
+          echo "=== CCACHE STATISTICS ==="
+          ccache -s || true
 
           echo "=== 5. Package DMG ==="
           chmod +x "$GITHUB_WORKSPACE/desktop/nicegram-desktop/Telegram/build/ggtg/make_dmg.sh"

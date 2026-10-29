@@ -66,6 +66,13 @@ jobs:
           sdk: '10.0.26100.0'
           toolset: '14.44'
 
+      - name: Setup sccache for MSVC
+        uses: hendrikmuhs/ccache-action@v1.2
+        with:
+          variant: sccache
+          key: ${{ runner.os }}-windows-sccache
+          max-size: 5G
+
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
@@ -247,7 +254,6 @@ jobs:
           key: ${{ runner.os }}-x64-libraries-v7-${{ github.run_id }}
           restore-keys: |
             ${{ runner.os }}-x64-libraries-v7-
-            ${{ runner.os }}-x64-libraries-v6-
 
       - name: Clean incomplete dependency builds & verify Qt
         shell: pwsh
@@ -473,7 +479,7 @@ jobs:
           key: ${{ runner.os }}-x64-thirdparty-v6-${{ hashFiles('desktop/nicegram-desktop/Telegram/build/prepare/prepare.py') }}
 
       - name: Save Libraries Cache (Incremental)
-        if: always()
+        if: always() && steps.restore-libraries.outputs.cache-hit != 'true'
         uses: actions/cache/save@v4
         with:
           path: D:\TBuild\Libraries\win64
@@ -485,7 +491,7 @@ jobs:
           QT: "5.15.19"
         run: |
           set QT=5.15.19
-          call configure.bat x64 -D TDESKTOP_API_ID=2040 -D TDESKTOP_API_HASH=b18441a1ff607e10a989891a5462e627
+          call configure.bat x64 -D CMAKE_C_COMPILER_LAUNCHER=sccache -D CMAKE_CXX_COMPILER_LAUNCHER=sccache -D TDESKTOP_API_ID=2040 -D TDESKTOP_API_HASH=b18441a1ff607e10a989891a5462e627
 
       - name: Build GGTG EXE
         working-directory: D:\TBuild\tdesktop\out
@@ -493,6 +499,7 @@ jobs:
           set "PreferredToolArchitecture=x64"
           set "_CL_=/FS /bigobj"
           cmake --build . --config Release --target Telegram -- /m:2 /p:CL_MPcount=2 /p:PreferredToolArchitecture=x64 /p:TrackFileAccess=false /v:m /fl /flp:logfile=build.log;verbosity=normal
+          sccache --show-stats || exit 0
 
       - name: Package GGTG Executable
         if: always()

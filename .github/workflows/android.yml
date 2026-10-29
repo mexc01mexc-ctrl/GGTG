@@ -39,28 +39,35 @@ jobs:
           "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" "build-tools;36.0.0" "platforms;android-36" "ndk;27.2.12479018" "cmake;3.22.1"
           yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --licenses || true
 
-      - name: Cache Gradle packages
-        uses: actions/cache@v4
+      - name: Setup ccache for NDK C++
+        uses: hendrikmuhs/ccache-action@v1.2
         with:
-          path: |
-            ~/.gradle/caches
-            ~/.gradle/wrapper
-          key: ${{ runner.os }}-gradle-${{ hashFiles('android/Telegram-GGTG/**/*.gradle*', 'android/Telegram-GGTG/gradle/wrapper/gradle-wrapper.properties') }}
-          restore-keys: |
-            ${{ runner.os }}-gradle-
+          key: ${{ runner.os }}-android-ccache
+          max-size: 4G
+
+      - name: Setup Gradle Build Cache
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          cache-read-only: false
+          gradle-home-cache-cleanup: true
 
       - name: Build Standalone APK
         working-directory: android/Telegram-GGTG
         run: |
           set -eo pipefail
           chmod +x gradlew
-          ./gradlew --no-daemon \
+          export NDK_CCACHE="$(which ccache)"
+          export CMAKE_C_COMPILER_LAUNCHER="$(which ccache)"
+          export CMAKE_CXX_COMPILER_LAUNCHER="$(which ccache)"
+          ./gradlew --build-cache --parallel \
             -Dorg.gradle.jvmargs="-Xmx6g -XX:MaxMetaspaceSize=1g" \
-            -Dorg.gradle.parallel=false \
-            --max-workers=2 \
+            -Dorg.gradle.caching=true \
+            --max-workers=4 \
             -Pandroid.injected.build.abi=arm64-v8a \
             -Pandroid.injected.testOnly=false \
             :TMessagesProj_AppStandalone:assembleAfatStandalone 2>&1 | tee "$GITHUB_WORKSPACE/gradle_build.log"
+          echo "=== CCACHE STATISTICS ==="
+          ccache -s || true
 
       - name: Find generated APK
         id: find-apk
