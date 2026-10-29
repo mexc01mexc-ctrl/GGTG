@@ -1,4 +1,5 @@
 name: Build macOS DMG
+# Full macOS ARM64 CI: 16 chunks with boost/regex, WebRTC tg_owt, and Qt objects
 
 on:
   workflow_dispatch:
