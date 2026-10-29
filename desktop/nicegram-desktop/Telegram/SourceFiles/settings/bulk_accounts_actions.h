@@ -322,13 +322,15 @@ void RunSequentialAccountsAction(
 	not_null<Window::SessionController*> controller,
 	std::vector<not_null<Main::Account*>> accounts,
 	StepWithProgress step,
-	const QString &title);
+	const QString &title,
+	std::shared_ptr<Ui::Show> show = nullptr);
 
 void RunSequentialAccountsAction(
 	not_null<Window::SessionController*> controller,
 	std::vector<not_null<Main::Account*>> accounts,
 	Step step,
-	const QString &title);
+	const QString &title,
+	std::shared_ptr<Ui::Show> show = nullptr);
 
 // Stops running `account` on its current session - locally only, nothing is
 // sent to Telegram, so that session stays valid for whoever takes it - and

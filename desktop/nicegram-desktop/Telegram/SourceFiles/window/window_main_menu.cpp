@@ -2148,8 +2148,9 @@ void OpenGgtgShell(not_null<Window::SessionController*> controller) {
 	if (Core::BlockedReason(Core::GuardedAction::EditBases).isEmpty()) {
 		Data::RemoveDuplicatesAcrossBases();
 	}
-	const auto panel = new Ui::SeparatePanel();
+	const auto panel = new Ui::SeparatePanel({ .noShadow = true });
 	GgtgPanel() = QPointer<Ui::SeparatePanel>(panel);
+	panel->setNoShadow(true);
 	// SeparatePanel defaults to always-on-top (it's normally used for
 	// modal-ish flows like Payments/Passport that sit over the main
 	// window) - this is meant to behave like an ordinary window the user

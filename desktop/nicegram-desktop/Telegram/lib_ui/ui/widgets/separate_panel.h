@@ -56,6 +56,7 @@ struct SeparatePanelArgs {
 	bool onAllSpaces = false;
 	Fn<bool(int zorder)> animationsPaused;
 	const style::PopupMenu *menuSt = nullptr;
+	bool noShadow = false;
 };
 
 struct TitleBadgeDescriptor {
@@ -85,6 +86,8 @@ public:
 	void allowChildFullScreenControls(bool allow);
 	[[nodiscard]] rpl::producer<bool> fullScreenValue() const;
 	[[nodiscard]] QMargins computePadding() const;
+	void setNoShadow(bool noShadow = true);
+	[[nodiscard]] bool noShadow() const;
 
 	void setHideOnDeactivate(bool hideOnDeactivate);
 	void setAnchorData(Platform::ForeignParent transientParent);
@@ -238,6 +241,7 @@ private:
 	bool _useTransparency = true;
 	bool _backAllowed = false;
 	bool _closeAllowed = true;
+	bool _noShadow = false;
 	style::margins _padding;
 
 	bool _dragging = false;

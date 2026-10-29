@@ -42,7 +42,7 @@ enum class GuardedAction : uchar {
 // Why `action` can't be done now, or empty when it can.
 [[nodiscard]] QString BlockedReason(GuardedAction action);
 
-// BlockedReason as a toast on `show`: true when the action may go on.
+// BlockedReason as an inform box on `show`: true when the action may go on.
 [[nodiscard]] bool GuardAllows(
 	const std::shared_ptr<Ui::Show> &show,
 	GuardedAction action);

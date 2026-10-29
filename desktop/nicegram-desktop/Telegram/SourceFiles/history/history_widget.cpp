@@ -1717,6 +1717,9 @@ void HistoryWidget::initTabbedSelector() {
 	refreshTabbedPanel();
 
 	_tabbedSelectorToggle->addClickHandler([=] {
+		if (_smsTemplatesPanel) {
+			_smsTemplatesPanel->hidePanel();
+		}
 		if (_tabbedPanel && _tabbedPanel->isHidden()) {
 			_tabbedPanel->showAnimated();
 		} else {
@@ -7719,6 +7722,9 @@ void HistoryWidget::showSmsTemplates() {
 	if (!_peer || !_canSendTexts) {
 		return;
 	}
+	if (_tabbedPanel) {
+		_tabbedPanel->hideAnimated();
+	}
 	createSmsTemplatesPanel();
 	_smsTemplatesPanel->showPanel();
 	updateControlsGeometry();
@@ -7732,6 +7738,9 @@ void HistoryWidget::toggleSmsTemplates() {
 	if (_smsTemplatesPanel->isVisible()) {
 		_smsTemplatesPanel->hidePanel();
 	} else {
+		if (_tabbedPanel) {
+			_tabbedPanel->hideAnimated();
+		}
 		_smsTemplatesPanel->showPanel();
 		updateControlsGeometry();
 	}
@@ -8146,8 +8155,9 @@ void HistoryWidget::moveFieldControls() {
 	}
 	auto right = st::historySendRight;
 	_send->moveToRight(right, buttonsBottom); right += _send->width();
-	// Right beside the send / voice button, ahead of everything else that
-	// lives on this side.
+	_tabbedSelectorToggle->moveToRight(right, buttonsBottom);
+	_botKeyboardHide->moveToRight(right, buttonsBottom);
+	right += _tabbedSelectorToggle->width();
 	if (!_smsTemplates->isHidden()) {
 		_smsTemplates->moveToRight(right, buttonsBottom);
 		right += _smsTemplates->width();
@@ -8155,17 +8165,11 @@ void HistoryWidget::moveFieldControls() {
 	if (_smsTemplatesPanel) {
 		const auto panelWidth = _smsTemplatesPanel->width();
 		const auto panelHeight = _smsTemplatesPanel->height();
-		const auto x = std::clamp(
-			_smsTemplates->x() + _smsTemplates->width() - panelWidth,
-			style::ConvertScale(10),
-			std::max(style::ConvertScale(10), width() - panelWidth - style::ConvertScale(10)));
+		const auto x = std::max(0, width() - panelWidth);
 		const auto y = _smsTemplates->y() - panelHeight - style::ConvertScale(4);
 		_smsTemplatesPanel->move(x, y);
 	}
 	_voiceRecordBar->moveToLeft(0, bottom - _voiceRecordBar->height());
-	_tabbedSelectorToggle->moveToRight(right, buttonsBottom);
-	_botKeyboardHide->moveToRight(right, buttonsBottom);
-	right += _botKeyboardHide->width();
 	_botKeyboardShow->moveToRight(right, buttonsBottom);
 	_botCommandStart->moveToRight(right, buttonsBottom);
 	if (_silent) {

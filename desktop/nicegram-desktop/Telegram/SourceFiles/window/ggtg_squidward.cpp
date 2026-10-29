@@ -502,6 +502,30 @@ private:
 	return result;
 }
 
+} // namespace
+
+namespace Squidward {
+
+void CacheLookupCard(const QString &query, const Card &card) {
+	Lookups().putCard(query, card);
+}
+
+void CacheLookupGroups(const QString &query, const GroupsResult &result) {
+	Lookups().putGroups(query, result);
+}
+
+void CacheLookupUsers(const QString &query, const UsersResult &result) {
+	Lookups().putUsers(query, result);
+}
+
+void CacheLookupTotal(const QString &query, int total) {
+	Lookups().setTotal(query, total);
+}
+
+} // namespace Squidward
+
+namespace {
+
 not_null<Ui::FlatLabel*> AddLabel(
 		not_null<Ui::VerticalLayout*> to,
 		const QString &text) {
@@ -591,8 +615,11 @@ void AddExpander(
 
 // "Имя (@username)" or "Имя (+7...)" of the account this window uses.
 [[nodiscard]] QString ViaAccount(
-		not_null<Window::SessionController*> controller) {
-	const auto user = controller->session().user();
+		not_null<Main::Account*> account) {
+	if (!account->sessionExists()) {
+		return u"не подключён"_q;
+	}
+	const auto user = account->session().user();
 	const auto name = user->name().trimmed();
 	const auto username = user->username();
 	const auto handle = !username.isEmpty()
@@ -649,10 +676,11 @@ private:
 
 	const not_null<Ui::GenericBox*> _box;
 	const not_null<Window::SessionController*> _controller;
-	const std::unique_ptr<Session> _session;
+	std::shared_ptr<Session> _session;
 	// 🦑 from «База»: looked up, collected and saved without any clicks.
 	const QString _autoQuery;
-	const QString _via; // the account the bot is talked to from
+	QString _via; // the account the bot is talked to from
+	rpl::lifetime _sessionLifetime;
 	bool _autoCollect = false; // the next group card starts collecting
 	bool _autoSave = false; // the running collection was auto-started
 	// The card on screen came from the saved lookups, not from the bot.
@@ -704,10 +732,27 @@ Screen::Screen(
 	const QString &autoQuery)
 : _box(box)
 , _controller(controller)
-, _session(std::make_unique<Session>(controller))
 , _autoQuery(AsLookupQuery(autoQuery))
-, _via(ViaAccount(controller))
 , _recentList(LoadRecent()) {
+	const auto autoQueryClean = _autoQuery;
+	const auto active = ActiveSquidwardSession();
+	const auto isCollecting = active && active->collecting();
+	const auto hasActiveResult = active && (
+		(autoQueryClean.isEmpty() && active->hasResults())
+		|| (!autoQueryClean.isEmpty() && active->isQuery(autoQueryClean)));
+
+	if (isCollecting || hasActiveResult) {
+		_session = active;
+		_session->setController(controller);
+	} else {
+		if (active && !active->collecting()) {
+			ClearActiveSquidwardSession();
+		}
+		_session = std::make_shared<Session>(controller);
+		SetActiveSquidwardSession(_session);
+	}
+	_via = ViaAccount(_session->account());
+
 	setupHeader();
 	setupSearch();
 	Ui::AddDivider(_box->verticalLayout());
@@ -719,11 +764,30 @@ Screen::Screen(
 		style::margins());
 	setupEvents();
 	renderRecent();
-	renderIdle();
-	if (!_autoQuery.isEmpty()) {
-		_autoCollect = true;
-		_field->setText(_autoQuery);
-		start(_autoQuery);
+
+	if (_session->currentCard()) {
+		const auto card = *_session->currentCard();
+		_lastQuery = _session->currentQuery();
+		_field->setText(_lastQuery);
+		renderCard(card);
+		if (_session->collecting()) {
+			const auto progress = _session->currentProgress().value_or(Progress{});
+			renderProgress(progress);
+		} else if (const auto groups = _session->lastGroups()) {
+			_groups = *groups;
+			renderGroups(*groups);
+		} else if (const auto users = _session->lastUsers()) {
+			_users = *users;
+			renderUsers(*users);
+		}
+	} else {
+		renderIdle();
+		if (!_autoQuery.isEmpty()) {
+			_autoCollect = true;
+			_session->setAutoSave(true);
+			_field->setText(_autoQuery);
+			start(_autoQuery);
+		}
 	}
 }
 
@@ -743,7 +807,7 @@ void Screen::setupHeader() {
 		object_ptr<Ui::LinkButton>(_box, u"Сменить аккаунт…"_q),
 		st::boxRowPadding);
 	link->setClickedCallback([=] {
-		const auto current = &_controller->session().account();
+		const auto current = _session ? _session->account().get() : &_controller->session().account();
 		_box->getDelegate()->show(Box([=](not_null<Ui::GenericBox*> picker) {
 			picker->setTitle(rpl::single(u"Через какой аккаунт пробивать"_q));
 			picker->setWidth(st::boxWideWidth);
@@ -957,7 +1021,7 @@ void Screen::setupSearch() {
 }
 
 void Screen::setupEvents() {
-	const auto lifetime = &_box->lifetime();
+	_sessionLifetime.destroy();
 	_session->status(
 	) | rpl::on_next([=](BotStatus status) {
 		_status->setText(status == BotStatus::Ready
@@ -978,7 +1042,7 @@ void Screen::setupEvents() {
 			renderLookupError(
 				u"Бот (и его зеркала) недоступен. Проверьте сеть."_q);
 		}
-	}, *lifetime);
+	}, _sessionLifetime);
 	_session->cards(
 	) | rpl::on_next([=](const Card &card) {
 		_fromCache = false;
@@ -995,7 +1059,7 @@ void Screen::setupEvents() {
 		} else if (collectNext && card.list != CardKind::Unknown) {
 			_session->collect();
 		}
-	}, *lifetime);
+	}, _sessionLifetime);
 	_session->progress(
 	) | rpl::on_next([=](const Progress &progress) {
 		if (progress.total > 0 && !_lastQuery.isEmpty()) {
@@ -1003,7 +1067,7 @@ void Screen::setupEvents() {
 			Lookups().setTotal(_lastQuery, progress.total);
 		}
 		renderProgress(progress);
-	}, *lifetime);
+	}, _sessionLifetime);
 	_session->groupsCollected(
 	) | rpl::on_next([=](const GroupsResult &result) {
 		_groups = result;
@@ -1025,7 +1089,7 @@ void Screen::setupEvents() {
 		} else {
 			renderGroups(result);
 		}
-	}, *lifetime);
+	}, _sessionLifetime);
 	_session->usersCollected(
 	) | rpl::on_next([=](const UsersResult &result) {
 		_users = result;
@@ -1039,7 +1103,7 @@ void Screen::setupEvents() {
 		} else {
 			renderUsers(result);
 		}
-	}, *lifetime);
+	}, _sessionLifetime);
 	_session->errors(
 	) | rpl::on_next([=](const QString &text) {
 		_autoCollect = false;
@@ -1048,7 +1112,7 @@ void Screen::setupEvents() {
 		} else {
 			Ggtg::Notice(_box->uiShow(), text);
 		}
-	}, *lifetime);
+	}, _sessionLifetime);
 }
 
 void Screen::submit() {
@@ -1075,8 +1139,15 @@ void Screen::submit() {
 }
 
 void Screen::start(const QString &query, bool force) {
+	if (_session->account() != &_controller->session().account() && !_session->collecting()) {
+		_session = std::make_shared<Session>(_controller);
+		SetActiveSquidwardSession(_session);
+		_via = ViaAccount(_session->account());
+		setupEvents();
+	}
 	// Only 🦑's own query collects and saves by itself.
 	_autoCollect = _autoCollect && (query == _autoQuery);
+	_session->setAutoSave(_autoCollect);
 	_autoSave = false;
 	_lastQuery = query;
 	_recentList = PushRecent(_recentList, query, kRecentLimit);

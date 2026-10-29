@@ -730,12 +730,12 @@ struct ViewsFormMemory {
 				? ParseJoinLinks(linksText, &bad)
 				: ParseViewsLinks(linksText, &bad);
 			if (!bad.isEmpty()) {
-				Ggtg::Notice(controller->uiShow(), 
+				Ggtg::Notice(box->uiShow(), 
 					u"Не удалось разобрать: "_q + bad.front());
 				return;
 			}
 			if (targets.empty()) {
-				Ggtg::Notice(controller->uiShow(), 
+				Ggtg::Notice(box->uiShow(), 
 					u"Укажите хотя бы одну ссылку"_q);
 				return;
 			}
@@ -745,6 +745,9 @@ struct ViewsFormMemory {
 				: 1;
 			if (!ok || threads < 1) {
 				threads = 1;
+			}
+			if (!Core::GuardAllows(box->uiShow(), Core::GuardedAction::StartViews)) {
+				return;
 			}
 			remember();
 			box->closeBox();

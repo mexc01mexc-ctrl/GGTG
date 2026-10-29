@@ -44,7 +44,7 @@
 | `main/session_duplicate.h` | 4 KB | Mints a genuinely new, independent MTProto session for `account`'s already-logged-in user - its own auth key, its own entry in Telegram's "Active Sessions" (revocable there on its own, unaffected by anything that happens to `account`'s own session) - via the s… |
 | `mtproto/proxy_pool.cpp` | 9 KB |  |
 | `mtproto/proxy_pool.h` | 3 KB | Named, on-disk pools of spare SOCKS5 proxies (e.g. one list per region/source: "India", "Indonesia", ...), entirely separate from the app's own global proxy list/settings. Meant for bulk-loading a batch of proxies once per list (paste as ip:port:login:pass, on… |
-| `settings/bulk_accounts_actions.cpp` | 386 KB |  |
+| `settings/bulk_accounts_actions.cpp` | 387 KB |  |
 | `settings/bulk_accounts_actions.h` | 19 KB | Drives the "Массовые действия" menu row's spinner/checkmark suffix (see window_main_menu.cpp), the same way SmsCampaignIndicatorValue() does for "Отправка SMS" - see sms_campaign.h for the exact state meanings. |
 | `settings/ggtg_add_accounts.h` | 17 KB | The ways to add accounts: the "Добавить" tab of «Аккаунты», the side menu's "Add account" button and the GGTG button of the sign-in screen (when there are no accounts yet, so nothing here may need a session). A proxy is mandatory everywhere: a new account neve… |
 | `settings/ggtg_ai_agent.h` | 60 KB | The "ИИ-агент": a conversation with the 9B model that decides by itself what it needs - a web search, a page, the user's own campaign numbers, templates and bases - and remembers what it learns about the user's business between conversations (ai_agent.json). E… |
@@ -82,13 +82,13 @@
 | `settings/views_campaign.h` | 1 KB | Drives the "Просмотры" menu row's spinner/checkmark suffix, the same way SmsCampaignIndicatorValue() does for "Отправка SMS". |
 | `window/ggtg_click.h` | 2 KB | One reliable click for a GGTG list row (a checkbox row, a folder header). Rows used to filter Press/Release themselves and toggle a child checkbox by hand, while the checkbox could ALSO react natively - two handlers on one gesture, and Qt turns a quick second … |
 | `window/ggtg_home_widgets.h` | 12 KB | The dashboard of "Главная": a greeting with the one thing to do, tiles with the numbers, and cards for what is going on. Everything is drawn in the colors of the theme (dark or light), nothing is hard-coded. |
-| `window/ggtg_squidward.cpp` | 48 KB |  |
+| `window/ggtg_squidward.cpp` | 50 KB |  |
 | `window/ggtg_squidward.h` | 1 KB | The GGTG "Сквидвард" section: a curated front end for two of @skvidvarde_bot's lookups (by user, by group/channel) whose results can be saved into "База". `lookupGroup`, when not empty, is a group's @username to be looked up ("Пробить группу") the moment the b… |
 | `window/ggtg_squidward_parse.cpp` | 20 KB | Qt::StringLiterals is Qt 6 only, and the Windows build is on Qt 5. |
 | `window/ggtg_squidward_parse.h` | 4 KB | Reading @skvidvarde_bot's replies into plain data. Depends on Qt Core only (see Telegram/build/ggtg/test_squidward_parse.sh, which builds its test without the rest of the app). |
 | `window/ggtg_squidward_parse_test.cpp` | 14 KB | Standalone checks for ggtg_squidward_parse.cpp - not part of the app build. Run: Telegram/build/ggtg/test_squidward_parse.sh |
-| `window/ggtg_squidward_session.cpp` | 34 KB | The bot and its mirrors, in the order they are tried: when one is not found, does not answer, or has no crystals left, the next one takes the lookup. |
-| `window/ggtg_squidward_session.h` | 7 KB | Which list collect() gathers: User - the person's groups, Group - the group's members, Unknown - none (no matching button in the reply). |
+| `window/ggtg_squidward_session.cpp` | 39 KB | The bot and its mirrors, in the order they are tried: when one is not found, does not answer, or has no crystals left, the next one takes the lookup. |
+| `window/ggtg_squidward_session.h` | 9 KB | Which list collect() gathers: User - the person's groups, Group - the group's members, Unknown - none (no matching button in the reply). |
 | `window/ggtg_widgets.h` | 25 KB | One line of a right-click menu. |
 
 ## Android: `android/Telegram-GGTG/TMessagesProj/src/main/java/app/ggtg/`

@@ -11,8 +11,10 @@ For license and exceptions, see https://github.com/telegramdesktop/tdesktop/blob
 #include "apiwrap.h"
 #include "base/call_delayed.h"
 #include "base/flat_set.h"
+#include "core/application.h"
 #include "core/click_handler_types.h"
 #include "core/ggtg_log.h"
+#include "core/process_manager.h"
 #include "data/data_changes.h"
 #include "data/data_channel.h"
 #include "data/data_session.h"
@@ -21,6 +23,7 @@ For license and exceptions, see https://github.com/telegramdesktop/tdesktop/blob
 #include "history/history_item.h"
 #include "history/history_item_components.h"
 #include "history/history_item_reply_markup.h"
+#include "main/main_account.h"
 #include "main/main_session.h"
 #include "ui/layers/generic_box.h"
 #include "ui/text/text_entity.h"
@@ -29,6 +32,8 @@ For license and exceptions, see https://github.com/telegramdesktop/tdesktop/blob
 #include "ui/wrap/vertical_layout.h"
 #include "styles/style_boxes.h"
 #include "styles/style_layers.h"
+#include "window/ggtg_squidward.h"
+#include "window/window_controller.h"
 #include "window/window_session_controller.h"
 
 namespace Window::Squidward {
@@ -179,16 +184,37 @@ struct ChoiceButton {
 	return crystals && shortage;
 }
 
+std::shared_ptr<Session> GlobalActiveSquidwardSession;
+
 } // namespace
 
+std::shared_ptr<Session> ActiveSquidwardSession() {
+	return GlobalActiveSquidwardSession;
+}
+
+void SetActiveSquidwardSession(std::shared_ptr<Session> session) {
+	GlobalActiveSquidwardSession = std::move(session);
+}
+
+void ClearActiveSquidwardSession() {
+	GlobalActiveSquidwardSession.reset();
+}
+
 Session::Session(not_null<Window::SessionController*> controller)
-: _controller(controller)
-, _api(&controller->session().mtp())
+: Session(&controller->session(), controller.get()) {
+}
+
+Session::Session(
+	not_null<Main::Session*> session,
+	Window::SessionController *controller)
+: _session(session)
+, _account(&session->account())
+, _controller(controller ? base::make_weak(controller) : nullptr)
+, _api(&session->mtp())
 , _lookupTimer([=] { lookupTimeout(); })
 , _pageTimer([=] { pageTimeout(); })
 , _resolveTimer([=] { keepRestUnchecked(); })
 , _unknownTimer([=] { settleUnknown(); }) {
-	const auto session = &controller->session();
 	session->data().newItemAdded(
 	) | rpl::on_next([=](not_null<HistoryItem*> item) {
 		handle(item, false);
@@ -199,6 +225,35 @@ Session::Session(not_null<Window::SessionController*> controller)
 		handle(update.item, true);
 	}, _lifetime);
 	resolveBot();
+}
+
+Session::~Session() {
+	if (_process) {
+		_process->fail(u"Сбор прерван"_q);
+		_process = nullptr;
+	}
+}
+
+void Session::setController(Window::SessionController *controller) {
+	_controller = controller ? base::make_weak(controller) : nullptr;
+}
+
+bool Session::isQuery(const QString &query) const {
+	if (query.isEmpty() || _query.isEmpty()) {
+		return false;
+	}
+	auto q1 = query.trimmed().toLower();
+	auto q2 = _query.trimmed().toLower();
+	while (q1.startsWith('@')) q1 = q1.mid(1);
+	while (q2.startsWith('@')) q2 = q2.mid(1);
+	return q1 == q2;
+}
+
+std::optional<Progress> Session::currentProgress() const {
+	if (_collect) {
+		return _collect->progress;
+	}
+	return _lastProgress;
 }
 
 rpl::producer<BotStatus> Session::status() const {
@@ -247,7 +302,7 @@ void Session::reconnect() {
 MsgId Session::botFloor() const {
 	auto result = _maxSeenId;
 	if (_bot) {
-		const auto history = _controller->session().data().history(_bot);
+		const auto history = _session->data().history(_bot);
 		if (const auto last = history->lastServerMessage()) {
 			result = std::max(result, last->id);
 		}
@@ -267,7 +322,7 @@ bool Session::botEmpty(int index) const {
 
 void Session::resolveBot() {
 	const auto username = BotNames()[_botIndex];
-	const auto session = &_controller->session();
+	const auto session = _session;
 	if (const auto peer = session->data().peerByUsername(username)) {
 		if (const auto user = peer->asUser()) {
 			_bot = user;
@@ -420,6 +475,9 @@ void Session::startLookup(const QString &text, bool retry) {
 	_resolveTimer.cancel();
 	_query = text;
 	_card.reset();
+	_lastProgress.reset();
+	_lastGroups.reset();
+	_lastUsers.reset();
 	_cardItem = FullMsgId();
 	_choiceItem = FullMsgId();
 	_unknown.reset();
@@ -429,9 +487,9 @@ void Session::startLookup(const QString &text, bool retry) {
 	_cardFloor = botFloor();
 	Core::GgtgLog::Info(u"Сквидвард"_q, u"Пробив: "_q + text);
 	auto message = Api::MessageToSend(Api::SendAction(
-		_controller->session().data().history(_bot)));
+		_session->data().history(_bot)));
 	message.textWithTags = { text, TextWithTags::Tags() };
-	_controller->session().api().sendMessage(std::move(message));
+	_session->api().sendMessage(std::move(message));
 	_lookupTimer.callOnce(kLookupTimeout);
 }
 
@@ -547,6 +605,7 @@ void Session::acceptCard(not_null<HistoryItem*> item, Card card) {
 	_unknownItem = FullMsgId();
 	_card = card;
 	_cardItem = item->fullId();
+	CacheLookupCard(_query, card);
 	_cards.fire(std::move(card));
 	if (fresh) {
 		resolveRealTitle();
@@ -575,7 +634,16 @@ void Session::startChoice(not_null<HistoryItem*> item) {
 
 	const auto weak = base::make_weak(this);
 	const auto picked = std::make_shared<bool>(false);
-	_controller->show(Box([=](not_null<Ui::GenericBox*> box) {
+	const auto controller = _controller.get()
+		? _controller.get()
+		: (Core::App().activeWindow() ? Core::App().activeWindow()->sessionController() : nullptr);
+	if (!controller) {
+		if (!buttons.empty()) {
+			pickChoice(generation, itemId, buttons.front().coords);
+		}
+		return;
+	}
+	controller->show(Box([=](not_null<Ui::GenericBox*> box) {
 		box->setTitle(rpl::single(u"Сквидвард нашёл несколько результатов"_q));
 		box->addRow(
 			object_ptr<Ui::FlatLabel>(
@@ -635,7 +703,7 @@ void Session::settleUnknown() {
 	if (!_awaitingCard || !_unknown) {
 		return;
 	}
-	const auto item = _controller->session().data().message(_unknownItem);
+	const auto item = _session->data().message(_unknownItem);
 	if (!item) {
 		_awaitingCard = false;
 		_unknown.reset();
@@ -658,7 +726,7 @@ void Session::resolveRealTitle() {
 	if (username.isEmpty() && card.user && !card.user->usernames.isEmpty()) {
 		username = card.user->usernames.front();
 	}
-	const auto data = &_controller->session().data();
+	const auto data = &_session->data();
 	if (!username.isEmpty()) {
 		if (const auto peer = data->peerByUsername(username)) {
 			applyRealTitle(peer, username);
@@ -703,7 +771,7 @@ void Session::resolveRealTitle() {
 		}
 		auto peer = (PeerData*)nullptr;
 		result.match([&](const MTPDcontacts_resolvedPeer &data) {
-			const auto owner = &_controller->session().data();
+			const auto owner = &_session->data();
 			owner->processUsers(data.vusers());
 			owner->processChats(data.vchats());
 			const auto peerId = peerFromMTP(data.vpeer());
@@ -733,7 +801,7 @@ void Session::collect() {
 	if (collecting() || !_card || _card->list == CardKind::Unknown) {
 		return;
 	}
-	const auto item = _controller->session().data().message(_cardItem);
+	const auto item = _session->data().message(_cardItem);
 	if (!item) {
 		_errors.fire(u"Ответ бота больше не найден, пробейте заново."_q);
 		return;
@@ -753,16 +821,99 @@ void Session::collect() {
 	_collect->kind = _card->list;
 	_collect->buttonItem = _cardItem;
 	_collect->button = *button;
+	_lastProgress = _collect->progress;
 	_progress.fire_copy(_collect->progress);
+
+	// ggtg: register background scrape so it survives account switches and layer closes
+	const auto reopen = [] {
+		if (const auto window = Core::App().activeWindow()) {
+			if (const auto controller = window->sessionController()) {
+				controller->show(MakeSquidwardBox(controller));
+			}
+		}
+	};
+	const auto title = (isUser ? u"Сбор групп: "_q : u"Сбор участников: "_q) + baseTitle();
+	_process = Core::App().processes().start(title, reopen, Core::ProcessKind::Scrape);
+	if (_process) {
+		_process->log(u"Запрос списка у бота…"_q);
+	}
+
 	click(_cardItem, *button);
 	_pageTimer.callOnce(kFirstPageTimeout);
 }
 
 void Session::click(FullMsgId itemId, std::pair<int, int> button) {
-	Api::ActivateBotCommand(ClickHandlerContext{
-		.itemId = itemId,
-		.sessionWindow = base::make_weak(_controller),
-	}, button.first, button.second);
+	const auto item = _session->data().message(itemId);
+	if (!item) {
+		return;
+	}
+	const auto markup = item->Get<HistoryMessageReplyMarkup>();
+	if (!markup) {
+		return;
+	}
+	if (button.first < 0 || button.first >= int(markup->data.rows.size())) {
+		return;
+	}
+	const auto &row = markup->data.rows[button.first];
+	if (button.second < 0 || button.second >= int(row.size())) {
+		return;
+	}
+	const auto &btn = row[button.second];
+	if (btn.type == HistoryMessageMarkupButton::Type::Callback) {
+		auto flags = MTPmessages_GetBotCallbackAnswer::Flags(0);
+		if (!btn.data.isEmpty()) {
+			flags |= MTPmessages_GetBotCallbackAnswer::Flag::f_data;
+		}
+		const auto history = item->history();
+		const auto fullId = item->fullId();
+		const auto owner = &_session->data();
+		const auto rowIdx = button.first;
+		const auto colIdx = button.second;
+
+		_session->api().request(
+			MTPmessages_GetBotCallbackAnswer(
+				MTP_flags(flags),
+				history->peer->input(),
+				MTP_int(item->id),
+				MTP_bytes(btn.data),
+				MTP_inputCheckPasswordEmpty())
+		).done([=](const MTPmessages_BotCallbackAnswer &result) {
+			const auto item = owner->message(fullId);
+			if (!item) {
+				return;
+			}
+			if (const auto btnPtr = HistoryMessageMarkupButton::Get(
+					owner,
+					fullId,
+					rowIdx,
+					colIdx)) {
+				btnPtr->requestId = 0;
+				owner->requestItemRepaint(item);
+			}
+		}).fail([=](const MTP::Error &error) {
+			const auto item = owner->message(fullId);
+			if (!item) {
+				return;
+			}
+			if (const auto btnPtr = HistoryMessageMarkupButton::Get(
+					owner,
+					fullId,
+					rowIdx,
+					colIdx)) {
+				btnPtr->requestId = 0;
+				owner->requestItemRepaint(item);
+			}
+		}).send();
+
+		_session->changes().messageUpdated(
+			item,
+			Data::MessageUpdate::Flag::BotCallbackSent);
+	} else if (const auto controller = _controller.get()) {
+		Api::ActivateBotCommand(ClickHandlerContext{
+			.itemId = itemId,
+			.sessionWindow = base::make_weak(controller),
+		}, button.first, button.second);
+	}
 }
 
 void Session::handlePage(not_null<HistoryItem*> item, bool edited) {
@@ -809,8 +960,19 @@ void Session::handlePage(not_null<HistoryItem*> item, bool edited) {
 	c.progress.pages = info ? info->pages : 0;
 	if (info && info->total >= 0) {
 		c.progress.total = info->total;
+		CacheLookupTotal(_query, info->total);
 	}
+	_lastProgress = c.progress;
 	_progress.fire_copy(c.progress);
+
+	if (_process) {
+		const auto total = (c.progress.pages > 0) ? c.progress.pages : (c.lastPage + 1);
+		_process->progress(c.lastPage, total);
+		_process->log(
+			u"Страница "_q + QString::number(c.lastPage)
+			+ ((c.progress.pages > 0) ? (u" из "_q + QString::number(c.progress.pages)) : QString())
+			+ u" · найдено "_q + QString::number(c.progress.found));
+	}
 
 	const auto next = FindButton(item, &IsNextPageButton);
 	if (!next || (info && info->page >= info->pages) || --c.safety <= 0) {
@@ -831,7 +993,7 @@ void Session::pageTimeout() {
 	if (c.retries++ < (c.waitingFirst ? 2 : 1)) {
 		// Look the button up again: the keyboard may have changed, and a
 		// stored position could now point at a paid one.
-		const auto item = _controller->session().data().message(c.buttonItem);
+		const auto item = _session->data().message(c.buttonItem);
 		const auto button = !item
 			? std::nullopt
 			: !c.waitingFirst
@@ -852,6 +1014,11 @@ void Session::pageTimeout() {
 	_errors.fire(c.waitingFirst
 		? u"Бот не прислал список. Попробуйте ещё раз."_q
 		: u"Страница не пришла — показано то, что успели собрать."_q);
+	if (_process) {
+		_process->log(c.waitingFirst
+			? u"Бот не прислал список — завершаем сбор"_q
+			: u"Страница не пришла — сохраняем собранное"_q);
+	}
 	finish(true);
 }
 
@@ -869,7 +1036,11 @@ void Session::finish(bool stopped) {
 	auto progress = c.progress;
 	progress.checking = true;
 	progress.page = progress.pages = 0; // checked-count comes next
+	_lastProgress = progress;
 	_progress.fire_copy(progress);
+	if (stopped && _process) {
+		_process->log(u"Сбор остановлен — обработка собранного"_q);
+	}
 	if (c.kind == CardKind::User) {
 		finishGroups(std::move(c.groups), stopped);
 	} else {
@@ -916,11 +1087,20 @@ void Session::checkNextGroup() {
 		};
 		_check.reset();
 		_finishing = false;
+		_lastGroups = result;
+		if (_process) {
+			_process->succeed(u"Собрано групп: "_q + QString::number(result.groups.size()));
+			_process = nullptr;
+		}
+		CacheLookupGroups(_query, result);
 		_groups.fire(std::move(result));
 		return;
 	}
 	auto entry = check.source[check.next++];
-	const auto session = &_controller->session();
+	if (_process) {
+		_process->progress(int(check.next), int(check.source.size()));
+	}
+	const auto session = _session;
 	const auto generation = check.generation;
 	if (const auto peer = session->data().peerByUsername(entry.username)) {
 		settleGroup(std::move(entry), peer, 0, generation);
@@ -930,7 +1110,7 @@ void Session::checkNextGroup() {
 }
 
 void Session::resolveGroup(Data::ScrapedGroupEntry entry, int generation) {
-	const auto session = &_controller->session();
+	const auto session = _session;
 	_resolveTimer.callOnce(kResolveTimeout);
 	_check->requestId = _api.request(MTPcontacts_ResolveUsername(
 		MTP_flags(MTPcontacts_ResolveUsername::Flags(0)),
@@ -1053,7 +1233,7 @@ void Session::settleGroup(
 		&& !fullLoaded) {
 		// Resolving a username doesn't tell the group's size (it reads
 		// as 1 then): the full info does, one more request.
-		const auto session = &_controller->session();
+		const auto session = _session;
 		_resolveTimer.callOnce(kResolveTimeout);
 		_check->requestId = _api.request(MTPchannels_GetFullChannel(
 			channel->inputChannel()
@@ -1093,12 +1273,13 @@ void Session::settleGroup(
 		.found = int(_check->kept.size()),
 		.checking = true,
 	};
+	_lastProgress = progress;
 	_progress.fire_copy(progress);
 	base::call_delayed(delay, this, [=] { checkNextGroup(); });
 }
 
 void Session::finishUsers(std::vector<UserRow> rows, bool stopped) {
-	const auto session = &_controller->session();
+	const auto session = _session;
 	const auto generation = _generation;
 	auto names = QStringList();
 	auto ids = std::vector<uint64>();
@@ -1136,7 +1317,19 @@ void Session::finishUsers(std::vector<UserRow> rows, bool stopped) {
 			}
 		}
 		_finishing = false;
-		_users.fire({ DedupeUsernames(all), stopped });
+		auto result = UsersResult{ DedupeUsernames(all), stopped };
+		_lastUsers = result;
+		if (_process) {
+			_process->succeed(u"Собрано участников: "_q + QString::number(result.usernames.size()));
+			_process = nullptr;
+		}
+		CacheLookupUsers(_query, result);
+		if (_autoSave && !stopped && !result.usernames.isEmpty()) {
+			_autoSave = false;
+			const auto id = Data::GenerateManualBaseId();
+			Data::SaveScrapedGroupUsernames(id, baseTitle(), result.usernames);
+		}
+		_users.fire(std::move(result));
 	});
 }
 
@@ -1151,7 +1344,7 @@ void Session::resolveUsers(QVector<MTPInputUser> pending, Fn<void()> done) {
 	_api.request(MTPusers_GetUsers(
 		MTP_vector<MTPInputUser>(std::move(chunk))
 	)).done([=](const MTPVector<MTPUser> &result) {
-		_controller->session().data().processUsers(result);
+		_session->data().processUsers(result);
 		resolveUsers(rest, done);
 	}).fail([=] {
 		resolveUsers(rest, done);

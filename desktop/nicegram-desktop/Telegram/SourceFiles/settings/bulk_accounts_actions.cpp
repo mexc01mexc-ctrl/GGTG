@@ -730,6 +730,7 @@ void BuildBulkProgressBox(
 }
 
 struct BulkOptions {
+	std::shared_ptr<Ui::Show> show;
 	QString title = u"Массовое действие"_q;
 	Fn<crl::time()> pause;
 	QString failPrefix = u"ошибка: "_q;
@@ -750,8 +751,9 @@ void RunBulkAction(
 		BulkOptions options = {}) {
 	Expects(!accounts.empty());
 
+	const auto show = options.show ? options.show : controller->uiShow();
 	if (!Core::GuardAllows(
-			controller->uiShow(),
+			show,
 			Core::GuardedAction::StartBulk)) {
 		return;
 	}
@@ -1417,6 +1419,9 @@ void ShowBulkPhotoBox(
 				Ggtg::Notice(box->uiShow(), u"Сначала выберите файл"_q);
 				return;
 			}
+			if (!Core::GuardAllows(box->uiShow(), Core::GuardedAction::StartBulk)) {
+				return;
+			}
 			const auto replace = (state->mode->current() == Mode::Replace);
 			const auto paths = state->paths;
 			box->closeBox();
@@ -1522,6 +1527,9 @@ void ShowBulkNameBox(
 						});
 				}
 			}
+			if (!Core::GuardAllows(box->uiShow(), Core::GuardedAction::StartBulk)) {
+				return;
+			}
 			box->closeBox();
 			const auto index = std::make_shared<int>(0);
 			RunBulkAction(controller, accounts, [=](
@@ -1610,6 +1618,9 @@ void ShowBulkBioBox(
 				break;
 			}
 			}
+			if (!Core::GuardAllows(box->uiShow(), Core::GuardedAction::StartBulk)) {
+				return;
+			}
 			box->closeBox();
 			const auto index = std::make_shared<int>(0);
 			RunBulkAction(controller, accounts, [=](
@@ -1648,6 +1659,9 @@ void ShowBulkUsernameBox(
 		box->addRow(object_ptr<Ui::Radioenum<Mode>>(
 			box, mode, Mode::Delete, u"Удалить username"_q), st::ggtgChoiceRowPadding);
 		box->addButton(rpl::single(u"Начать"_q), [=] {
+			if (!Core::GuardAllows(box->uiShow(), Core::GuardedAction::StartBulk)) {
+				return;
+			}
 			const auto remove = (mode->current() == Mode::Delete);
 			box->closeBox();
 			RunBulkAction(controller, accounts, [=](
@@ -1712,6 +1726,9 @@ void ShowBulkTerminateSessionsBox(
 					"резервные сессии из хранилища программы тоже не "
 					"завершаются."_q));
 		box->addButton(rpl::single(u"Деактивировать"_q), [=] {
+			if (!Core::GuardAllows(box->uiShow(), Core::GuardedAction::StartBulk)) {
+				return;
+			}
 			box->closeBox();
 			RunBulkAction(controller, accounts, [=](
 					not_null<Main::Account*> account,
@@ -1758,6 +1775,9 @@ void ShowBulkBackupBox(
 					"Аккаунты обрабатываются по одному, с паузами - не "
 					"создавайте резервные для сотен аккаунтов за раз."_q));
 		box->addButton(rpl::single(u"Создать"_q), [=] {
+			if (!Core::GuardAllows(box->uiShow(), Core::GuardedAction::StartBulk)) {
+				return;
+			}
 			box->closeBox();
 			RunBulkAction(controller, accounts, [=](
 					not_null<Main::Account*> account,
@@ -1789,7 +1809,7 @@ void ShowBulkSwapToBackupBox(
 			// The accounts are replaced: nothing that holds them (a
 			// campaign) may be running.
 			if (!Core::GuardAllows(
-					controller->uiShow(),
+					box->uiShow(),
 					Core::GuardedAction::RemoveAccount)) {
 				return;
 			}
@@ -2026,6 +2046,9 @@ void ShowBulkPasswordBox(
 				: state->password->getLastText();
 			if (!deleting && newPassword.isEmpty()) {
 				Ggtg::Notice(box->uiShow(), u"Введите новый пароль"_q);
+				return;
+			}
+			if (!Core::GuardAllows(box->uiShow(), Core::GuardedAction::StartBulk)) {
 				return;
 			}
 			const auto hint = state->hint->getLastText();
@@ -10969,16 +10992,32 @@ void RunSequentialAccountsAction(
 		not_null<Window::SessionController*> controller,
 		std::vector<not_null<Main::Account*>> accounts,
 		StepWithProgress step,
-		const QString &title) {
-	RunBulkAction(controller, std::move(accounts), std::move(step), BulkOptions{ .title = title });
+		const QString &title,
+		std::shared_ptr<Ui::Show> show) {
+	RunBulkAction(
+		controller,
+		std::move(accounts),
+		std::move(step),
+		BulkOptions{
+			.show = std::move(show),
+			.title = title,
+		});
 }
 
 void RunSequentialAccountsAction(
 		not_null<Window::SessionController*> controller,
 		std::vector<not_null<Main::Account*>> accounts,
 		Step step,
-		const QString &title) {
-	RunBulkAction(controller, std::move(accounts), std::move(step), BulkOptions{ .title = title });
+		const QString &title,
+		std::shared_ptr<Ui::Show> show) {
+	RunBulkAction(
+		controller,
+		std::move(accounts),
+		std::move(step),
+		BulkOptions{
+			.show = std::move(show),
+			.title = title,
+		});
 }
 
 QString StoreSessionKey(

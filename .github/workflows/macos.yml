@@ -54,10 +54,7 @@ jobs:
           done
 
           echo "Bypassing ReRunCMake in CI..."
-          cat << 'EOF' > "$GITHUB_WORKSPACE/desktop/nicegram-desktop/out/CMakeScripts/ReRunCMake.make"
-all:
-	@echo "Skipping CMake regeneration in CI"
-EOF
+          printf 'all:\n\t@echo "Skipping CMake regeneration in CI"\n' > "$GITHUB_WORKSPACE/desktop/nicegram-desktop/out/CMakeScripts/ReRunCMake.make"
           ls -la "$GITHUB_WORKSPACE/desktop/Libraries"
           ls -la "$GITHUB_WORKSPACE/desktop/nicegram-desktop/out"
 

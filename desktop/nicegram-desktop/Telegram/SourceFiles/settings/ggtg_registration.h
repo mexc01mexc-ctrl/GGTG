@@ -4965,7 +4965,7 @@ inline void FillPhoneMigrationContent(
 		not_null<Window::SessionController*> controller,
 		not_null<SettingsData*> state,
 		std::vector<not_null<Main::Account*>> initialAccounts = {}) {
-	const auto show = controller->uiShow();
+	const auto show = box->uiShow();
 	const auto pickerState = box->lifetime().make_state<AccountPickerState>();
 
 	if (!initialAccounts.empty()) {
@@ -5431,6 +5431,9 @@ inline void FillPhoneMigrationContent(
 			Ggtg::Notice(show, u"Укажите API-ключ SMS-сервиса"_q);
 			return;
 		}
+		if (!Core::GuardAllows(show, Core::GuardedAction::StartBulk)) {
+			return;
+		}
 		SaveSettings(*state);
 		box->closeBox();
 
@@ -5452,7 +5455,8 @@ inline void FillPhoneMigrationContent(
 						done(ok, res);
 					});
 			},
-			u"Смена номера"_q);
+			u"Смена номера"_q,
+			controller->uiShow());
 	});
 }
 
@@ -6964,12 +6968,12 @@ inline void FillRegistrationBox(
 		SaveSettings(*state);
 
 		if (state->apiKey.isEmpty() && state->mode == 0) {
-			show->showToast(u"Введите API-ключ SMS-сервиса"_q);
+			Ggtg::Notice(show, u"Введите API-ключ SMS-сервиса"_q);
 			return;
 		}
 
 		if (state->countryId < 0 && state->mode == 0) {
-			show->showToast(u"Выберите страну номера перед запуском"_q);
+			Ggtg::Notice(show, u"Выберите страну номера перед запуском"_q);
 			return;
 		}
 

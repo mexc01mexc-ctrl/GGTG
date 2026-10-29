@@ -12,6 +12,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "core/ggtg_log.h"
 #include "core/ggtg_paths.h"
 #include "main/main_domain.h"
+#include "ui/boxes/confirm_box.h"
 #include "ui/layers/show.h"
 
 #ifdef Q_OS_WIN
@@ -333,7 +334,7 @@ bool GuardAllows(
 	}
 	GgtgLog::Info(u"Защита"_q, reason);
 	if (show) {
-		show->showToast(reason);
+		show->showBox(Ui::MakeInformBox(reason));
 	}
 	return false;
 }

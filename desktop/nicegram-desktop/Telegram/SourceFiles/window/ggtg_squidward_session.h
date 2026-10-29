@@ -18,6 +18,15 @@ For license and exceptions, see https://github.com/telegramdesktop/tdesktop/blob
 class HistoryItem;
 class UserData;
 
+namespace Main {
+class Account;
+class Session;
+} // namespace Main
+
+namespace Core {
+class ProcessHandle;
+} // namespace Core
+
 namespace Window {
 class SessionController;
 } // namespace Window
@@ -79,6 +88,24 @@ struct UsersResult {
 class Session final : public base::has_weak_ptr {
 public:
 	explicit Session(not_null<Window::SessionController*> controller);
+	explicit Session(
+		not_null<Main::Session*> session,
+		Window::SessionController *controller = nullptr);
+	~Session();
+
+	[[nodiscard]] not_null<Main::Session*> session() const { return _session; }
+	[[nodiscard]] not_null<Main::Account*> account() const { return _account; }
+	void setController(Window::SessionController *controller);
+
+	[[nodiscard]] std::optional<Card> currentCard() const { return _card; }
+	[[nodiscard]] std::optional<Progress> currentProgress() const;
+	[[nodiscard]] std::optional<GroupsResult> lastGroups() const { return _lastGroups; }
+	[[nodiscard]] std::optional<UsersResult> lastUsers() const { return _lastUsers; }
+	[[nodiscard]] QString currentQuery() const { return _query; }
+	[[nodiscard]] bool hasResults() const { return _lastGroups.has_value() || _lastUsers.has_value(); }
+	[[nodiscard]] bool isQuery(const QString &query) const;
+	void setAutoSave(bool autoSave) { _autoSave = autoSave; }
+	[[nodiscard]] bool autoSave() const { return _autoSave; }
 
 	[[nodiscard]] rpl::producer<BotStatus> status() const;
 	[[nodiscard]] rpl::producer<Card> cards() const;
@@ -170,8 +197,16 @@ private:
 	void resolveRealTitle();
 	void applyRealTitle(PeerData *peer, const QString &username);
 
-	const not_null<Window::SessionController*> _controller;
+	const not_null<Main::Session*> _session;
+	const not_null<Main::Account*> _account;
+	base::weak_ptr<Window::SessionController> _controller;
 	MTP::Sender _api;
+	std::shared_ptr<Core::ProcessHandle> _process;
+
+	std::optional<Progress> _lastProgress;
+	std::optional<GroupsResult> _lastGroups;
+	std::optional<UsersResult> _lastUsers;
+	bool _autoSave = false;
 	UserData *_bot = nullptr;
 	rpl::variable<BotStatus> _status = BotStatus::Connecting;
 	rpl::event_stream<Card> _cards;
@@ -217,5 +252,15 @@ private:
 	rpl::lifetime _lifetime;
 
 };
+
+// ggtg: Active Squidward session survives layer close and account switch
+[[nodiscard]] std::shared_ptr<Session> ActiveSquidwardSession();
+void SetActiveSquidwardSession(std::shared_ptr<Session> session);
+void ClearActiveSquidwardSession();
+
+void CacheLookupCard(const QString &query, const Card &card);
+void CacheLookupGroups(const QString &query, const GroupsResult &result);
+void CacheLookupUsers(const QString &query, const UsersResult &result);
+void CacheLookupTotal(const QString &query, int total);
 
 } // namespace Window::Squidward

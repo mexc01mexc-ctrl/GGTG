@@ -293,54 +293,59 @@ SeparatePanel::ResizeEdge::ResizeEdge(
 
 void SeparatePanel::ResizeEdge::updateSize() {
 	const auto parent = parentWidget()->rect();
-	if ((_extent.left() + _extent.right() >= parent.width())
-		|| (_extent.top() + _extent.bottom() >= parent.height())) {
+	const auto grip = _extent.isNull() ? style::ConvertScale(5) : 0;
+	const auto left = _extent.left() ? _extent.left() : grip;
+	const auto right = _extent.right() ? _extent.right() : grip;
+	const auto top = _extent.top() ? _extent.top() : grip;
+	const auto bottom = _extent.bottom() ? _extent.bottom() : grip;
+	if ((left + right >= parent.width())
+		|| (top + bottom >= parent.height())) {
 		return;
 	}
 	if (_edges == (Qt::LeftEdge | Qt::TopEdge)) {
-		setGeometry(0, 0, _extent.left(), _extent.top());
+		setGeometry(0, 0, left, top);
 	} else if (_edges == Qt::TopEdge) {
 		setGeometry(
-			_extent.left(),
+			left,
 			0,
-			parent.width() - _extent.left() - _extent.right(),
-			_extent.top());
+			parent.width() - left - right,
+			top);
 	} else if (_edges == (Qt::RightEdge | Qt::TopEdge)) {
 		setGeometry(
-			parent.width() - _extent.right(),
+			parent.width() - right,
 			0,
-			_extent.right(),
-			_extent.top());
+			right,
+			top);
 	} else if (_edges == Qt::RightEdge) {
 		setGeometry(
-			parent.width() - _extent.right(),
-			_extent.top(),
-			_extent.right(),
-			parent.height() - _extent.top() - _extent.bottom());
+			parent.width() - right,
+			top,
+			right,
+			parent.height() - top - bottom);
 	} else if (_edges == (Qt::RightEdge | Qt::BottomEdge)) {
 		setGeometry(
-			parent.width() - _extent.right(),
-			parent.height() - _extent.bottom(),
-			_extent.right(),
-			_extent.bottom());
+			parent.width() - right,
+			parent.height() - bottom,
+			right,
+			bottom);
 	} else if (_edges == Qt::BottomEdge) {
 		setGeometry(
-			_extent.left(),
-			parent.height() - _extent.bottom(),
-			parent.width() - _extent.left() - _extent.right(),
-			_extent.bottom());
+			left,
+			parent.height() - bottom,
+			parent.width() - left - right,
+			bottom);
 	} else if (_edges == (Qt::LeftEdge | Qt::BottomEdge)) {
 		setGeometry(
 			0,
-			parent.height() - _extent.bottom(),
-			_extent.left(),
-			_extent.bottom());
+			parent.height() - bottom,
+			left,
+			bottom);
 	} else if (_edges == Qt::LeftEdge) {
 		setGeometry(
 			0,
-			_extent.top(),
-			_extent.left(),
-			parent.height() - _extent.top() - _extent.bottom());
+			top,
+			left,
+			parent.height() - top - bottom);
 	} else {
 		Unexpected("Corrupt edges in SeparatePanel::ResizeEdge.");
 	}
@@ -427,7 +432,8 @@ SeparatePanel::SeparatePanel(SeparatePanelArgs &&args)
 , _close(this, st::separatePanelClose)
 , _back(this, object_ptr<IconButton>(this, st::separatePanelBack))
 , _body(this)
-, _titleHeight(st::separatePanelTitleHeight) {
+, _titleHeight(st::separatePanelTitleHeight)
+, _noShadow(args.noShadow) {
 	setMouseTracking(true);
 	setWindowIcon(QGuiApplication::windowIcon());
 	initControls();
@@ -1063,10 +1069,13 @@ bool SeparatePanel::eventHook(QEvent *e) {
 }
 
 void SeparatePanel::initLayout(const SeparatePanelArgs &args) {
-	setWindowFlags(Qt::WindowFlags(Qt::FramelessWindowHint)
+	auto flags = Qt::WindowFlags(Qt::FramelessWindowHint)
 		| Qt::WindowStaysOnTopHint
-		| Qt::NoDropShadowWindowHint
-		| Qt::Dialog);
+		| Qt::Dialog;
+	if (!_noShadow) {
+		flags |= Qt::NoDropShadowWindowHint;
+	}
+	setWindowFlags(flags);
 	setAttribute(Qt::WA_MacAlwaysShowToolWindow);
 	setAttribute(Qt::WA_NoSystemBackground, true);
 	setAttribute(Qt::WA_TranslucentBackground, true);
@@ -1396,7 +1405,33 @@ rpl::producer<bool> SeparatePanel::fullScreenValue() const {
 }
 
 QMargins SeparatePanel::computePadding() const {
-	return _fullscreen.current() ? QMargins() : _padding;
+	return (_fullscreen.current() || _noShadow) ? QMargins() : _padding;
+}
+
+void SeparatePanel::setNoShadow(bool noShadow) {
+	if (_noShadow != noShadow) {
+		_noShadow = noShadow;
+		setWindowFlag(Qt::NoDropShadowWindowHint, !noShadow);
+		_useTransparency = !_noShadow && Platform::TranslucentWindowsSupported();
+		_padding = _noShadow
+			? QMargins()
+			: _useTransparency
+			? st::callShadow.extend
+			: style::margins(
+				st::lineWidth,
+				st::lineWidth,
+				st::lineWidth,
+				st::lineWidth);
+		for (const auto &edge : _resizeEdges) {
+			edge->setParentPadding(_padding);
+		}
+		updateControlsGeometry();
+		update();
+	}
+}
+
+bool SeparatePanel::noShadow() const {
+	return _noShadow;
 }
 
 void SeparatePanel::initGeometry(QSize size) {
@@ -1410,8 +1445,10 @@ void SeparatePanel::initGeometry(QSize size) {
 	const auto parentGeometry = (parent && parent->isVisible())
 		? parent->geometry()
 		: available;
-	_useTransparency = Platform::TranslucentWindowsSupported();
-	_padding = _useTransparency
+	_useTransparency = !_noShadow && Platform::TranslucentWindowsSupported();
+	_padding = _noShadow
+		? QMargins()
+		: _useTransparency
 		? st::callShadow.extend
 		: style::margins(
 			st::lineWidth,
@@ -1470,6 +1507,7 @@ void SeparatePanel::resizeEvent(QResizeEvent *e) {
 	updateControlsGeometry();
 	for (const auto &edge : _resizeEdges) {
 		edge->updateSize();
+		edge->raise();
 	}
 }
 
@@ -1482,6 +1520,9 @@ void SeparatePanel::updateControlsGeometry() {
 		top,
 		width() - padding.left() - padding.right(),
 		height() - top - padding.bottom());
+	for (const auto &edge : _resizeEdges) {
+		edge->raise();
+	}
 }
 
 void SeparatePanel::paintEvent(QPaintEvent *e) {
@@ -1514,7 +1555,9 @@ void SeparatePanel::paintEvent(QPaintEvent *e) {
 			return;
 		}
 	}
-	if (_useTransparency && !_fullscreen.current()) {
+	if (_noShadow) {
+		paintBodyBg(p, 0);
+	} else if (_useTransparency && !_fullscreen.current()) {
 		paintShadowBorder(p);
 	} else {
 		paintOpaqueBorder(p);
