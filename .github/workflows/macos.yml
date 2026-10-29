@@ -42,16 +42,23 @@ jobs:
           path: |
             desktop/Libraries
             desktop/nicegram-desktop/out
-          key: ${{ runner.os }}-arm64-full-v1
+          key: ${{ runner.os }}-arm64-full-v2
 
-      - name: Fetch and unpack dependencies from storage branch
+      - name: Checkout dependencies storage
+        if: steps.cache-libraries.outputs.cache-hit != 'true'
+        uses: actions/checkout@v4
+        with:
+          ref: macos-deps-storage
+          path: /tmp/deps-repo
+
+      - name: Unpack precompiled dependencies
         if: steps.cache-libraries.outputs.cache-hit != 'true'
         run: |
-          echo "Restoring macOS dependencies from storage branch..."
-          git clone --branch macos-deps-storage --depth 1 https://github.com/mexc01mexc-ctrl/GGTG.git /tmp/deps-repo
+          echo "Reassembling and unpacking macOS dependencies..."
           cat /tmp/deps-repo/macos_deps.tar.gz.part_* > /tmp/macos_deps.tar.gz
-          tar -xzf /tmp/macos_deps.tar.gz -C .
+          tar -xzf /tmp/macos_deps.tar.gz -C "$GITHUB_WORKSPACE"
           rm -rf /tmp/deps-repo /tmp/macos_deps.tar.gz
+          echo "Dependencies unpacked successfully."
 
       - name: Save macOS Libraries Cache
         if: steps.cache-libraries.outputs.cache-hit != 'true'
@@ -60,7 +67,7 @@ jobs:
           path: |
             desktop/Libraries
             desktop/nicegram-desktop/out
-          key: ${{ runner.os }}-arm64-full-v1
+          key: ${{ runner.os }}-arm64-full-v2
 
       - name: Build macOS Application
         run: |
