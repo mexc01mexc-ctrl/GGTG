@@ -84,6 +84,10 @@ GGTG/
 
 ## 3. Сборка
 
+> [!TIP]
+> **Автоматическая облачная сборка в GitHub Actions:**
+> Подробная инструкция по процессу разработки, сборке без нагрузки на ноутбук и скачиванию готовых файлов описана в [`docs/DEVELOPMENT_WORKFLOW.md`](docs/DEVELOPMENT_WORKFLOW.md).
+
 | Что | Команда | Результат |
 |---|---|---|
 | Mac, инкрементально (обычно 1–3 мин) | `cd desktop/nicegram-desktop/out && xcodebuild -project Telegram.xcodeproj -target Telegram -configuration Release ARCHS=arm64 ONLY_ACTIVE_ARCH=YES` | `desktop/nicegram-desktop/out/Release/GGTG.app` |
