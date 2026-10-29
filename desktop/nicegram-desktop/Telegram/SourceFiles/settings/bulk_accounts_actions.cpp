@@ -746,7 +746,7 @@ struct BulkOptions {
 void RunBulkAction(
 		not_null<Window::SessionController*> controller,
 		Accounts accounts,
-		Step step,
+		StepWithProgress step,
 		BulkOptions options = {}) {
 	Expects(!accounts.empty());
 
@@ -838,7 +838,21 @@ void RunBulkAction(
 			i,
 			label + u" — выполняется..."_q,
 			std::nullopt);
-		step(account, [=](bool success, QString message) {
+		setStatus(label + u" — выполняется..."_q);
+
+		const auto onProgress = [=](QString progress) {
+			if (progress.isEmpty()) {
+				progress = u"выполняется..."_q;
+			}
+			setRowText(
+				i,
+				label + u" — "_q + progress,
+				std::nullopt);
+			setStatus(label + u": "_q + progress);
+		};
+
+		step(account, onProgress, [=](bool success, QString message) {
+			setStatus(QString());
 			setRowText(
 				i,
 				label + u" — "_q + (success
@@ -886,6 +900,23 @@ void RunBulkAction(
 		});
 	};
 	(*runNext)();
+}
+
+void RunBulkAction(
+		not_null<Window::SessionController*> controller,
+		Accounts accounts,
+		Step step,
+		BulkOptions options = {}) {
+	RunBulkAction(
+		controller,
+		std::move(accounts),
+		[step = std::move(step)](
+				not_null<Main::Account*> account,
+				StepProgress,
+				StepDone done) {
+			step(account, std::move(done));
+		},
+		std::move(options));
 }
 
 // ---- Step implementations (one account, MTP request(s), then done()) ----
@@ -10937,7 +10968,15 @@ void CreateMobileSessionWith(
 void RunSequentialAccountsAction(
 		not_null<Window::SessionController*> controller,
 		std::vector<not_null<Main::Account*>> accounts,
-		Fn<void(not_null<Main::Account*> account, Fn<void(bool success, QString message)> done)> step,
+		StepWithProgress step,
+		const QString &title) {
+	RunBulkAction(controller, std::move(accounts), std::move(step), BulkOptions{ .title = title });
+}
+
+void RunSequentialAccountsAction(
+		not_null<Window::SessionController*> controller,
+		std::vector<not_null<Main::Account*>> accounts,
+		Step step,
 		const QString &title) {
 	RunBulkAction(controller, std::move(accounts), std::move(step), BulkOptions{ .title = title });
 }

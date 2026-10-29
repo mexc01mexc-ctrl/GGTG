@@ -186,6 +186,8 @@ void ShowSavedBase(std::shared_ptr<Ui::Show> show, uint64 id);
 using Accounts = std::vector<not_null<Main::Account*>>;
 using StepDone = Fn<void(bool success, QString message)>;
 using Step = Fn<void(not_null<Main::Account*> account, StepDone done)>;
+using StepProgress = Fn<void(QString progress)>;
+using StepWithProgress = Fn<void(not_null<Main::Account*> account, StepProgress progress, StepDone done)>;
 
 struct GuardedStep {
 	StepDone done;
@@ -319,7 +321,13 @@ void CreateMobileSessionWith(
 void RunSequentialAccountsAction(
 	not_null<Window::SessionController*> controller,
 	std::vector<not_null<Main::Account*>> accounts,
-	Fn<void(not_null<Main::Account*> account, Fn<void(bool success, QString message)> done)> step,
+	StepWithProgress step,
+	const QString &title);
+
+void RunSequentialAccountsAction(
+	not_null<Window::SessionController*> controller,
+	std::vector<not_null<Main::Account*>> accounts,
+	Step step,
 	const QString &title);
 
 // Stops running `account` on its current session - locally only, nothing is

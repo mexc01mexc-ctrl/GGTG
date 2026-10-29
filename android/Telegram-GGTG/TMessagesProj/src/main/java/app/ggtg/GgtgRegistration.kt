@@ -983,7 +983,7 @@ object GgtgRegistration {
     }
 
     suspend fun solveAntiSafetyCaptcha(apiKey: String, aid: String, action: String, keyId: String): Result<String> {
-        val act = action.trim().ifEmpty { "login" }
+        val act = action.trim().lowercase().ifEmpty { "login" }
         val aidStr = aid.ifBlank { "308aba4e-5680-466b-81a5-477ac6befa95" }.trim()
         val createUrl = "https://antisafety.net/api/tasks/recaptcha/create?api_key=${apiKey.trim()}&aid=$aidStr&action=$act&app_key=${keyId.trim()}&score=high"
         val res = fetchApiGet(createUrl)

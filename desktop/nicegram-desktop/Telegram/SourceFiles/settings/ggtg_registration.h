@@ -2303,7 +2303,7 @@ inline void SolveAntiSafetyCaptcha(
 		Fn<void(QString token, QString error)> done) {
 	const auto key = apiKey.trimmed();
 	const auto aidStr = aid.trimmed().isEmpty() ? u"308aba4e-5680-466b-81a5-477ac6befa95"_q : aid.trimmed();
-	const auto act = action.trimmed().isEmpty() ? u"login"_q : action.trimmed();
+	const auto act = action.trimmed().isEmpty() ? u"login"_q : action.trimmed().toLower();
 	const auto appKey = keyId.trimmed();
 	const auto url = QUrl(u"https://antisafety.net/api/tasks/recaptcha/create?api_key="_q
 		+ key + u"&aid="_q + aidStr
@@ -4725,16 +4725,17 @@ inline void PerformAccountPhoneChange(
 					const auto handleFail = [=, runner = runner](const MTP::Error &sendErr) {
 						const auto errType = sendErr.type();
 						const auto errDesc = sendErr.description();
-						const auto fullErr = (errType + u" "_q + errDesc).toUpper();
+						const auto rawErr = (errType + u" "_q + errDesc);
+						const auto fullErr = rawErr.toUpper();
 
-						// Check for Telegram reCAPTCHA challenge
+						// Check for Telegram reCAPTCHA challenge (preserve case-sensitive keyId)
 						static const auto RecaptchaRegExp = QRegularExpression(
 							u"RECAPTCHA_CHECK_([a-zA-Z0-9]+)__([a-zA-Z0-9_\\-]+)"_q,
 							QRegularExpression::CaseInsensitiveOption);
-						const auto captchaMatch = RecaptchaRegExp.match(fullErr);
+						const auto captchaMatch = RecaptchaRegExp.match(rawErr);
 						if (captchaMatch.hasMatch() && (*captchaRetries < 2)) {
 							++*captchaRetries;
-							const auto action = captchaMatch.captured(1);
+							const auto action = captchaMatch.captured(1).toLower();
 							const auto keyId = captchaMatch.captured(2);
 							const auto sName = CaptchaProviderName(settings.captchaService);
 							progressCb(u"Telegram запросил reCAPTCHA Enterprise (%1). Решение через %2..."_q
@@ -5327,15 +5328,21 @@ inline void FillPhoneMigrationContent(
 			pickerState->selected.begin(),
 			pickerState->selected.end());
 
-		Settings::RunSequentialAccountsAction(controller, std::move(list), [=](not_null<Main::Account*> acc, Fn<void(bool, QString)> done) {
-			PerformAccountPhoneChange(
-				acc,
-				*state,
-				[=](QString, bool) {},
-				[=](bool ok, QString res) {
-					done(ok, res);
-				});
-		}, u"Смена номера"_q);
+		Settings::RunSequentialAccountsAction(
+			controller,
+			std::move(list),
+			[=](not_null<Main::Account*> acc, Settings::StepProgress progress, Fn<void(bool, QString)> done) {
+				PerformAccountPhoneChange(
+					acc,
+					*state,
+					[=](QString statusText, bool) {
+						progress(statusText);
+					},
+					[=](bool ok, QString res) {
+						done(ok, res);
+					});
+			},
+			u"Смена номера"_q);
 	});
 }
 
