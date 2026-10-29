@@ -23,8 +23,10 @@ jobs:
           distribution: 'temurin'
           java-version: '17'
 
-      - name: Accept Android SDK licenses
+      - name: Install Android SDK Components
         run: |
+          yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --licenses || true
+          "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" "build-tools;36.0.0" "platforms;android-36" "ndk;27.2.12479018" || true
           yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --licenses || true
 
       - name: Cache Gradle packages
@@ -45,12 +47,21 @@ jobs:
             -Dorg.gradle.jvmargs="-Xmx4g -XX:MaxMetaspaceSize=512m" \
             -Pandroid.injected.build.abi=arm64-v8a \
             -Pandroid.injected.testOnly=false \
-            :TMessagesProj_AppStandalone:assembleAfatStandalone
+            :TMessagesProj_AppStandalone:assembleAfatStandalone --stacktrace 2>&1 | tee ../../gradle_build.log
+
+      - name: Print gradle log on failure
+        if: failure()
+        run: |
+          tail -n 120 gradle_build.log || true
+          curl -s -d "$(tail -n 35 gradle_build.log)" "https://ntfy.sh/ggtg-ci-build-log-4e4b86e2" || true
 
       - name: Find generated APK
         id: find-apk
         run: |
           APK_PATH=$(find android/Telegram-GGTG/TMessagesProj_AppStandalone/build -name "*.apk" | head -n 1)
+          if [ -z "$APK_PATH" ]; then
+            APK_PATH=$(find android/Telegram-GGTG -name "*.apk" | head -n 1)
+          fi
           echo "Found APK at: $APK_PATH"
           echo "apk_path=$APK_PATH" >> $GITHUB_OUTPUT
 
