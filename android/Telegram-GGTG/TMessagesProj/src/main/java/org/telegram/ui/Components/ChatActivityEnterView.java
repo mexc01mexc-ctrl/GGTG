@@ -5156,6 +5156,55 @@ public class ChatActivityEnterView extends FrameLayout implements
                 }
             });
         }
+        if (hasText()) {
+            final boolean isTypingNow = app.ggtg.GgtgTypingImitation.INSTANCE.isTyping(dialog_id);
+            if (isTypingNow) {
+                options.add(R.drawable.msg_edit, "Отменить печать", () -> {
+                    app.ggtg.GgtgTypingImitation.INSTANCE.cancel(dialog_id, true);
+                    if (messageSendPreview != null) {
+                        messageSendPreview.dismiss(true);
+                        messageSendPreview = null;
+                    }
+                });
+            } else {
+                options.add(R.drawable.msg_edit, "Печатать", () -> {
+                    final CharSequence messageText = messageEditText != null ? messageEditText.getText() : null;
+                    if (messageText == null || messageText.length() == 0) {
+                        return;
+                    }
+                    final String fullString = messageText.toString();
+                    if (messageSendPreview != null) {
+                        messageSendPreview.dismiss(true);
+                        messageSendPreview = null;
+                    }
+                    setFieldText("");
+                    final long threadId = (parentFragment != null && parentFragment.isTopic ? parentFragment.getTopicId() : 0);
+                    app.ggtg.GgtgTypingImitation.INSTANCE.start(
+                        currentAccount,
+                        dialog_id,
+                        threadId,
+                        fullString,
+                        parentFragment,
+                        restored -> {
+                            AndroidUtilities.runOnUIThread(() -> {
+                                if (parentFragment != null && parentFragment.getDialogId() == dialog_id) {
+                                    setFieldText(restored);
+                                }
+                            });
+                            return kotlin.Unit.INSTANCE;
+                        },
+                        () -> {
+                            AndroidUtilities.runOnUIThread(() -> {
+                                if (delegate != null) {
+                                    delegate.onMessageSend(fullString, true, 0, 0, 0);
+                                }
+                            });
+                            return kotlin.Unit.INSTANCE;
+                        }
+                    );
+                });
+            }
+        }
         options.setupSelectors();
         if (sendWhenOnlineButton != null) {
             TLRPC.User user = parentFragment == null ? null : parentFragment.getCurrentUser();

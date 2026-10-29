@@ -26,11 +26,16 @@ namespace {
 Error::Error(const MTPrpcError &error)
 : _code(error.c_rpc_error().verror_code().v) {
 	QString text = qs(error.c_rpc_error().verror_message());
+	// ggtg: strip numeric HTTP/RPC status codes like "400 ", "406 ", or "400: "
+	auto stripped = text.trimmed();
+	static const auto StatusPrefix = QRegularExpression(u"^[0-9]{3}[: ]+"_q);
+	stripped.remove(StatusPrefix);
+
 	static const auto Expression = QRegularExpression(
 		"^([A-Z0-9_]+)(: .*)?$",
 		(QRegularExpression::DotMatchesEverythingOption
 			| QRegularExpression::MultilineOption));
-	const auto match = Expression.match(text);
+	const auto match = Expression.match(stripped);
 	if (match.hasMatch()) {
 		_type = match.captured(1);
 		_description = match.captured(2).mid(2);

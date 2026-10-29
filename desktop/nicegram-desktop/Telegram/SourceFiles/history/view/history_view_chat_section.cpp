@@ -31,6 +31,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "history/view/history_view_self_forwards_tagger.h"
 #include "history/view/history_view_draw_to_reply.h"
 #include "history/history.h"
+#include "history/ggtg_typing_imitation.h"
 #include "history/history_drag_area.h"
 #include "history/history_inner_widget.h"
 #include "history/history_item_components.h"
@@ -2373,6 +2374,39 @@ void ChatWidget::sendVoice(const ComposeControls::VoiceToSend &data) {
 }
 
 void ChatWidget::send(Api::SendOptions options) {
+	if (options.imitateTyping) {
+		options.imitateTyping = false;
+		if (const auto page = _composeControls->shownRichMessage()) {
+			sendRichDraft(page, options);
+			return;
+		}
+		const auto textWithTags = _composeControls->getTextWithAppliedMarkdown();
+		if (textWithTags.text.isEmpty()) {
+			return;
+		}
+		auto message = Api::MessageToSend(prepareSendAction(options));
+		message.textWithTags = textWithTags;
+		message.webPage = _composeControls->webPageDraft();
+		if (!session().ephemeralMessages().wouldSend(message)
+			&& showSlowmodeError()) {
+			return;
+		}
+		_composeControls->clear();
+		Ggtg::TypingImitation::Instance().start(
+			controller()->uiShow(),
+			_history,
+			_repliesRootId,
+			std::move(message),
+			textWithTags,
+			[weak = base::make_weak(this), targetHistory = _history](const TextWithTags &restored) {
+				if (const auto strong = weak.get()) {
+					if (strong->_history == targetHistory) {
+						strong->_composeControls->setText(restored);
+					}
+				}
+			});
+		return;
+	}
 	if (const auto page = _composeControls->shownRichMessage()) {
 		sendRichDraft(page, options);
 		return;

@@ -8,7 +8,6 @@ import android.content.Intent
 import android.graphics.Typeface
 import android.net.Uri
 import android.provider.OpenableColumns
-import android.text.InputType
 import android.view.Gravity
 import android.view.View
 import android.widget.CheckBox
@@ -42,32 +41,21 @@ class GgtgRegistrationActivity : BaseFragment() {
 
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
 
+    // Step 1: SMS Service & Number
     private lateinit var serviceNameView: TextView
     private lateinit var apiKeyInput: EditText
     private lateinit var balanceText: TextView
-
     private lateinit var countryView: TextView
-    private lateinit var proxyView: TextView
-
-    private lateinit var targetCountInput: EditText
-    private lateinit var threadsCountInput: EditText
-    private lateinit var stepDelayMinInput: EditText
-    private lateinit var stepDelayMaxInput: EditText
-    private lateinit var accountDelayMinInput: EditText
-    private lateinit var accountDelayMaxInput: EditText
-
-    private lateinit var smsWaitInput: EditText
-    private lateinit var skipAppCheck: CheckBox
+    private lateinit var operatorView: TextView
+    private lateinit var maxPriceInput: EditText
     private lateinit var filterCheck: CheckBox
+
+    // Step 2: Proxy & Storage
+    private lateinit var proxyView: TextView
     private lateinit var folderInput: EditText
+    private lateinit var precheckProxyCheck: CheckBox
 
-    // 2FA controls
-    private lateinit var single2faCheck: CheckBox
-    private lateinit var single2faLayout: LinearLayout
-    private lateinit var random2faLayout: LinearLayout
-    private lateinit var twoFaInput: EditText
-
-    // Names & Gender controls
+    // Step 3: Profile & 2FA
     private lateinit var singleNameCheck: CheckBox
     private lateinit var singleNameLayout: LinearLayout
     private lateinit var randomNamesLayout: LinearLayout
@@ -81,28 +69,45 @@ class GgtgRegistrationActivity : BaseFragment() {
     private lateinit var autoSetUsernameCheck: CheckBox
     private lateinit var autoSetBioCheck: CheckBox
     private lateinit var bioInput: EditText
-    private lateinit var precheckProxyCheck: CheckBox
-    private lateinit var refundQueueLabel: TextView
-    private lateinit var refundQueueBtn: View
+    private lateinit var single2faCheck: CheckBox
+    private lateinit var single2faLayout: LinearLayout
+    private lateinit var random2faLayout: LinearLayout
+    private lateinit var twoFaInput: EditText
 
-    // SMS & Tokens controls
-    private lateinit var operatorView: TextView
-    private lateinit var maxPriceInput: EditText
-    private lateinit var resetSessionsCheck: CheckBox
-    private lateinit var reset2faCheck: CheckBox
-    private lateinit var autoBuyEmailCheck: CheckBox
-    private lateinit var emailApiKeyInput: EditText
+    // Step 4: Protection & Tokens
     private lateinit var tokenServiceView: TextView
     private lateinit var tokenApiKeyInput: EditText
+    private lateinit var aidInput: EditText
+    private lateinit var aidLayout: LinearLayout
     private lateinit var tokenBalanceText: TextView
     private lateinit var replaceTokenCheck: CheckBox
+    private lateinit var captchaServiceView: TextView
+    private lateinit var captchaApiKeyInput: EditText
+    private lateinit var autoBuyEmailCheck: CheckBox
+    private lateinit var emailServiceView: TextView
+    private lateinit var emailApiKeyInput: EditText
 
+    // Step 5: Plan & Execution
+    private lateinit var targetCountInput: EditText
+    private lateinit var threadsCountInput: EditText
+    private lateinit var stepDelayMinInput: EditText
+    private lateinit var stepDelayMaxInput: EditText
+    private lateinit var accountDelayMinInput: EditText
+    private lateinit var accountDelayMaxInput: EditText
+    private lateinit var smsWaitInput: EditText
+    private lateinit var skipAppCheck: CheckBox
+    private lateinit var resetSessionsCheck: CheckBox
+    private lateinit var reset2faCheck: CheckBox
     private lateinit var statusTitleView: TextView
     private lateinit var progressLabelView: TextView
     private lateinit var startButton: View
     private lateinit var runningButtonsRow: LinearLayout
     private lateinit var pauseButton: TextView
     private lateinit var stopButton: TextView
+    private lateinit var refundQueueLabel: TextView
+    private lateinit var refundQueueBtn: View
+
+    // Live Log
     private lateinit var logConsoleView: TextView
 
     private var currentConfig = GgtgRegistration.loadConfig()
@@ -123,22 +128,37 @@ class GgtgRegistrationActivity : BaseFragment() {
 
         val root = GgtgUi.page(context, frame)
 
-        // -----------------------------------------------------------------------------
-        // 1. SMS Service & API Key
-        // -----------------------------------------------------------------------------
-        root.addView(sectionHeader(context, "SMS-сервис и API-ключ", "Откуда брать номера для регистрации", R.drawable.msg2_devices))
-        val serviceCard = GgtgUi.card(context)
+        buildRegistrationUi(context, root)
+
+        root.addView(GgtgUi.spacer(context, 24f))
+
+        setupRegistrationCallbacks()
+
+        return frame
+    }
+
+    // =============================================================================
+    // BUILD REGISTRATION UI (Steps 1 to 5 + Live Log)
+    // =============================================================================
+    private fun buildRegistrationUi(context: Context, container: LinearLayout) {
+        // -------------------------------------------------------------------------
+        // ШАГ 1: SMS-сервис и номер
+        // -------------------------------------------------------------------------
+        container.addView(sectionHeader(context, "Шаг 1: SMS-сервис и номер", "Сервис, ключ, баланс, страна и оператор связи", R.drawable.msg2_devices))
+        val s1Card = GgtgUi.card(context)
 
         val currentServiceName = GgtgRegistration.SERVICES.firstOrNull { it.id == currentConfig.serviceId }?.name ?: GgtgRegistration.SERVICES.first().name
-        serviceNameView = pickerRow(context, serviceCard, "Сервис", currentServiceName) { showServicePicker(context) }
+        serviceNameView = pickerRow(context, s1Card, "SMS-сервис", currentServiceName) { showServicePicker(context) }
 
         apiKeyInput = GgtgUi.input(context, "API-ключ сервиса", currentConfig.apiKey)
-        GgtgUi.labeled(context, serviceCard, "API-ключ", "Сохраняется отдельно для каждого сервиса, вводить заново не нужно", apiKeyInput)
+        GgtgUi.labeled(context, s1Card, "API-ключ сервиса", "Сохраняется отдельно для каждого сервиса, вводить заново не нужно", apiKeyInput)
         apiKeyInput.addTextChangedListener(object : android.text.TextWatcher {
             override fun beforeTextChanged(s: CharSequence?, start: Int, count: Int, after: Int) {}
             override fun onTextChanged(s: CharSequence?, start: Int, before: Int, count: Int) {}
             override fun afterTextChanged(s: android.text.Editable?) {
-                currentConfig = currentConfig.copy(apiKey = s.toString().trim())
+                val key = s.toString().trim()
+                currentConfig = currentConfig.copy(apiKey = key)
+                GgtgRegistration.saveApiKeyFor(currentConfig.serviceId, key)
                 GgtgRegistration.saveConfig(currentConfig)
             }
         })
@@ -146,73 +166,80 @@ class GgtgRegistrationActivity : BaseFragment() {
         val balanceRow = LinearLayout(context).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
-            setPadding(0, GgtgUi.dp(8f), 0, 0)
+            setPadding(0, GgtgUi.dp(6f), 0, GgtgUi.dp(6f))
         }
         val checkBalBtn = GgtgUi.withLeadingIcon(GgtgUi.pill(context, "Проверить баланс", 0xFFFFFFFF.toInt(), GgtgUi.accent), R.drawable.msg_stats, 0xFFFFFFFF.toInt(), 13f, 5f)
         checkBalBtn.setOnClickListener { checkBalance() }
         balanceRow.addView(checkBalBtn)
         balanceText = GgtgUi.body(context, "  Баланс: —", 13f)
         balanceRow.addView(balanceText)
-        serviceCard.addView(balanceRow)
+        s1Card.addView(balanceRow)
 
-        GgtgUi.addCard(root, serviceCard)
-
-        // -----------------------------------------------------------------------------
-        // 1.5 SMS Order & Email Settings (operator, maxPrice, email)
-        // -----------------------------------------------------------------------------
-        root.addView(sectionHeader(context, "Настройки SMS-заказа и Email", "Оператор, лимит цены и подтверждение почты", R.drawable.msg_payment_card))
-        val smsOrderCard = GgtgUi.card(context)
+        countryView = pickerRow(context, s1Card, "Страна номеров", GgtgRegistration.currentCountryTitle(currentConfig)) { showCountryPicker(context) }
 
         val currentOpTitle = GgtgRegistration.operatorDisplayTitle(currentConfig.smsOperator)
-        operatorView = pickerRow(context, smsOrderCard, "Оператор связи", currentOpTitle) { showOperatorPicker(context) }
+        operatorView = pickerRow(context, s1Card, "Оператор связи", currentOpTitle) { showOperatorPicker(context) }
 
         maxPriceInput = GgtgUi.input(context, "без ограничения", currentConfig.maxPrice)
-        GgtgUi.labeled(context, smsOrderCard, "Макс. цена номера", "Максимальная стоимость, например 15.00. Пусто = без лимита", maxPriceInput)
+        bindAutoSave(maxPriceInput) { currentConfig = currentConfig.copy(maxPrice = it) }
+        GgtgUi.labeled(context, s1Card, "Макс. цена номера", "Максимальная стоимость (например 15.00). Пусто = без ограничения", maxPriceInput)
 
-        autoBuyEmailCheck = checkBox(context, "Автопокупка Email при требовании Telegram", currentConfig.autoBuyEmail)
-        smsOrderCard.addView(autoBuyEmailCheck)
-        smsOrderCard.addView(GgtgUi.body(context, "Если Telegram требует указать Email для получения кода, программа автоматически купит и подтвердит временную почту (Hero-SMS / SMSBower).", 12f))
-
-        emailApiKeyInput = GgtgUi.input(context, "пусто = такой же как у SMS-сервиса", currentConfig.emailApiKey)
-        GgtgUi.labeled(context, smsOrderCard, "API-ключ почты (необязательно)", "Отдельный API-ключ для сервиса почты, если отличается от SMS-сервиса", emailApiKeyInput)
-
-        resetSessionsCheck = checkBox(context, "Сбросить другие сессии после регистрации", currentConfig.resetSessionsAfterReg)
-        smsOrderCard.addView(resetSessionsCheck)
-        smsOrderCard.addView(GgtgUi.body(context, "После успешной регистрации вызывает auth.resetAuthorizations — все другие сессии номера будут отключены.", 12f))
-
-        reset2faCheck = checkBox(context, "Запросить сброс 2FA на занятых номерах", currentConfig.reset2faOnOccupied)
-        smsOrderCard.addView(reset2faCheck)
-        smsOrderCard.addView(GgtgUi.body(context, "Если на номере стоит чужой 2FA пароль, отправляет запрос account.resetPassword (сброс через 7 дней).", 12f))
-
-        GgtgUi.addCard(root, smsOrderCard)
-
-        // -----------------------------------------------------------------------------
-        // 2. Country Selection
-        // -----------------------------------------------------------------------------
-        root.addView(sectionHeader(context, "Страна номеров", "Номера какой страны покупать", R.drawable.msg_language))
-        val countryCard = GgtgUi.card(context) { showCountryPicker(context) }
-        countryView = GgtgUi.title(context, GgtgRegistration.currentCountryTitle(currentConfig), 15f)
-        val countryRow = LinearLayout(context).apply {
-            orientation = LinearLayout.HORIZONTAL
-            gravity = Gravity.CENTER_VERTICAL
+        filterCheck = checkBox(context, "Фильтровать номера перед регистрацией", currentConfig.filterNumbers)
+        filterCheck.setOnCheckedChangeListener { _, isChecked ->
+            currentConfig = currentConfig.copy(filterNumbers = isChecked)
+            GgtgRegistration.saveConfig(currentConfig)
         }
-        countryRow.addView(GgtgUi.badge(context, R.drawable.msg_language, 36f), LinearLayout.LayoutParams(GgtgUi.dp(36f), GgtgUi.dp(36f)).apply { rightMargin = GgtgUi.dp(12f) })
-        countryRow.addView(countryView, LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f))
-        countryRow.addView(chevron(context))
-        countryCard.addView(countryRow)
-        GgtgUi.addCard(root, countryCard)
+        s1Card.addView(filterCheck)
+        s1Card.addView(GgtgUi.body(context, "Программа помнит номера, которые уже не подошли (заняты, заблокированы, неверные), и сразу отменяет их при повторной выдаче.", 12f))
 
-        // -----------------------------------------------------------------------------
-        // 2.5 Names & Surnames
-        // -----------------------------------------------------------------------------
-        root.addView(sectionHeader(context, "Имена и фамилии", "Настройка имён для создаваемых аккаунтов", R.drawable.msg_contacts))
-        val namesCard = GgtgUi.card(context)
+        GgtgUi.addCard(container, s1Card)
+
+        // -------------------------------------------------------------------------
+        // ШАГ 2: Прокси и сохранение
+        // -------------------------------------------------------------------------
+        container.addView(sectionHeader(context, "Шаг 2: Прокси и сохранение", "Пулы прокси и папка для сохранения аккаунтов", R.drawable.msg2_permissions))
+        val s2Card = GgtgUi.card(context)
+
+        proxyView = pickerRow(context, s2Card, "Список прокси", getProxyDisplayTitle()) { showProxyPicker(context) }
+
+        val proxyManageRow = LinearLayout(context).apply {
+            orientation = LinearLayout.HORIZONTAL
+            setPadding(0, GgtgUi.dp(4f), 0, GgtgUi.dp(6f))
+        }
+        val manageProxyBtn = GgtgUi.withLeadingIcon(
+            GgtgUi.pill(context, "Управление списками прокси", 0xFFFFFFFF.toInt(), GgtgUi.accent),
+            R.drawable.msg_settings, 0xFFFFFFFF.toInt(), 13f, 5f
+        )
+        manageProxyBtn.setOnClickListener {
+            presentFragment(GgtgProxyActivity())
+        }
+        proxyManageRow.addView(manageProxyBtn)
+        s2Card.addView(proxyManageRow)
+
+        folderInput = GgtgUi.input(context, "Регистрация", currentConfig.folderTag)
+        bindAutoSave(folderInput) { currentConfig = currentConfig.copy(folderTag = it) }
+        GgtgUi.labeled(context, s2Card, "Папка в GGTG", "Куда сохранять новые аккаунты", folderInput)
+
+        precheckProxyCheck = checkBox(context, "Проверять прокси перед заказом номера", currentConfig.precheckProxy)
+        precheckProxyCheck.setOnCheckedChangeListener { _, isChecked ->
+            currentConfig = currentConfig.copy(precheckProxy = isChecked)
+            GgtgRegistration.saveConfig(currentConfig)
+        }
+        s2Card.addView(precheckProxyCheck)
+        s2Card.addView(GgtgUi.body(context, "Исключает списание средств за номер, если прокси из пула внезапно перестал отвечать.", 12f))
+
+        GgtgUi.addCard(container, s2Card)
+
+        // -------------------------------------------------------------------------
+        // ШАГ 3: Профиль и безопасность (2FA)
+        // -------------------------------------------------------------------------
+        container.addView(sectionHeader(context, "Шаг 3: Профиль и безопасность (2FA)", "Имена, фамилии, пол, Bio, юзернейм и пароль 2FA", R.drawable.msg_contacts))
+        val s3Card = GgtgUi.card(context)
 
         singleNameCheck = checkBox(context, "Одно имя и фамилия на все аккаунты", currentConfig.singleNameForAll)
-        namesCard.addView(singleNameCheck)
-        namesCard.addView(GgtgUi.body(context, "Если включено — все создаваемые аккаунты получат указанные имя и фамилию. Если выключено — имена генерируются автоматически или берутся из файлов.", 12f))
+        s3Card.addView(singleNameCheck)
+        s3Card.addView(GgtgUi.body(context, "Если включено — все создаваемые аккаунты получат указанные имя и фамилию. Если выключено — имена генерируются автоматически или берутся из файлов.", 12f))
 
-        // Fixed single name container
         singleNameLayout = LinearLayout(context).apply {
             orientation = LinearLayout.VERTICAL
             setPadding(0, GgtgUi.dp(6f), 0, 0)
@@ -225,9 +252,8 @@ class GgtgRegistrationActivity : BaseFragment() {
         lastNameInput = GgtgUi.input(context, "Фамилия (например, Иванов)", currentConfig.customLastName)
         bindAutoSave(lastNameInput) { currentConfig = currentConfig.copy(customLastName = it) }
         GgtgUi.labeled(context, singleNameLayout, "Фамилия для всех аккаунтов", "Будет установлена всем новым пользователям", lastNameInput)
-        namesCard.addView(singleNameLayout)
+        s3Card.addView(singleNameLayout)
 
-        // Random or file-based names container
         randomNamesLayout = LinearLayout(context).apply {
             orientation = LinearLayout.VERTICAL
             setPadding(0, GgtgUi.dp(6f), 0, 0)
@@ -236,7 +262,6 @@ class GgtgRegistrationActivity : BaseFragment() {
         val genderLabel = when (currentConfig.gender) { 1 -> "Мужской"; 2 -> "Женский"; else -> "Случайный (М/Ж)" }
         genderView = pickerRow(context, randomNamesLayout, "Пол", genderLabel) { showGenderPicker(context) }
 
-        // First names file row
         randomNamesLayout.addView(GgtgUi.title(context, "Файл со списком имён", 14f).apply {
             setPadding(0, GgtgUi.dp(8f), 0, GgtgUi.dp(2f))
         })
@@ -269,7 +294,6 @@ class GgtgRegistrationActivity : BaseFragment() {
         })
         randomNamesLayout.addView(fnBtnRow)
 
-        // Last names file row
         randomNamesLayout.addView(GgtgUi.title(context, "Файл со списком фамилий", 14f).apply {
             setPadding(0, GgtgUi.dp(4f), 0, GgtgUi.dp(2f))
         })
@@ -302,7 +326,7 @@ class GgtgRegistrationActivity : BaseFragment() {
         })
         randomNamesLayout.addView(lnBtnRow)
 
-        namesCard.addView(randomNamesLayout)
+        s3Card.addView(randomNamesLayout)
 
         singleNameCheck.setOnCheckedChangeListener { _, isChecked ->
             currentConfig = currentConfig.copy(singleNameForAll = isChecked, autoRandomNames = !isChecked)
@@ -310,7 +334,6 @@ class GgtgRegistrationActivity : BaseFragment() {
             singleNameLayout.visibility = if (isChecked) View.VISIBLE else View.GONE
             randomNamesLayout.visibility = if (isChecked) View.GONE else View.VISIBLE
         }
-
         updateNamesFileLabels()
 
         autoSetUsernameCheck = checkBox(context, "Устанавливать @username при регистрации", currentConfig.autoSetUsername)
@@ -318,197 +341,30 @@ class GgtgRegistrationActivity : BaseFragment() {
             currentConfig = currentConfig.copy(autoSetUsername = isChecked)
             GgtgRegistration.saveConfig(currentConfig)
         }
-        namesCard.addView(autoSetUsernameCheck)
-        namesCard.addView(GgtgUi.body(context, "Генерирует уникальный юзернейм на основе имени и фамилии (например, ivan_ivanov_842).", 12f))
+        s3Card.addView(autoSetUsernameCheck)
+        s3Card.addView(GgtgUi.body(context, "Генерирует уникальный юзернейм на основе имени и фамилии (например, ivan_ivanov_842).", 12f))
 
         autoSetBioCheck = checkBox(context, "Заполнять описание профиля (Bio)", currentConfig.autoSetBio)
         autoSetBioCheck.setOnCheckedChangeListener { _, isChecked ->
             currentConfig = currentConfig.copy(autoSetBio = isChecked)
             GgtgRegistration.saveConfig(currentConfig)
         }
-        namesCard.addView(autoSetBioCheck)
+        s3Card.addView(autoSetBioCheck)
         bioInput = GgtgUi.input(context, "Текст Bio (или оставьте пустым для случайного)", currentConfig.customBio)
         bindAutoSave(bioInput) { currentConfig = currentConfig.copy(customBio = it) }
-        GgtgUi.labeled(context, namesCard, "Описание профиля (Bio)", "Оставьте пустым для реалистичных случайных фраз, либо укажите свой шаблон (поддерживает рандомизацию {A|B})", bioInput)
+        GgtgUi.labeled(context, s3Card, "Описание профиля (Bio)", "Оставьте пустым для реалистичных случайных фраз, либо укажите свой шаблон (поддерживает рандомизацию {A|B})", bioInput)
 
-        GgtgUi.addCard(root, namesCard)
+        // 2FA in Step 3
+        val divFa = View(context).apply { setBackgroundColor(GgtgUi.color(Theme.key_divider)) }
+        s3Card.addView(divFa, LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, 1).apply {
+            topMargin = GgtgUi.dp(10f)
+            bottomMargin = GgtgUi.dp(10f)
+        })
 
-        // -----------------------------------------------------------------------------
-        // 2.7 Token Service (Play Integrity / SafetyNet)
-        // -----------------------------------------------------------------------------
-        root.addView(sectionHeader(context, "Токены Play Integrity", "Сервис токенов для обхода защиты при регистрации", R.drawable.msg_secret))
-        val tokenCard = GgtgUi.card(context)
-
-        val currentTokenName = GgtgRegistration.tokenServiceName(currentConfig.tokenService)
-        tokenServiceView = pickerRow(context, tokenCard, "Сервис токенов", currentTokenName) { showTokenServicePicker(context) }
-
-        tokenApiKeyInput = GgtgUi.input(context, "API-ключ TokenFast / AntiSafety", currentConfig.tokenApiKey)
-        bindAutoSave(tokenApiKeyInput) { currentConfig = currentConfig.copy(tokenApiKey = it) }
-        GgtgUi.labeled(context, tokenCard, "API-ключ токенов", "Master API key сервиса TokenFast или AntiSafety", tokenApiKeyInput)
-
-        replaceTokenCheck = checkBox(context, "Заменять токен при лимите флуда (FLOOD)", currentConfig.replaceTokenOnFlood)
-        replaceTokenCheck.setOnCheckedChangeListener { _, isChecked ->
-            currentConfig = currentConfig.copy(replaceTokenOnFlood = isChecked)
-            GgtgRegistration.saveConfig(currentConfig)
-        }
-        tokenCard.addView(replaceTokenCheck)
-
-        val tokenBalanceRow = LinearLayout(context).apply {
-            orientation = LinearLayout.HORIZONTAL
-            gravity = Gravity.CENTER_VERTICAL
-            setPadding(0, GgtgUi.dp(8f), 0, 0)
-        }
-        val checkTokenBalBtn = GgtgUi.withLeadingIcon(GgtgUi.pill(context, "Проверить баланс", 0xFFFFFFFF.toInt(), GgtgUi.accent), R.drawable.msg_stats, 0xFFFFFFFF.toInt(), 13f, 5f)
-        checkTokenBalBtn.setOnClickListener { checkTokenBalance() }
-        tokenBalanceRow.addView(checkTokenBalBtn)
-        tokenBalanceText = GgtgUi.body(context, "  Баланс: —", 13f)
-        tokenBalanceRow.addView(tokenBalanceText)
-        tokenCard.addView(tokenBalanceRow)
-
-        GgtgUi.addCard(root, tokenCard)
-
-        // -----------------------------------------------------------------------------
-        // 3. Plan & Threads
-        // -----------------------------------------------------------------------------
-        root.addView(sectionHeader(context, "План и потоки", "Сколько аккаунтов и как быстро", R.drawable.msg_stats))
-        val planCard = GgtgUi.card(context)
-
-        targetCountInput = GgtgUi.input(context, "10", currentConfig.targetSuccessCount.toString(), numeric = true)
-        bindAutoSave(targetCountInput) {
-            val v = it.toIntOrNull()?.coerceAtLeast(1) ?: 10
-            currentConfig = currentConfig.copy(targetSuccessCount = v)
-        }
-        GgtgUi.labeled(context, planCard, "Целевое количество успешных аккаунтов", "Программа работает в цикле, пока не достигнет этой цели", targetCountInput)
-
-        threadsCountInput = GgtgUi.input(context, "2", currentConfig.threadsCount.toString(), numeric = true)
-        bindAutoSave(threadsCountInput) {
-            val v = it.toIntOrNull()?.coerceIn(1, 10) ?: 2
-            currentConfig = currentConfig.copy(threadsCount = v)
-        }
-        GgtgUi.labeled(context, planCard, "Параллельных потоков", "Сколько аккаунтов регистрируются одновременно (1–10)", threadsCountInput)
-
-        val stepDelayRow = LinearLayout(context).apply {
-            orientation = LinearLayout.HORIZONTAL
-            gravity = Gravity.CENTER_VERTICAL
-            setPadding(0, GgtgUi.dp(6f), 0, 0)
-        }
-        stepDelayMinInput = GgtgUi.input(context, "10", currentConfig.stepDelayMin.toString(), numeric = true).apply {
-            layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
-        }
-        bindAutoSave(stepDelayMinInput) {
-            val v = it.toIntOrNull()?.coerceAtLeast(0) ?: 10
-            currentConfig = currentConfig.copy(stepDelayMin = v)
-        }
-        stepDelayMaxInput = GgtgUi.input(context, "30", currentConfig.stepDelayMax.toString(), numeric = true).apply {
-            layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
-        }
-        bindAutoSave(stepDelayMaxInput) {
-            val v = it.toIntOrNull()?.coerceAtLeast(10) ?: 30
-            currentConfig = currentConfig.copy(stepDelayMax = v)
-        }
-        stepDelayRow.addView(GgtgUi.body(context, "от ", 13f))
-        stepDelayRow.addView(stepDelayMinInput)
-        stepDelayRow.addView(GgtgUi.body(context, " до ", 13f))
-        stepDelayRow.addView(stepDelayMaxInput)
-        stepDelayRow.addView(GgtgUi.body(context, " сек", 13f))
-        GgtgUi.labeled(context, planCard, "Пауза между шагами регистрации", "Интервал случайной задержки между действиями", stepDelayRow)
-
-        val accDelayRow = LinearLayout(context).apply {
-            orientation = LinearLayout.HORIZONTAL
-            gravity = Gravity.CENTER_VERTICAL
-            setPadding(0, GgtgUi.dp(6f), 0, 0)
-        }
-        accountDelayMinInput = GgtgUi.input(context, "15", currentConfig.accountDelayMin.toString(), numeric = true).apply {
-            layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
-        }
-        bindAutoSave(accountDelayMinInput) {
-            val v = it.toIntOrNull()?.coerceAtLeast(0) ?: 15
-            currentConfig = currentConfig.copy(accountDelayMin = v)
-        }
-        accountDelayMaxInput = GgtgUi.input(context, "45", currentConfig.accountDelayMax.toString(), numeric = true).apply {
-            layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
-        }
-        bindAutoSave(accountDelayMaxInput) {
-            val v = it.toIntOrNull()?.coerceAtLeast(15) ?: 45
-            currentConfig = currentConfig.copy(accountDelayMax = v)
-        }
-        accDelayRow.addView(GgtgUi.body(context, "от ", 13f))
-        accDelayRow.addView(accountDelayMinInput)
-        accDelayRow.addView(GgtgUi.body(context, " до ", 13f))
-        accDelayRow.addView(accountDelayMaxInput)
-        accDelayRow.addView(GgtgUi.body(context, " сек", 13f))
-        GgtgUi.labeled(context, planCard, "Пауза между аккаунтами", "Интервал задержки перед запуском следующего номера", accDelayRow)
-
-        smsWaitInput = GgtgUi.input(context, "300", currentConfig.smsWaitSeconds.toString(), numeric = true)
-        bindAutoSave(smsWaitInput) {
-            val v = it.toIntOrNull()?.coerceIn(120, 1800) ?: 300
-            currentConfig = currentConfig.copy(smsWaitSeconds = v)
-        }
-        GgtgUi.labeled(context, planCard, "Сколько ждать SMS-код (сек)", "От 120 до 1800, рекомендуется 300: номер обычно живёт у сервиса ~20 минут, а слишком короткое ожидание отменяет номера, на которые код ещё придёт. Если SMS не придёт, номер отменяется и деньги возвращаются (статус 8)", smsWaitInput)
-
-        skipAppCheck = checkBox(context, "Не регистрировать трасты (отменять номер, если код пришёл бы в приложение)", currentConfig.skipAppCode)
-        skipAppCheck.setOnCheckedChangeListener { _, isChecked ->
-            currentConfig = currentConfig.copy(skipAppCode = isChecked)
-            GgtgRegistration.saveConfig(currentConfig)
-        }
-        planCard.addView(skipAppCheck)
-        planCard.addView(GgtgUi.body(context, "Если Telegram шлёт код в приложение, номер уже зарегистрирован. Опция отменяет его и возвращает деньги, но на некоторых странах код в приложение приходит и для новых номеров - проверьте на небольшом объёме.", 12f))
-
-        filterCheck = checkBox(context, "Фильтровать номера перед регистрацией", currentConfig.filterNumbers)
-        filterCheck.setOnCheckedChangeListener { _, isChecked ->
-            currentConfig = currentConfig.copy(filterNumbers = isChecked)
-            GgtgRegistration.saveConfig(currentConfig)
-        }
-        planCard.addView(filterCheck)
-        planCard.addView(GgtgUi.body(context, "Программа помнит номера, которые уже не подошли (заняты, заблокированы, неверные), и сразу отменяет их при повторной выдаче, не запрашивая код.", 12f))
-
-        GgtgUi.addCard(root, planCard)
-
-        // -----------------------------------------------------------------------------
-        // 4. Proxy (Сеть и пулы прокси)
-        // -----------------------------------------------------------------------------
-        root.addView(sectionHeader(context, "Прокси и сеть", "Подключение аккаунтов через списки прокси", R.drawable.msg2_permissions))
-        val proxyCard = GgtgUi.card(context)
-
-        proxyView = pickerRow(context, proxyCard, "Список прокси", getProxyDisplayTitle()) { showProxyPicker(context) }
-
-        val proxyManageRow = LinearLayout(context).apply {
-            orientation = LinearLayout.HORIZONTAL
-            setPadding(0, GgtgUi.dp(6f), 0, 0)
-        }
-        val manageProxyBtn = GgtgUi.withLeadingIcon(
-            GgtgUi.pill(context, "Управление списками прокси", 0xFFFFFFFF.toInt(), GgtgUi.accent),
-            R.drawable.msg_settings, 0xFFFFFFFF.toInt(), 13f, 5f
-        )
-        manageProxyBtn.setOnClickListener {
-            presentFragment(GgtgProxyActivity())
-        }
-        proxyManageRow.addView(manageProxyBtn)
-        proxyCard.addView(proxyManageRow)
-
-        folderInput = GgtgUi.input(context, "Регистрация", currentConfig.folderTag)
-        bindAutoSave(folderInput) { currentConfig = currentConfig.copy(folderTag = it) }
-        GgtgUi.labeled(context, proxyCard, "Папка в GGTG", "Куда сохранять новые аккаунты", folderInput)
-
-        precheckProxyCheck = checkBox(context, "Проверять прокси перед заказом номера", currentConfig.precheckProxy)
-        precheckProxyCheck.setOnCheckedChangeListener { _, isChecked ->
-            currentConfig = currentConfig.copy(precheckProxy = isChecked)
-            GgtgRegistration.saveConfig(currentConfig)
-        }
-        proxyCard.addView(precheckProxyCheck)
-        proxyCard.addView(GgtgUi.body(context, "Исключает списание средств за номер, если прокси из пула внезапно перестал отвечать.", 12f))
-
-        GgtgUi.addCard(root, proxyCard)
-
-        // -----------------------------------------------------------------------------
-        // 4.5 Two-Factor Authentication (2FA)
-        // -----------------------------------------------------------------------------
-        root.addView(sectionHeader(context, "Облачный пароль (2FA)", "Двухфакторная защита для новых аккаунтов", R.drawable.msg_secret))
-        val twoFaCard = GgtgUi.card(context)
-
+        s3Card.addView(GgtgUi.title(context, "Облачный пароль (2FA)", 14f))
         single2faCheck = checkBox(context, "Один пароль на все аккаунты", currentConfig.single2faForAll)
-        twoFaCard.addView(single2faCheck)
-        twoFaCard.addView(GgtgUi.body(context, "Если включено — на всех создаваемых аккаунтах будет установлен указанный пароль. Если выключено — для каждого аккаунта генерируется свой уникальный надёжный пароль (18 символов), автоматически сохраняемый в 2FA Vault.", 12f))
+        s3Card.addView(single2faCheck)
+        s3Card.addView(GgtgUi.body(context, "Если включено — на всех создаваемых аккаунтах будет установлен указанный пароль. Если выключено — для каждого аккаунта генерируется свой уникальный надёжный пароль (18 символов), автоматически сохраняемый в 2FA Vault.", 12f))
 
         single2faLayout = LinearLayout(context).apply {
             orientation = LinearLayout.VERTICAL
@@ -546,15 +402,15 @@ class GgtgRegistrationActivity : BaseFragment() {
             leftMargin = GgtgUi.dp(10f)
         })
         single2faLayout.addView(pwdBtnsRow)
-        twoFaCard.addView(single2faLayout)
+        s3Card.addView(single2faLayout)
 
         random2faLayout = LinearLayout(context).apply {
             orientation = LinearLayout.VERTICAL
             setPadding(0, GgtgUi.dp(6f), 0, 0)
             visibility = if (currentConfig.single2faForAll) View.GONE else View.VISIBLE
         }
-        random2faLayout.addView(GgtgUi.body(context, "🔐 Для каждого аккаунта будет сгенерирован свой уникальный надежный пароль 2FA и сохранен в хранилище приложения (2FA Vault).", 13f))
-        twoFaCard.addView(random2faLayout)
+        random2faLayout.addView(GgtgUi.body(context, "Для каждого аккаунта будет сгенерирован свой уникальный надежный пароль 2FA и сохранен в хранилище приложения (2FA Vault).", 13f))
+        s3Card.addView(random2faLayout)
 
         single2faCheck.setOnCheckedChangeListener { _, isChecked ->
             currentConfig = currentConfig.copy(single2faForAll = isChecked)
@@ -563,24 +419,204 @@ class GgtgRegistrationActivity : BaseFragment() {
             random2faLayout.visibility = if (isChecked) View.GONE else View.VISIBLE
         }
 
-        GgtgUi.addCard(root, twoFaCard)
+        GgtgUi.addCard(container, s3Card)
 
-        // -----------------------------------------------------------------------------
-        // 5. Execution & Status
-        // -----------------------------------------------------------------------------
-        root.addView(sectionHeader(context, "Процесс регистрации", "Управление процессом авторегистрации", R.drawable.msg_list))
-        val statusCard = GgtgUi.card(context)
+        // -------------------------------------------------------------------------
+        // ШАГ 4: Защита и токены (Push, Captcha, Email)
+        // -------------------------------------------------------------------------
+        container.addView(sectionHeader(context, "Шаг 4: Защита и токены (Push, Captcha, Email)", "Play Integrity, reCAPTCHA Enterprise и подтверждение Email", R.drawable.msg_secret))
+        val s4Card = GgtgUi.card(context)
+
+        val currentTokenName = GgtgRegistration.tokenServiceName(currentConfig.tokenService)
+        tokenServiceView = pickerRow(context, s4Card, "Сервис токенов Play Integrity", currentTokenName) { showTokenServicePicker(context) }
+
+        tokenApiKeyInput = GgtgUi.input(context, "API-ключ токенов", currentConfig.tokenApiKey)
+        bindAutoSave(tokenApiKeyInput) { currentConfig = currentConfig.copy(tokenApiKey = it) }
+        GgtgUi.labeled(context, s4Card, "API-ключ токенов", "Master API key сервиса TokenFast или AntiSafety", tokenApiKeyInput)
+
+        aidLayout = LinearLayout(context).apply {
+            orientation = LinearLayout.VERTICAL
+            visibility = if (currentConfig.tokenService == 2) View.VISIBLE else View.GONE
+        }
+        aidInput = GgtgUi.input(context, "308aba4e-5680-466b-81a5-477ac6befa95", currentConfig.antiSafetyAid)
+        bindAutoSave(aidInput) { currentConfig = currentConfig.copy(antiSafetyAid = it) }
+        GgtgUi.labeled(context, aidLayout, "AID аккаунта AntiSafety", "Идентификатор аккаунта antisafety.net", aidInput)
+        s4Card.addView(aidLayout)
+
+        val tokenBalanceRow = LinearLayout(context).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            setPadding(0, GgtgUi.dp(6f), 0, GgtgUi.dp(6f))
+        }
+        val checkTokenBalBtn = GgtgUi.withLeadingIcon(GgtgUi.pill(context, "Проверить баланс", 0xFFFFFFFF.toInt(), GgtgUi.accent), R.drawable.msg_stats, 0xFFFFFFFF.toInt(), 13f, 5f)
+        checkTokenBalBtn.setOnClickListener { checkTokenBalance() }
+        tokenBalanceRow.addView(checkTokenBalBtn)
+        tokenBalanceText = GgtgUi.body(context, "  Баланс: —", 13f)
+        tokenBalanceRow.addView(tokenBalanceText)
+        s4Card.addView(tokenBalanceRow)
+
+        replaceTokenCheck = checkBox(context, "Заменять токен при лимите флуда (FLOOD)", currentConfig.replaceTokenOnFlood)
+        replaceTokenCheck.setOnCheckedChangeListener { _, isChecked ->
+            currentConfig = currentConfig.copy(replaceTokenOnFlood = isChecked)
+            GgtgRegistration.saveConfig(currentConfig)
+        }
+        s4Card.addView(replaceTokenCheck)
+
+        val divCap = View(context).apply { setBackgroundColor(GgtgUi.color(Theme.key_divider)) }
+        s4Card.addView(divCap, LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, 1).apply {
+            topMargin = GgtgUi.dp(8f)
+            bottomMargin = GgtgUi.dp(8f)
+        })
+
+        // Captcha
+        val currentCaptchaName = GgtgRegistration.captchaServiceName(currentConfig.captchaService)
+        captchaServiceView = pickerRow(context, s4Card, "Обход reCAPTCHA Enterprise", currentCaptchaName) { showCaptchaServicePicker(context) }
+
+        captchaApiKeyInput = GgtgUi.input(context, "пусто = ключ сервиса токенов", currentConfig.captchaApiKey)
+        bindAutoSave(captchaApiKeyInput) { currentConfig = currentConfig.copy(captchaApiKey = it) }
+        GgtgUi.labeled(context, s4Card, "API-ключ капчи", "Если отличается от ключа сервиса токенов", captchaApiKeyInput)
+
+        val divMail = View(context).apply { setBackgroundColor(GgtgUi.color(Theme.key_divider)) }
+        s4Card.addView(divMail, LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, 1).apply {
+            topMargin = GgtgUi.dp(8f)
+            bottomMargin = GgtgUi.dp(8f)
+        })
+
+        // Email
+        autoBuyEmailCheck = checkBox(context, "Автопокупка Email при требовании Telegram", currentConfig.autoBuyEmail)
+        s4Card.addView(autoBuyEmailCheck)
+        s4Card.addView(GgtgUi.body(context, "Если Telegram требует указать Email для получения кода, программа автоматически купит и подтвердит временную почту.", 12f))
+
+        val currentEmailName = GgtgRegistration.emailServiceName(currentConfig.emailService)
+        emailServiceView = pickerRow(context, s4Card, "Сервис почты", currentEmailName) { showEmailServicePicker(context) }
+
+        emailApiKeyInput = GgtgUi.input(context, "пусто = такой же как у SMS-сервиса", currentConfig.emailApiKey)
+        bindAutoSave(emailApiKeyInput) { currentConfig = currentConfig.copy(emailApiKey = it) }
+        GgtgUi.labeled(context, s4Card, "API-ключ почты (необязательно)", "Отдельный API-ключ для сервиса почты, если отличается от SMS-сервиса", emailApiKeyInput)
+
+        GgtgUi.addCard(container, s4Card)
+
+        // -------------------------------------------------------------------------
+        // ШАГ 5: План и запуск
+        // -------------------------------------------------------------------------
+        container.addView(sectionHeader(context, "Шаг 5: План и запуск", "Объём, потоки, задержки, сбросы и управление", R.drawable.msg_stats))
+        val s5Card = GgtgUi.card(context)
+
+        targetCountInput = GgtgUi.input(context, "10", currentConfig.targetSuccessCount.toString(), numeric = true)
+        bindAutoSave(targetCountInput) {
+            val v = it.toIntOrNull()?.coerceAtLeast(1) ?: 10
+            currentConfig = currentConfig.copy(targetSuccessCount = v)
+        }
+        GgtgUi.labeled(context, s5Card, "Целевое количество успешных аккаунтов", "Программа работает в цикле, пока не достигнет этой цели", targetCountInput)
+
+        threadsCountInput = GgtgUi.input(context, "2", currentConfig.threadsCount.toString(), numeric = true)
+        bindAutoSave(threadsCountInput) {
+            val v = it.toIntOrNull()?.coerceIn(1, 10) ?: 2
+            currentConfig = currentConfig.copy(threadsCount = v)
+        }
+        GgtgUi.labeled(context, s5Card, "Параллельных потоков", "Сколько аккаунтов регистрируются одновременно (1–10)", threadsCountInput)
+
+        val stepDelayRow = LinearLayout(context).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            setPadding(0, GgtgUi.dp(6f), 0, 0)
+        }
+        stepDelayMinInput = GgtgUi.input(context, "10", currentConfig.stepDelayMin.toString(), numeric = true).apply {
+            layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
+        }
+        bindAutoSave(stepDelayMinInput) {
+            val v = it.toIntOrNull()?.coerceAtLeast(0) ?: 10
+            currentConfig = currentConfig.copy(stepDelayMin = v)
+        }
+        stepDelayMaxInput = GgtgUi.input(context, "30", currentConfig.stepDelayMax.toString(), numeric = true).apply {
+            layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
+        }
+        bindAutoSave(stepDelayMaxInput) {
+            val v = it.toIntOrNull()?.coerceAtLeast(10) ?: 30
+            currentConfig = currentConfig.copy(stepDelayMax = v)
+        }
+        stepDelayRow.addView(GgtgUi.body(context, "от ", 13f))
+        stepDelayRow.addView(stepDelayMinInput)
+        stepDelayRow.addView(GgtgUi.body(context, " до ", 13f))
+        stepDelayRow.addView(stepDelayMaxInput)
+        stepDelayRow.addView(GgtgUi.body(context, " сек", 13f))
+        GgtgUi.labeled(context, s5Card, "Пауза между шагами регистрации", "Интервал случайной задержки между действиями", stepDelayRow)
+
+        val accDelayRow = LinearLayout(context).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            setPadding(0, GgtgUi.dp(6f), 0, 0)
+        }
+        accountDelayMinInput = GgtgUi.input(context, "15", currentConfig.accountDelayMin.toString(), numeric = true).apply {
+            layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
+        }
+        bindAutoSave(accountDelayMinInput) {
+            val v = it.toIntOrNull()?.coerceAtLeast(0) ?: 15
+            currentConfig = currentConfig.copy(accountDelayMin = v)
+        }
+        accountDelayMaxInput = GgtgUi.input(context, "45", currentConfig.accountDelayMax.toString(), numeric = true).apply {
+            layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
+        }
+        bindAutoSave(accountDelayMaxInput) {
+            val v = it.toIntOrNull()?.coerceAtLeast(15) ?: 45
+            currentConfig = currentConfig.copy(accountDelayMax = v)
+        }
+        accDelayRow.addView(GgtgUi.body(context, "от ", 13f))
+        accDelayRow.addView(accountDelayMinInput)
+        accDelayRow.addView(GgtgUi.body(context, " до ", 13f))
+        accDelayRow.addView(accountDelayMaxInput)
+        accDelayRow.addView(GgtgUi.body(context, " сек", 13f))
+        GgtgUi.labeled(context, s5Card, "Пауза между аккаунтами", "Интервал задержки перед запуском следующего номера", accDelayRow)
+
+        smsWaitInput = GgtgUi.input(context, "300", currentConfig.smsWaitSeconds.toString(), numeric = true)
+        bindAutoSave(smsWaitInput) {
+            val v = it.toIntOrNull()?.coerceIn(120, 1800) ?: 300
+            currentConfig = currentConfig.copy(smsWaitSeconds = v)
+        }
+        GgtgUi.labeled(context, s5Card, "Сколько ждать SMS-код (сек)", "От 120 до 1800, рекомендуется 300. Если SMS не придёт, деньги возвращаются", smsWaitInput)
+
+        skipAppCheck = checkBox(context, "Не регистрировать трасты (отменять номер, если код в приложение)", currentConfig.skipAppCode)
+        skipAppCheck.setOnCheckedChangeListener { _, isChecked ->
+            currentConfig = currentConfig.copy(skipAppCode = isChecked)
+            GgtgRegistration.saveConfig(currentConfig)
+        }
+        s5Card.addView(skipAppCheck)
+
+        resetSessionsCheck = checkBox(context, "Сбросить другие сессии после регистрации", currentConfig.resetSessionsAfterReg)
+        resetSessionsCheck.setOnCheckedChangeListener { _, isChecked ->
+            currentConfig = currentConfig.copy(resetSessionsAfterReg = isChecked)
+            GgtgRegistration.saveConfig(currentConfig)
+        }
+        s5Card.addView(resetSessionsCheck)
+
+        reset2faCheck = checkBox(context, "Запросить сброс 2FA на занятых номерах", currentConfig.reset2faOnOccupied)
+        reset2faCheck.setOnCheckedChangeListener { _, isChecked ->
+            currentConfig = currentConfig.copy(reset2faOnOccupied = isChecked)
+            GgtgRegistration.saveConfig(currentConfig)
+        }
+        s5Card.addView(reset2faCheck)
+
+        val divSt = View(context).apply { setBackgroundColor(GgtgUi.color(Theme.key_divider)) }
+        s5Card.addView(divSt, LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, 1).apply {
+            topMargin = GgtgUi.dp(10f)
+            bottomMargin = GgtgUi.dp(10f)
+        })
+
         statusTitleView = GgtgUi.title(context, "Готов к запуску", 16f)
         setStatus(statusTitleView, "Готов к запуску", R.drawable.msg_info)
-        statusCard.addView(statusTitleView)
+        s5Card.addView(statusTitleView)
 
         progressLabelView = GgtgUi.body(context, "Успешно: 0 / ${currentConfig.targetSuccessCount} | Потоков: 0 | Ошибок: 0", 14f)
-        statusCard.addView(progressLabelView, LinearLayout.LayoutParams(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT).apply {
+        s5Card.addView(progressLabelView, LinearLayout.LayoutParams(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT).apply {
             topMargin = GgtgUi.dp(4f)
         })
 
-        startButton = iconButton(context, "Запустить регистрацию", R.drawable.msg_select) { startRegistration() }
-        statusCard.addView(startButton, LinearLayout.LayoutParams(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT).apply {
+        val startBtn = GgtgUi.button(context, "Запустить регистрацию", false) { startRegistration() }
+        startBtn.setCompoundDrawablesWithIntrinsicBounds(R.drawable.msg_select, 0, 0, 0)
+        startBtn.compoundDrawablePadding = GgtgUi.dp(8f)
+        startBtn.setPadding(GgtgUi.dp(16f), GgtgUi.dp(10f), GgtgUi.dp(16f), GgtgUi.dp(10f))
+        startButton = startBtn
+        s5Card.addView(startButton, LinearLayout.LayoutParams(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT).apply {
             topMargin = GgtgUi.dp(12f)
         })
 
@@ -588,19 +624,29 @@ class GgtgRegistrationActivity : BaseFragment() {
             orientation = LinearLayout.HORIZONTAL
             visibility = View.GONE
         }
-        pauseButton = iconButton(context, "Пауза", R.drawable.ic_pause) {
+        val pauseBtn = GgtgUi.button(context, "Пауза", false) {
             GgtgRegistration.Engine.togglePause()
         }
-        stopButton = iconButton(context, "Остановить", R.drawable.msg_close, destructive = true) {
+        pauseBtn.setCompoundDrawablesWithIntrinsicBounds(R.drawable.ic_pause, 0, 0, 0)
+        pauseBtn.compoundDrawablePadding = GgtgUi.dp(8f)
+        pauseBtn.setPadding(GgtgUi.dp(16f), GgtgUi.dp(10f), GgtgUi.dp(16f), GgtgUi.dp(10f))
+        pauseButton = pauseBtn
+
+        val stopBtn = GgtgUi.button(context, "Остановить", true) {
             stopRegistration()
         }
+        stopBtn.setCompoundDrawablesWithIntrinsicBounds(R.drawable.msg_close, 0, 0, 0)
+        stopBtn.compoundDrawablePadding = GgtgUi.dp(8f)
+        stopBtn.setPadding(GgtgUi.dp(16f), GgtgUi.dp(10f), GgtgUi.dp(16f), GgtgUi.dp(10f))
+        stopButton = stopBtn
+
         runningButtonsRow.addView(pauseButton, LinearLayout.LayoutParams(0, LayoutHelper.WRAP_CONTENT, 1f).apply {
             rightMargin = GgtgUi.dp(6f)
         })
         runningButtonsRow.addView(stopButton, LinearLayout.LayoutParams(0, LayoutHelper.WRAP_CONTENT, 1f).apply {
             leftMargin = GgtgUi.dp(6f)
         })
-        statusCard.addView(runningButtonsRow, LinearLayout.LayoutParams(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT).apply {
+        s5Card.addView(runningButtonsRow, LinearLayout.LayoutParams(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT).apply {
             topMargin = GgtgUi.dp(8f)
         })
 
@@ -628,14 +674,14 @@ class GgtgRegistrationActivity : BaseFragment() {
             }
         }
         refundQueueRow.addView(refundQueueBtn)
-        statusCard.addView(refundQueueRow)
+        s5Card.addView(refundQueueRow)
 
-        GgtgUi.addCard(root, statusCard)
+        GgtgUi.addCard(container, s5Card)
 
-        // -----------------------------------------------------------------------------
-        // 6. Action Log Console
-        // -----------------------------------------------------------------------------
-        root.addView(sectionHeader(context, "Журнал действий", "Что происходит прямо сейчас", R.drawable.msg_list))
+        // -------------------------------------------------------------------------
+        // Журнал действий
+        // -------------------------------------------------------------------------
+        container.addView(sectionHeader(context, "Журнал действий", "Лог регистрации в реальном времени", R.drawable.msg_list))
         val logCard = GgtgUi.card(context)
         logConsoleView = TextView(context).apply {
             text = "Лог авторегистрации готов..."
@@ -646,181 +692,100 @@ class GgtgRegistrationActivity : BaseFragment() {
             background = GgtgUi.rounded(GgtgUi.color(Theme.key_windowBackgroundGray), GgtgUi.dp(8f).toFloat())
         }
         logCard.addView(logConsoleView)
-        GgtgUi.addCard(root, logCard)
+        GgtgUi.addCard(container, logCard)
+    }
 
-        root.addView(GgtgUi.spacer(context, 24f))
-
-        if (currentConfig.apiKey.isNotEmpty() && currentConfig.countryId >= 0) {
-            scope.launch {
-                val ops = GgtgRegistration.fetchOperators(currentConfig, currentConfig.countryId).getOrNull()
-                val cur = ops?.firstOrNull { it.name == currentConfig.smsOperator || (currentConfig.smsOperator.isEmpty() && it.name == "any") }
-                if (cur != null) {
-                    AndroidUtilities.runOnUIThread {
-                        if (::operatorView.isInitialized) {
-                            operatorView.text = GgtgRegistration.operatorDisplayTitle(currentConfig.smsOperator, cur.count)
-                        }
-                    }
+    // =============================================================================
+    // REGISTRATION ENGINE & CALLBACKS
+    // =============================================================================
+    private fun setupRegistrationCallbacks() {
+        GgtgRegistration.Engine.onLog = { msg ->
+            AndroidUtilities.runOnUIThread {
+                if (::logConsoleView.isInitialized) {
+                    val cur = logConsoleView.text.toString()
+                    val lines = cur.lines()
+                    val trimmed = if (lines.size > 250) lines.takeLast(200).joinToString("\n") else cur
+                    logConsoleView.text = if (trimmed.isEmpty()) msg else "$trimmed\n$msg"
                 }
             }
         }
 
-        setupEngineCallbacks()
-        return frame
-    }
-
-
-    private fun chevron(context: Context) = TextView(context).apply {
-        text = "›"
-        textSize = 22f
-        setTextColor(GgtgUi.color(Theme.key_windowBackgroundWhiteGrayText))
-    }
-
-    /** Section header: round accent badge with a Telegram icon, bold title and a gray hint line. */
-    private fun sectionHeader(context: Context, title: String, sub: String, iconRes: Int): View {
-        val row = LinearLayout(context).apply {
-            orientation = LinearLayout.HORIZONTAL
-            gravity = Gravity.CENTER_VERTICAL
-            setPadding(GgtgUi.dp(18f), GgtgUi.dp(18f), GgtgUi.dp(18f), GgtgUi.dp(2f))
-        }
-        row.addView(GgtgUi.badge(context, iconRes, 32f), LinearLayout.LayoutParams(GgtgUi.dp(32f), GgtgUi.dp(32f)).apply { rightMargin = GgtgUi.dp(10f) })
-        val texts = LinearLayout(context).apply { orientation = LinearLayout.VERTICAL }
-        texts.addView(GgtgUi.title(context, title, 15f))
-        texts.addView(GgtgUi.body(context, sub, 12f))
-        row.addView(texts, LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f))
-        return row
-    }
-
-    /** A tappable "label - value ›" row in a card; returns the value view so it can be updated. */
-    private fun pickerRow(context: Context, card: LinearLayout, label: String, value: String, onClick: () -> Unit): TextView {
-        val row = LinearLayout(context).apply {
-            orientation = LinearLayout.HORIZONTAL
-            gravity = Gravity.CENTER_VERTICAL
-            background = GgtgUi.rounded(GgtgUi.color(Theme.key_windowBackgroundGray), GgtgUi.dp(10f).toFloat())
-            setPadding(GgtgUi.dp(12f), GgtgUi.dp(10f), GgtgUi.dp(12f), GgtgUi.dp(10f))
-            setOnClickListener { onClick() }
-        }
-        row.addView(GgtgUi.body(context, "$label:  ", 14f))
-        val valueView = GgtgUi.title(context, value, 14f)
-        row.addView(valueView, LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f))
-        row.addView(chevron(context))
-        card.addView(row, LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT))
-        return valueView
-    }
-
-    private fun iconButton(context: Context, text: String, icon: Int, destructive: Boolean = false, onClick: () -> Unit): TextView =
-        GgtgUi.withLeadingIcon(GgtgUi.button(context, text, destructive, onClick), icon, 0xFFFFFFFF.toInt(), 18f, 8f)
-
-    private fun setStatus(view: TextView, text: String, icon: Int, tint: Int = GgtgUi.accent) {
-        view.text = text
-        GgtgUi.withLeadingIcon(view, icon, tint, 20f, 8f)
-    }
-
-    private fun checkBox(context: Context, text: String, checked: Boolean) = CheckBox(context).apply {
-        this.text = text
-        isChecked = checked
-        textSize = 14f
-        setTextColor(GgtgUi.color(Theme.key_windowBackgroundWhiteBlackText))
-        setPadding(0, GgtgUi.dp(6f), 0, 0)
-    }
-
-    private fun updatePauseButton(paused: Boolean) {
-        val text = if (paused) "Продолжить" else "Пауза"
-        val icon = if (paused) R.drawable.ic_play else R.drawable.ic_pause
-        pauseButton.text = text
-        GgtgUi.withLeadingIcon(pauseButton, icon, 0xFFFFFFFF.toInt(), 18f, 8f)
-    }
-
-    private fun setupEngineCallbacks() {
-        val history = GgtgRegistration.Engine.getLogHistory()
-        if (history.isNotEmpty()) {
-            logConsoleView.text = history.takeLast(40).joinToString("\n")
-        }
-
-        val running = GgtgRegistration.Engine.isRunning.get()
-        startButton.visibility = if (running) View.GONE else View.VISIBLE
-        runningButtonsRow.visibility = if (running) View.VISIBLE else View.GONE
-        updatePauseButton(GgtgRegistration.Engine.isPaused.get())
-        if (running) {
-            val s = GgtgRegistration.Engine.successCount.get()
-            val t = currentConfig.targetSuccessCount
-            val a = GgtgRegistration.Engine.activeThreads.get()
-            val f = GgtgRegistration.Engine.failedCount.get()
-            if (GgtgRegistration.Engine.isPaused.get()) {
-                setStatus(statusTitleView, "Авторегистрация на паузе", R.drawable.msg_recent)
-            } else {
-                setStatus(statusTitleView, "Авторегистрация выполняется...", R.drawable.msg_recent)
-            }
-            progressLabelView.text = "Успешно: $s / $t | Потоков: $a | Ошибок: $f"
-        }
-        refundQueueLabel.text = "Очередь автовозврата: ${GgtgRegistration.Engine.refundQueue.size} номеров"
-
-        GgtgRegistration.Engine.onPauseChanged = { paused ->
+        GgtgRegistration.Engine.onStatus = { st, isError, isSuccess ->
             AndroidUtilities.runOnUIThread {
-                updatePauseButton(paused)
-            }
-        }
-
-        GgtgRegistration.Engine.onLog = { line ->
-            AndroidUtilities.runOnUIThread {
-                val prev = logConsoleView.text.toString()
-                logConsoleView.text = if (prev.isEmpty() || prev == "Лог авторегистрации готов...") line else "$prev\n$line"
-                refundQueueLabel.text = "Очередь автовозврата: ${GgtgRegistration.Engine.refundQueue.size} номеров"
-            }
-        }
-
-        GgtgRegistration.Engine.onStatus = { msg, isError, isSuccess ->
-            AndroidUtilities.runOnUIThread {
-                when {
-                    isError -> setStatus(statusTitleView, msg, R.drawable.msg_warning, GgtgUi.color(Theme.key_text_RedRegular))
-                    isSuccess -> setStatus(statusTitleView, msg, R.drawable.msg_select, GgtgUi.color(Theme.key_chats_actionBackground))
-                    else -> setStatus(statusTitleView, msg, R.drawable.msg_recent)
+                if (::statusTitleView.isInitialized) {
+                    val icon = if (isError) R.drawable.msg_close else if (isSuccess) R.drawable.msg_select else R.drawable.msg_recent
+                    setStatus(statusTitleView, st, icon)
                 }
             }
         }
 
-        GgtgRegistration.Engine.onProgress = { success, target, active, failed ->
+        GgtgRegistration.Engine.onProgress = { success, active, failed, target ->
             AndroidUtilities.runOnUIThread {
-                progressLabelView.text = "Успешно: $success / $target | Потоков: $active | Ошибок: $failed"
+                if (::progressLabelView.isInitialized) {
+                    progressLabelView.text = "Успешно: $success / $target | Потоков: $active | Ошибок: $failed"
+                }
                 val isRunning = GgtgRegistration.Engine.isRunning.get()
-                startButton.visibility = if (isRunning) View.GONE else View.VISIBLE
-                runningButtonsRow.visibility = if (isRunning) View.VISIBLE else View.GONE
+                if (::startButton.isInitialized) {
+                    startButton.visibility = if (isRunning) View.GONE else View.VISIBLE
+                }
+                if (::runningButtonsRow.isInitialized) {
+                    runningButtonsRow.visibility = if (isRunning) View.VISIBLE else View.GONE
+                }
                 updatePauseButton(GgtgRegistration.Engine.isPaused.get())
             }
         }
 
         GgtgRegistration.Engine.onFinished = { success, failed ->
             AndroidUtilities.runOnUIThread {
-                startButton.visibility = View.VISIBLE
-                runningButtonsRow.visibility = View.GONE
+                if (::startButton.isInitialized) {
+                    startButton.visibility = View.VISIBLE
+                }
+                if (::runningButtonsRow.isInitialized) {
+                    runningButtonsRow.visibility = View.GONE
+                }
             }
         }
     }
 
+    // =============================================================================
+    // PICKERS & DIALOGS
+    // =============================================================================
     private fun showServicePicker(context: Context) {
         val names = GgtgRegistration.SERVICES.map { it.name }.toTypedArray()
         AlertDialog.Builder(context).apply {
             setTitle("Выберите SMS-сервис")
             setItems(names) { _, which ->
                 val s = GgtgRegistration.SERVICES[which]
-                // keep the key typed for the old service, bring the one kept for the new service
-                GgtgRegistration.saveConfig(currentConfig.copy(apiKey = apiKeyInput.text.toString().trim()))
-                currentConfig = currentConfig.copy(serviceId = s.id, countryName = "", apiKey = GgtgRegistration.apiKeyFor(s.id), smsOperator = "")
-                apiKeyInput.setText(currentConfig.apiKey)
+                val currentTypedKey = apiKeyInput.text.toString().trim()
+                GgtgRegistration.saveApiKeyFor(currentConfig.serviceId, currentTypedKey)
+
+                val restoredKey = GgtgRegistration.apiKeyFor(s.id)
+                currentConfig = currentConfig.copy(
+                    serviceId = s.id,
+                    countryName = "",
+                    apiKey = restoredKey,
+                    smsOperator = ""
+                )
+                GgtgRegistration.saveConfig(currentConfig)
+
+                apiKeyInput.setText(restoredKey)
                 serviceNameView.text = s.name
                 countryView.text = GgtgRegistration.currentCountryTitle(currentConfig)
+
                 if (::operatorView.isInitialized) {
                     operatorView.text = GgtgRegistration.operatorDisplayTitle("")
                 }
-                GgtgRegistration.saveConfig(currentConfig)
             }
             setNegativeButton("Отмена", null)
         }.show()
     }
 
     private fun showCountryPicker(context: Context) {
-        // always ask the service: only its current list is shown
-        currentConfig = currentConfig.copy(apiKey = apiKeyInput.text.toString().trim())
+        val key = apiKeyInput.text.toString().trim()
+        currentConfig = currentConfig.copy(apiKey = key)
+        GgtgRegistration.saveApiKeyFor(currentConfig.serviceId, key)
         GgtgRegistration.saveConfig(currentConfig)
+
         Toast.makeText(context, "Загружаю актуальный список стран...", Toast.LENGTH_SHORT).show()
         scope.launch {
             val res = GgtgRegistration.fetchCountries(currentConfig)
@@ -913,8 +878,9 @@ class GgtgRegistrationActivity : BaseFragment() {
     }
 
     private fun showOperatorPicker(context: Context) {
-        val key = if (::apiKeyInput.isInitialized) apiKeyInput.text.toString().trim() else currentConfig.apiKey
+        val key = apiKeyInput.text.toString().trim()
         currentConfig = currentConfig.copy(apiKey = key)
+        GgtgRegistration.saveApiKeyFor(currentConfig.serviceId, key)
         GgtgRegistration.saveConfig(currentConfig)
         if (currentConfig.apiKey.isEmpty()) {
             Toast.makeText(context, "Сначала укажите API-ключ сервиса", Toast.LENGTH_SHORT).show()
@@ -951,8 +917,7 @@ class GgtgRegistrationActivity : BaseFragment() {
             val query = search.text.toString().trim().lowercase(java.util.Locale.getDefault())
             var count = 0
 
-            // Option to type custom manually
-            val manualRow = GgtgUi.title(context, "✎ Ввести код вручную...", 14f).apply {
+            val manualRow = GgtgUi.title(context, "Ввести код вручную...", 14f).apply {
                 setPadding(0, GgtgUi.dp(10f), 0, GgtgUi.dp(10f))
                 setTextColor(GgtgUi.accent)
                 setOnClickListener {
@@ -1057,7 +1022,9 @@ class GgtgRegistrationActivity : BaseFragment() {
             setItems(listNames.toTypedArray()) { _, which ->
                 val selected = if (which == 0) "" else listNames[which]
                 currentConfig = currentConfig.copy(proxyListName = selected)
-                proxyView.text = getProxyDisplayTitle()
+                if (::proxyView.isInitialized) {
+                    proxyView.text = getProxyDisplayTitle()
+                }
                 GgtgRegistration.saveConfig(currentConfig)
             }
             setNegativeButton("Отмена", null)
@@ -1070,7 +1037,9 @@ class GgtgRegistrationActivity : BaseFragment() {
             setTitle("Выберите пол для генерации имён")
             setItems(options) { _, which ->
                 currentConfig = currentConfig.copy(gender = which)
-                genderView.text = options[which]
+                if (::genderView.isInitialized) {
+                    genderView.text = options[which]
+                }
                 GgtgRegistration.saveConfig(currentConfig)
             }
             setNegativeButton("Отмена", null)
@@ -1080,10 +1049,46 @@ class GgtgRegistrationActivity : BaseFragment() {
     private fun showTokenServicePicker(context: Context) {
         val options = arrayOf("Нет (без токенов)", "TokenFast (tokenfast.shop/api)", "AntiSafety (antisafety.net)")
         AlertDialog.Builder(context).apply {
-            setTitle("Выберите сервис токенов Play Integrity / SafetyNet")
+            setTitle("Выберите сервис токенов Play Integrity")
             setItems(options) { _, which ->
                 currentConfig = currentConfig.copy(tokenService = which)
-                tokenServiceView.text = GgtgRegistration.tokenServiceName(which)
+                if (::tokenServiceView.isInitialized) {
+                    tokenServiceView.text = GgtgRegistration.tokenServiceName(which)
+                }
+                if (::aidLayout.isInitialized) {
+                    aidLayout.visibility = if (which == 2) View.VISIBLE else View.GONE
+                }
+                GgtgRegistration.saveConfig(currentConfig)
+            }
+            setNegativeButton("Отмена", null)
+        }.show()
+    }
+
+    private fun showCaptchaServicePicker(context: Context) {
+        val options = arrayOf("Авто (по сервису токенов)", "TokenFast", "AntiSafety", "NextCaptcha")
+        AlertDialog.Builder(context).apply {
+            setTitle("Выберите сервис обхода капчи")
+            setItems(options) { _, which ->
+                currentConfig = currentConfig.copy(captchaService = which)
+                if (::captchaServiceView.isInitialized) {
+                    captchaServiceView.text = GgtgRegistration.captchaServiceName(which)
+                }
+                GgtgRegistration.saveConfig(currentConfig)
+            }
+            setNegativeButton("Отмена", null)
+        }.show()
+    }
+
+    private fun showEmailServicePicker(context: Context) {
+        val keys = arrayOf("auto", "hero-sms", "smsbower", "antisafety")
+        val names = arrayOf("Авто", "Hero-SMS", "SMSBower", "AntiSafety")
+        AlertDialog.Builder(context).apply {
+            setTitle("Выберите сервис временной почты")
+            setItems(names) { _, which ->
+                currentConfig = currentConfig.copy(emailService = keys[which])
+                if (::emailServiceView.isInitialized) {
+                    emailServiceView.text = names[which]
+                }
                 GgtgRegistration.saveConfig(currentConfig)
             }
             setNegativeButton("Отмена", null)
@@ -1097,12 +1102,16 @@ class GgtgRegistrationActivity : BaseFragment() {
             return
         }
         currentConfig = currentConfig.copy(apiKey = key)
+        GgtgRegistration.saveApiKeyFor(currentConfig.serviceId, key)
         GgtgRegistration.saveConfig(currentConfig)
+
         balanceText.text = "  Баланс: проверка..."
+
         scope.launch {
             val res = GgtgRegistration.fetchBalance(currentConfig)
-            balanceText.text = if (res.isSuccess) "  Баланс: ${res.getOrNull()}" else "  Ошибка: ${res.exceptionOrNull()?.message}"
-            // the same check refreshes the list of countries the service has
+            val txt = if (res.isSuccess) "  Баланс: ${res.getOrNull()}" else "  Ошибка: ${res.exceptionOrNull()?.message}"
+            balanceText.text = txt
+
             if (GgtgRegistration.fetchCountries(currentConfig).isSuccess) {
                 countryView.text = GgtgRegistration.currentCountryTitle(currentConfig)
             }
@@ -1117,10 +1126,12 @@ class GgtgRegistrationActivity : BaseFragment() {
         }
         currentConfig = currentConfig.copy(tokenApiKey = key)
         GgtgRegistration.saveConfig(currentConfig)
-        tokenBalanceText.text = "  Баланс: проверка..."
+        if (::tokenBalanceText.isInitialized) tokenBalanceText.text = "  Баланс: проверка..."
         scope.launch {
-            val res = GgtgRegistration.fetchTokenBalance(currentConfig.tokenService, key)
-            tokenBalanceText.text = if (res.isSuccess) "  Баланс: ${res.getOrNull()}" else "  Ошибка: ${res.exceptionOrNull()?.message}"
+            val res = GgtgRegistration.fetchTokenBalance(currentConfig.tokenService, key, currentConfig.antiSafetyAid)
+            if (::tokenBalanceText.isInitialized) {
+                tokenBalanceText.text = if (res.isSuccess) "  Баланс: ${res.getOrNull()}" else "  Ошибка: ${res.exceptionOrNull()?.message}"
+            }
         }
     }
 
@@ -1140,67 +1151,79 @@ class GgtgRegistrationActivity : BaseFragment() {
             Toast.makeText(parentActivity, "Выберите страну номера перед запуском", Toast.LENGTH_SHORT).show()
             return
         }
-        val target = targetCountInput.text.toString().trim().toIntOrNull()?.coerceAtLeast(1) ?: 10
-        val threads = threadsCountInput.text.toString().trim().toIntOrNull()?.coerceIn(1, 10) ?: 2
-        val folder = folderInput.text.toString().trim().ifEmpty { "Регистрация" }
-        val twoFa = twoFaInput.text.toString().trim()
+        val target = if (::targetCountInput.isInitialized) targetCountInput.text.toString().trim().toIntOrNull()?.coerceAtLeast(1) ?: 10 else 10
+        val threads = if (::threadsCountInput.isInitialized) threadsCountInput.text.toString().trim().toIntOrNull()?.coerceIn(1, 10) ?: 2 else 2
+        val folder = if (::folderInput.isInitialized) folderInput.text.toString().trim().ifEmpty { "Регистрация" } else "Регистрация"
+        val twoFa = if (::twoFaInput.isInitialized) twoFaInput.text.toString().trim() else ""
 
-        val stepMin = stepDelayMinInput.text.toString().trim().toIntOrNull()?.coerceAtLeast(0) ?: 10
-        val stepMax = stepDelayMaxInput.text.toString().trim().toIntOrNull()?.coerceAtLeast(stepMin) ?: 30
-        val accMin = accountDelayMinInput.text.toString().trim().toIntOrNull()?.coerceAtLeast(0) ?: 15
-        val accMax = accountDelayMaxInput.text.toString().trim().toIntOrNull()?.coerceAtLeast(accMin) ?: 45
+        val stepMin = if (::stepDelayMinInput.isInitialized) stepDelayMinInput.text.toString().trim().toIntOrNull()?.coerceAtLeast(0) ?: 10 else 10
+        val stepMax = if (::stepDelayMaxInput.isInitialized) stepDelayMaxInput.text.toString().trim().toIntOrNull()?.coerceAtLeast(stepMin) ?: 30 else 30
+        val accMin = if (::accountDelayMinInput.isInitialized) accountDelayMinInput.text.toString().trim().toIntOrNull()?.coerceAtLeast(0) ?: 15 else 15
+        val accMax = if (::accountDelayMaxInput.isInitialized) accountDelayMaxInput.text.toString().trim().toIntOrNull()?.coerceAtLeast(accMin) ?: 45 else 45
 
         currentConfig = currentConfig.copy(
             apiKey = key,
             targetSuccessCount = target,
             threadsCount = threads,
             folderTag = folder,
-            single2faForAll = single2faCheck.isChecked,
+            single2faForAll = if (::single2faCheck.isInitialized) single2faCheck.isChecked else currentConfig.single2faForAll,
             twoFactorPassword = twoFa,
-            singleNameForAll = singleNameCheck.isChecked,
-            customFirstName = firstNameInput.text.toString().trim(),
-            customLastName = lastNameInput.text.toString().trim(),
-            autoRandomNames = !singleNameCheck.isChecked,
+            singleNameForAll = if (::singleNameCheck.isInitialized) singleNameCheck.isChecked else currentConfig.singleNameForAll,
+            customFirstName = if (::firstNameInput.isInitialized) firstNameInput.text.toString().trim() else currentConfig.customFirstName,
+            customLastName = if (::lastNameInput.isInitialized) lastNameInput.text.toString().trim() else currentConfig.customLastName,
+            autoRandomNames = if (::singleNameCheck.isInitialized) !singleNameCheck.isChecked else currentConfig.autoRandomNames,
             stepDelayMin = stepMin,
             stepDelayMax = stepMax,
             accountDelayMin = accMin,
             accountDelayMax = accMax,
-            smsWaitSeconds = smsWaitInput.text.toString().trim().toIntOrNull()?.coerceIn(120, 1800) ?: 300,
-            skipAppCode = skipAppCheck.isChecked,
-            filterNumbers = filterCheck.isChecked,
-            replaceTokenOnFlood = replaceTokenCheck.isChecked,
-            autoBuyEmail = autoBuyEmailCheck.isChecked,
-            emailApiKey = emailApiKeyInput.text.toString().trim(),
+            smsWaitSeconds = if (::smsWaitInput.isInitialized) smsWaitInput.text.toString().trim().toIntOrNull()?.coerceIn(120, 1800) ?: 300 else 300,
+            skipAppCode = if (::skipAppCheck.isInitialized) skipAppCheck.isChecked else currentConfig.skipAppCode,
+            filterNumbers = if (::filterCheck.isInitialized) filterCheck.isChecked else currentConfig.filterNumbers,
+            replaceTokenOnFlood = if (::replaceTokenCheck.isInitialized) replaceTokenCheck.isChecked else currentConfig.replaceTokenOnFlood,
+            autoBuyEmail = if (::autoBuyEmailCheck.isInitialized) autoBuyEmailCheck.isChecked else currentConfig.autoBuyEmail,
+            emailApiKey = if (::emailApiKeyInput.isInitialized) emailApiKeyInput.text.toString().trim() else currentConfig.emailApiKey,
             smsOperator = currentConfig.smsOperator,
-            maxPrice = maxPriceInput.text.toString().trim(),
+            maxPrice = if (::maxPriceInput.isInitialized) maxPriceInput.text.toString().trim() else currentConfig.maxPrice,
             gender = currentConfig.gender,
             firstNameFile = currentConfig.firstNameFile,
             lastNameFile = currentConfig.lastNameFile,
-            resetSessionsAfterReg = resetSessionsCheck.isChecked,
-            reset2faOnOccupied = reset2faCheck.isChecked,
+            resetSessionsAfterReg = if (::resetSessionsCheck.isInitialized) resetSessionsCheck.isChecked else currentConfig.resetSessionsAfterReg,
+            reset2faOnOccupied = if (::reset2faCheck.isInitialized) reset2faCheck.isChecked else currentConfig.reset2faOnOccupied,
             tokenService = currentConfig.tokenService,
-            tokenApiKey = tokenApiKeyInput.text.toString().trim(),
-            autoSetBio = autoSetBioCheck.isChecked,
-            customBio = bioInput.text.toString().trim(),
-            autoSetUsername = autoSetUsernameCheck.isChecked,
-            precheckProxy = precheckProxyCheck.isChecked
+            tokenApiKey = if (::tokenApiKeyInput.isInitialized) tokenApiKeyInput.text.toString().trim() else currentConfig.tokenApiKey,
+            antiSafetyAid = if (::aidInput.isInitialized) aidInput.text.toString().trim().ifEmpty { currentConfig.antiSafetyAid } else currentConfig.antiSafetyAid,
+            autoSetBio = if (::autoSetBioCheck.isInitialized) autoSetBioCheck.isChecked else currentConfig.autoSetBio,
+            customBio = if (::bioInput.isInitialized) bioInput.text.toString().trim() else currentConfig.customBio,
+            autoSetUsername = if (::autoSetUsernameCheck.isInitialized) autoSetUsernameCheck.isChecked else currentConfig.autoSetUsername,
+            precheckProxy = if (::precheckProxyCheck.isInitialized) precheckProxyCheck.isChecked else currentConfig.precheckProxy
         )
+        GgtgRegistration.saveApiKeyFor(currentConfig.serviceId, key)
         GgtgRegistration.saveConfig(currentConfig)
 
-        startButton.visibility = View.GONE
-        runningButtonsRow.visibility = View.VISIBLE
+        if (::startButton.isInitialized) startButton.visibility = View.GONE
+        if (::runningButtonsRow.isInitialized) runningButtonsRow.visibility = View.VISIBLE
         updatePauseButton(false)
-        setStatus(statusTitleView, "Авторегистрация запущена...", R.drawable.msg_recent)
+        if (::statusTitleView.isInitialized) setStatus(statusTitleView, "Авторегистрация запущена...", R.drawable.msg_recent)
 
         GgtgRegistration.Engine.start(currentConfig)
     }
 
     private fun stopRegistration() {
         GgtgRegistration.Engine.stop(userRequested = true)
-        startButton.visibility = View.VISIBLE
-        runningButtonsRow.visibility = View.GONE
+        if (::startButton.isInitialized) startButton.visibility = View.VISIBLE
+        if (::runningButtonsRow.isInitialized) runningButtonsRow.visibility = View.GONE
     }
 
+    private fun updatePauseButton(paused: Boolean) {
+        if (!::pauseButton.isInitialized) return
+        pauseButton.text = if (paused) "Продолжить" else "Пауза"
+    }
+
+    private fun setStatus(view: TextView, text: String, iconRes: Int) {
+        view.text = text
+        view.setCompoundDrawablesWithIntrinsicBounds(iconRes, 0, 0, 0)
+        view.compoundDrawablePadding = GgtgUi.dp(6f)
+    }
 
     private fun bindAutoSave(input: EditText, updater: (String) -> Unit) {
         input.addTextChangedListener(object : android.text.TextWatcher {
@@ -1349,6 +1372,7 @@ class GgtgRegistrationActivity : BaseFragment() {
             val resetSess = if (::resetSessionsCheck.isInitialized) resetSessionsCheck.isChecked else currentConfig.resetSessionsAfterReg
             val reset2fa = if (::reset2faCheck.isInitialized) reset2faCheck.isChecked else currentConfig.reset2faOnOccupied
             val tokenKey = if (::tokenApiKeyInput.isInitialized) tokenApiKeyInput.text.toString().trim() else currentConfig.tokenApiKey
+            val asfAid = if (::aidInput.isInitialized) aidInput.text.toString().trim() else currentConfig.antiSafetyAid
 
             currentConfig = currentConfig.copy(
                 apiKey = key,
@@ -1376,11 +1400,13 @@ class GgtgRegistrationActivity : BaseFragment() {
                 resetSessionsAfterReg = resetSess,
                 reset2faOnOccupied = reset2fa,
                 tokenApiKey = tokenKey,
+                antiSafetyAid = asfAid,
                 autoSetBio = if (::autoSetBioCheck.isInitialized) autoSetBioCheck.isChecked else currentConfig.autoSetBio,
                 customBio = if (::bioInput.isInitialized) bioInput.text.toString().trim() else currentConfig.customBio,
                 autoSetUsername = if (::autoSetUsernameCheck.isInitialized) autoSetUsernameCheck.isChecked else currentConfig.autoSetUsername,
                 precheckProxy = if (::precheckProxyCheck.isInitialized) precheckProxyCheck.isChecked else currentConfig.precheckProxy
             )
+            GgtgRegistration.saveApiKeyFor(currentConfig.serviceId, key)
             GgtgRegistration.saveConfig(currentConfig)
         } catch (_: Exception) {}
     }
@@ -1401,11 +1427,69 @@ class GgtgRegistrationActivity : BaseFragment() {
     override fun onFragmentDestroy() {
         saveAllFromUi()
         super.onFragmentDestroy()
-        // Do not stop registration if user simply navigates back; engine runs in background!
-        // Just detach UI callbacks so there is no view leak
         GgtgRegistration.Engine.onLog = null
         GgtgRegistration.Engine.onStatus = null
         GgtgRegistration.Engine.onProgress = null
         GgtgRegistration.Engine.onFinished = null
+    }
+
+    // =============================================================================
+    // UI HELPERS (Strict Telegram Style, No Emoji)
+    // =============================================================================
+    private fun sectionHeader(context: Context, title: String, subtitle: String, iconRes: Int): View {
+        val row = LinearLayout(context).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            setPadding(GgtgUi.dp(16f), GgtgUi.dp(14f), GgtgUi.dp(16f), GgtgUi.dp(4f))
+        }
+        row.addView(GgtgUi.badge(context, iconRes, 28f), LinearLayout.LayoutParams(GgtgUi.dp(28f), GgtgUi.dp(28f)).apply {
+            rightMargin = GgtgUi.dp(10f)
+        })
+        val texts = LinearLayout(context).apply {
+            orientation = LinearLayout.VERTICAL
+        }
+        texts.addView(GgtgUi.title(context, title, 14f).apply {
+            setTextColor(GgtgUi.accent)
+        })
+        texts.addView(GgtgUi.body(context, subtitle, 12f))
+        row.addView(texts, LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f))
+        return row
+    }
+
+    private fun pickerRow(context: Context, card: LinearLayout, label: String, value: String, onClick: () -> Unit): TextView {
+        val row = LinearLayout(context).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            setPadding(0, GgtgUi.dp(6f), 0, GgtgUi.dp(6f))
+            setOnClickListener { onClick() }
+        }
+        val lbl = GgtgUi.body(context, label, 14f).apply {
+            setTextColor(GgtgUi.color(Theme.key_windowBackgroundWhiteBlackText))
+        }
+        val valView = GgtgUi.body(context, value, 14f).apply {
+            setTextColor(GgtgUi.accent)
+            gravity = Gravity.END
+        }
+        row.addView(lbl, LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f))
+        row.addView(valView, LinearLayout.LayoutParams(LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT))
+        val iv = android.widget.ImageView(context).apply {
+            setImageResource(R.drawable.arrow_more)
+            setColorFilter(GgtgUi.color(Theme.key_windowBackgroundWhiteGrayText))
+        }
+        row.addView(iv, LinearLayout.LayoutParams(LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT).apply {
+            leftMargin = GgtgUi.dp(6f)
+        })
+        card.addView(row)
+        return valView
+    }
+
+    private fun checkBox(context: Context, text: String, checked: Boolean): CheckBox {
+        return CheckBox(context).apply {
+            this.text = text
+            this.isChecked = checked
+            setTextColor(GgtgUi.color(Theme.key_windowBackgroundWhiteBlackText))
+            textSize = 14f
+            setPadding(GgtgUi.dp(6f), GgtgUi.dp(6f), GgtgUi.dp(6f), GgtgUi.dp(6f))
+        }
     }
 }

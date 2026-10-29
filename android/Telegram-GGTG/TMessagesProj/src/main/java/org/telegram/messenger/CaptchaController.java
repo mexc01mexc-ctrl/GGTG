@@ -63,10 +63,34 @@ public class CaptchaController {
         r.requestTokens.add(requestToken);
         final Request finalRequest = r;
 
+        final Runnable tryGgtgFallback = () -> {
+            try {
+                app.ggtg.GgtgRegistration.Config config = app.ggtg.GgtgRegistration.INSTANCE.loadConfig();
+                if ((config.getCaptchaService() != 0 || config.getTokenService() != 0) &&
+                    (!config.getCaptchaApiKey().isEmpty() || !config.getTokenApiKey().isEmpty())) {
+                    FileLog.d("CaptchaController: resolving via GGTG solver (AntiSafety/TokenFast)...");
+                    app.ggtg.GgtgRegistration.solveAppCaptchaAsync(config, action, key_id, solvedToken -> {
+                        if (solvedToken != null && !solvedToken.isEmpty()) {
+                            FileLog.d("CaptchaController: solved via GGTG solver: " + solvedToken);
+                            finalRequest.done(solvedToken);
+                        } else {
+                            FileLog.e("CaptchaController: GGTG solve failed");
+                            finalRequest.done("RECAPTCHA_FAILED_GGTG");
+                        }
+                        return kotlin.Unit.INSTANCE;
+                    });
+                    return;
+                }
+            } catch (Throwable t) {
+                FileLog.e(t);
+            }
+            finalRequest.done("RECAPTCHA_FAILED_NO_ACTIVITY");
+        };
+
         final Activity activity = AndroidUtilities.getActivity();
         if (activity == null) {
-            FileLog.e("CaptchaController: no activity found");
-            finalRequest.done("RECAPTCHA_FAILED_NO_ACTIVITY");
+            FileLog.e("CaptchaController: no activity found, trying GGTG solver");
+            tryGgtgFallback.run();
             return;
         }
 
@@ -76,19 +100,19 @@ public class CaptchaController {
                     .addOnSuccessListener(token -> {
                         FileLog.d("CaptchaController: got token for {action="+action+", key_id="+key_id+"}: " + token);
                         if (token == null) {
-                            finalRequest.done("RECAPTCHA_FAILED_TOKEN_NULL");
+                            tryGgtgFallback.run();
                         } else {
                             finalRequest.done(token);
                         }
                     })
                     .addOnFailureListener(e -> {
                         FileLog.e("CaptchaController: executeTask failure", e);
-                        finalRequest.done("RECAPTCHA_FAILED_TASK_EXCEPTION_" + formatException(e));
+                        tryGgtgFallback.run();
                     });
             })
             .addOnFailureListener(e -> {
                 FileLog.e("CaptchaController: getTasksClient failure", e);
-                finalRequest.done("RECAPTCHA_FAILED_GETCLIENT_EXCEPTION_" + formatException(e));
+                tryGgtgFallback.run();
             });
     }
 

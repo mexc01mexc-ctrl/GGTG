@@ -59,6 +59,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "styles/style_chat_helpers.h"
 #include "styles/style_menu_icons.h"
 #include "styles/style_window.h"
+#include "history/ggtg_typing_imitation.h"
 
 #include <QtWidgets/QApplication>
 
@@ -765,6 +766,21 @@ FillMenuResult FillSendMenu(
 				{ Api::DefaultSendWhenOnlineOptions() },
 				details); },
 			&icons.menuWhenOnline);
+	}
+	if (sending && type != Type::Reminder && type != Type::SilentOnly) {
+		const auto isRu = Lang::GetInstance().id().startsWith(u"ru"_q);
+		const auto isTyping = Ggtg::TypingImitation::Instance().isTyping(details.barePeerId);
+		if (isTyping) {
+			menu->addAction(
+				isRu ? u"Отменить печать"_q : u"Cancel typing"_q,
+				[=] { action({ .type = ActionType::CancelTypingImitation }, details); },
+				&st::menuIconEdit);
+		} else {
+			menu->addAction(
+				isRu ? u"Печатать"_q : u"Type & Send"_q,
+				[=] { action({ Api::SendOptions{ .imitateTyping = true } }, details); },
+				&st::menuIconEdit);
+		}
 	}
 
 	if ((type != Type::Disabled)

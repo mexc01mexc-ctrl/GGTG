@@ -6,6 +6,7 @@ For license and copyright information please follow this link:
 https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
 #include "history/history_widget.h"
+#include "history/ggtg_sms_templates_panel.h"
 #include "data/scraped_members_db.h"
 
 #include "api/api_compose_with_ai.h"
@@ -107,6 +108,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "data/stickers/data_stickers.h"
 #include "data/stickers/data_custom_emoji.h"
 #include "history/history.h"
+#include "history/ggtg_typing_imitation.h"
 #include "history/history_item.h"
 #include "history/history_item_helpers.h" // GetErrorForSending.
 #include "history/history_drag_area.h"
@@ -694,7 +696,14 @@ HistoryWidget::HistoryWidget(
 	_botKeyboardShow->addClickHandler([=] { toggleKeyboard(); });
 	_botKeyboardHide->addClickHandler([=] { toggleKeyboard(); });
 	_botCommandStart->addClickHandler([=] { startBotCommand(); });
-	_smsTemplates->addClickHandler([=] { showSmsTemplatesMenu(); });
+	_smsTemplates->installEventFilter(this);
+	_smsHoverTimer.setCallback([=] {
+		showSmsTemplates();
+	});
+	_smsTemplates->addClickHandler([=] {
+		_smsHoverTimer.cancel();
+		toggleSmsTemplates();
+	});
 	// The robot shows what the engine is doing, so nobody has to open the
 	// "ИИ" section to know.
 	_aiStateTimer.setCallback([=] { updateAiAssistState(); });
@@ -4398,6 +4407,9 @@ void HistoryWidget::updateControlsVisibility() {
 		if (_tabbedPanel) {
 			_tabbedPanel->hide();
 		}
+		if (_smsTemplatesPanel) {
+			_smsTemplatesPanel->hidePanel();
+		}
 		if (_voiceRecordBar) {
 			_voiceRecordBar->hideFast();
 		}
@@ -4596,6 +4608,9 @@ void HistoryWidget::updateControlsVisibility() {
 		_botCommandStart->hide();
 		if (_tabbedPanel) {
 			_tabbedPanel->hide();
+		}
+		if (_smsTemplatesPanel) {
+			_smsTemplatesPanel->hidePanel();
 		}
 		if (_voiceRecordBar) {
 			_voiceRecordBar->hideFast();
@@ -5552,7 +5567,9 @@ void HistoryWidget::setupSendMenu(
 		controller()->uiShow(),
 		[=] { return sendButtonMenuDetails(); },
 		[=](Action value, Details details) {
-			if (value.type == ActionType::CaptionUp
+			if (value.type == ActionType::CancelTypingImitation) {
+				Ggtg::TypingImitation::Instance().cancel(details.barePeerId);
+			} else if (value.type == ActionType::CaptionUp
 				|| value.type == ActionType::CaptionDown
 				|| value.type == ActionType::SpoilerOn
 				|| value.type == ActionType::SpoilerOff
@@ -5752,6 +5769,9 @@ void HistoryWidget::hideChildWidgets() {
 	if (_tabbedPanel) {
 		_tabbedPanel->hideFast();
 	}
+	if (_smsTemplatesPanel) {
+		_smsTemplatesPanel->hidePanel();
+	}
 	if (_sponsoredMessageBar) {
 		_sponsoredMessageBar->toggle(false, anim::type::instant);
 	}
@@ -5790,6 +5810,9 @@ void HistoryWidget::hideSelectorControlsAnimated() {
 	}
 	if (_tabbedPanel) {
 		_tabbedPanel->hideAnimated();
+	}
+	if (_smsTemplatesPanel) {
+		_smsTemplatesPanel->hidePanel();
 	}
 	if (_inlineResults) {
 		_inlineResults->hideAnimated();
@@ -5888,6 +5911,46 @@ void HistoryWidget::send(Api::SendOptions options) {
 		_aiLastDraft.clear();
 	}
 	if (!_history) {
+		return;
+	} else if (options.imitateTyping) {
+		options.imitateTyping = false;
+		if (const auto page = shownRichMessage()) {
+			sendRichDraft(page, options);
+			return;
+		}
+		const auto textWithTags = _field->getTextWithAppliedMarkdown();
+		if (textWithTags.text.isEmpty()) {
+			return;
+		}
+		auto action = Api::SendAction(_history, options);
+		action.replyTo = replyTo();
+		auto message = Api::MessageToSend(std::move(action));
+		message.textWithTags = textWithTags;
+		if (_preview) {
+			message.webPage = _preview->draft();
+		}
+		if (!session().ephemeralMessages().wouldSend(message)
+			&& showSlowmodeError()) {
+			return;
+		}
+		clearFieldText();
+		if (_preview) {
+			_preview->apply({ .removed = true });
+		}
+		saveDraftWithTextNow();
+		Ggtg::TypingImitation::Instance().start(
+			controller()->uiShow(),
+			_history,
+			resolveReplyToTopicRootId(),
+			std::move(message),
+			textWithTags,
+			[weak = base::make_weak(this), targetHistory = _history](const TextWithTags &restored) {
+				if (const auto strong = weak.get()) {
+					if (strong->_history == targetHistory) {
+						strong->setFieldText(restored);
+					}
+				}
+			});
 		return;
 	} else if (_editMsgId) {
 		saveEditMessage({});
@@ -6833,6 +6896,20 @@ void HistoryWidget::insertTextAtCursor(const QString &text) {
 }
 
 bool HistoryWidget::eventFilter(QObject *obj, QEvent *e) {
+	if (obj == _smsTemplates.data()) {
+		if (e->type() == QEvent::Enter) {
+			if (_smsTemplatesPanel && _smsTemplatesPanel->isVisible()) {
+				_smsTemplatesPanel->cancelHideTimer();
+			} else {
+				_smsHoverTimer.callOnce(150);
+			}
+		} else if (e->type() == QEvent::Leave) {
+			_smsHoverTimer.cancel();
+			if (_smsTemplatesPanel && _smsTemplatesPanel->isVisible()) {
+				_smsTemplatesPanel->startHideTimer();
+			}
+		}
+	}
 	if (e->type() == QEvent::KeyPress) {
 		const auto k = static_cast<QKeyEvent*>(e);
 		if ((k->modifiers() & kCommonModifiers) == Qt::ControlModifier) {
@@ -7618,59 +7695,50 @@ void HistoryWidget::updateSmsTemplatesVisibility() {
 	}
 }
 
-void HistoryWidget::showSmsTemplatesMenu() {
+void HistoryWidget::createSmsTemplatesPanel() {
+	if (_smsTemplatesPanel) {
+		return;
+	}
+	_smsTemplatesPanel = base::make_unique_q<HistoryView::SmsTemplatesPanel>(
+		this,
+		_smsTemplates.data(),
+		[=](const QString &text) {
+			if (!_peer) return;
+			_field->setFocus();
+			_field->insertTag(Settings::RenderSmsTemplateForPeer(text, _peer));
+		},
+		[=](const Data::SmsPrompt &prompt, QPoint globalPos) {
+			showSmsTemplateContextMenu(prompt.id, prompt.name, prompt.text, globalPos);
+		},
+		[=] {
+			saveFieldAsSmsTemplate();
+		});
+}
+
+void HistoryWidget::showSmsTemplates() {
 	if (!_peer || !_canSendTexts) {
 		return;
 	}
-	const auto peer = _peer;
-	_smsTemplatesMenu = base::make_unique_q<Ui::PopupMenu>(this);
-	const auto prompts = Data::LoadSmsPrompts();
-	if (prompts.empty()) {
-		_smsTemplatesMenu->addAction(
-			u"Шаблонов пока нет"_q,
-			[] {})->setEnabled(false);
+	createSmsTemplatesPanel();
+	_smsTemplatesPanel->showPanel();
+	updateControlsGeometry();
+}
+
+void HistoryWidget::toggleSmsTemplates() {
+	if (!_peer || !_canSendTexts) {
+		return;
 	}
-	// The menu's items don't tell left from right clicks, so the last
-	// released mouse button is tracked while the menu is open: a right
-	// click opens "Изменить / Удалить" for that template instead of
-	// inserting it.
-	const auto lastButton = std::make_shared<Qt::MouseButton>(
-		Qt::LeftButton);
-	base::install_event_filter(qApp, [=](not_null<QEvent*> e) {
-		if (e->type() == QEvent::MouseButtonRelease) {
-			*lastButton = static_cast<QMouseEvent*>(e.get())->button();
-		}
-		return base::EventFilterResult::Continue;
-	}, _smsTemplatesMenu->lifetime());
-	for (const auto &prompt : prompts) {
-		const auto text = prompt.text;
-		const auto id = prompt.id;
-		const auto name = prompt.name;
-		_smsTemplatesMenu->addAction(prompt.name, [=] {
-			if (*lastButton == Qt::RightButton) {
-				const auto pos = QCursor::pos();
-				Ui::PostponeCall(this, [=] {
-					showSmsTemplateContextMenu(id, name, text, pos);
-				});
-				return;
-			}
-			if (_peer != peer) {
-				return;
-			}
-			// Rendered for this chat, like a campaign would: a template
-			// with [NAME] or {a|b} arrives ready to send.
-			_field->setFocus();
-			_field->insertTag(Settings::RenderSmsTemplateForPeer(text, peer));
-		});
+	createSmsTemplatesPanel();
+	if (_smsTemplatesPanel->isVisible()) {
+		_smsTemplatesPanel->hidePanel();
+	} else {
+		_smsTemplatesPanel->showPanel();
+		updateControlsGeometry();
 	}
-	_smsTemplatesMenu->addSeparator();
-	_smsTemplatesMenu->addAction(
-		u"Сохранить текст поля как шаблон..."_q,
-		[=] { saveFieldAsSmsTemplate(); });
-	_smsTemplatesMenu->setForcedVerticalOrigin(
-		Ui::PopupMenu::VerticalOrigin::Bottom);
-	_smsTemplatesMenu->popup(
-		_smsTemplates->mapToGlobal(QPoint(_smsTemplates->width(), 0)));
+}
+
+void HistoryWidget::showSmsTemplatesMenu() {
+	showSmsTemplates();
 }
 
 // Next to the paperclip, whenever the plain compose row is shown and the
@@ -7935,6 +8003,9 @@ void HistoryWidget::showSmsTemplateContextMenu(
 	_smsTemplatesMenu->addAction(u"Удалить"_q, [=] {
 		Data::DeleteSmsPrompt(id);
 		controller()->showToast(u"Шаблон удалён"_q);
+		if (_smsTemplatesPanel) {
+			_smsTemplatesPanel->rebuild();
+		}
 	});
 	_smsTemplatesMenu->popup(globalPos);
 }
@@ -7979,6 +8050,9 @@ void HistoryWidget::editSmsTemplate(
 			}
 			Data::SaveSmsPrompt(id, newName, newText);
 			box->uiShow()->showToast(u"Шаблон сохранён"_q);
+			if (_smsTemplatesPanel) {
+				_smsTemplatesPanel->rebuild();
+			}
 			box->closeBox();
 		});
 		box->addButton(rpl::single(u"Отмена"_q), [=] { box->closeBox(); });
@@ -8016,6 +8090,9 @@ void HistoryWidget::saveFieldAsSmsTemplate() {
 			}
 			Data::SaveSmsPrompt(Data::GenerateSmsPromptId(), name, text);
 			box->uiShow()->showToast(u"Шаблон сохранён"_q);
+			if (_smsTemplatesPanel) {
+				_smsTemplatesPanel->rebuild();
+			}
 			box->closeBox();
 		});
 		box->addButton(rpl::single(u"Отмена"_q), [=] { box->closeBox(); });
@@ -8074,6 +8151,16 @@ void HistoryWidget::moveFieldControls() {
 	if (!_smsTemplates->isHidden()) {
 		_smsTemplates->moveToRight(right, buttonsBottom);
 		right += _smsTemplates->width();
+	}
+	if (_smsTemplatesPanel) {
+		const auto panelWidth = _smsTemplatesPanel->width();
+		const auto panelHeight = _smsTemplatesPanel->height();
+		const auto x = std::clamp(
+			_smsTemplates->x() + _smsTemplates->width() - panelWidth,
+			style::ConvertScale(10),
+			std::max(style::ConvertScale(10), width() - panelWidth - style::ConvertScale(10)));
+		const auto y = _smsTemplates->y() - panelHeight - style::ConvertScale(4);
+		_smsTemplatesPanel->move(x, y);
 	}
 	_voiceRecordBar->moveToLeft(0, bottom - _voiceRecordBar->height());
 	_tabbedSelectorToggle->moveToRight(right, buttonsBottom);

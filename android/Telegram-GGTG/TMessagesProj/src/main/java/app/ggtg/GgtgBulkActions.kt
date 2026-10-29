@@ -69,6 +69,9 @@ class GgtgBulkActions(private val fragment: BaseFragment, private val onChanged:
         }
         items += Item("Создать резервную сессию", R.drawable.msg_retry) { askBulkBackup(slots) }
         items += Item("Перейти на резервную сессию", R.drawable.msg_forward_replace) { askBulkSwap(slots) }
+        items += Item("Смена номера (миграция)", R.drawable.msg_calls) {
+            fragment.presentFragment(GgtgPhoneMigrationActivity(slots))
+        }
         items += Item("Экспорт аккаунтов…", R.drawable.msg_forward) { fragment.presentFragment(GgtgTdataExportActivity(slots)) }
         items += Item("Удалить из приложения…", R.drawable.msg_delete) { askRemove(slots) }
 

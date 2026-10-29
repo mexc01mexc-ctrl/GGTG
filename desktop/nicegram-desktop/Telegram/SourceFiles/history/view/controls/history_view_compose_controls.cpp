@@ -78,6 +78,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "ui/power_saving.h"
 #include "history/history.h"
 #include "history/history_item.h"
+#include "history/ggtg_typing_imitation.h"
 #include "history/history_streamed_drafts.h"
 #include "history/history_item_components.h"
 #include "history/history_item_helpers.h"
@@ -4143,6 +4144,8 @@ void ComposeControls::setupSendMenu(
 		if (action.type == ActionType::ChangePrice) {
 			_chosenStarsCount = details.price.value_or(0);
 			updateSendButtonType();
+		} else if (action.type == ActionType::CancelTypingImitation) {
+			Ggtg::TypingImitation::Instance().cancel(details.barePeerId);
 		} else if (action.type == ActionType::CaptionUp
 			|| action.type == ActionType::CaptionDown
 			|| action.type == ActionType::SpoilerOn

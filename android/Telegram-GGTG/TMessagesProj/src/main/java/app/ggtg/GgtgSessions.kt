@@ -8,13 +8,17 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.MainScope
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.withContext
+import kotlin.coroutines.resume
 import org.json.JSONArray
 import org.json.JSONObject
 import org.telegram.messenger.ApplicationLoader
 import org.telegram.messenger.FileLog
 import org.telegram.messenger.UserConfig
 import org.telegram.tgnet.ConnectionsManager
+import org.telegram.tgnet.TLRPC
+import org.telegram.tgnet.tl.TL_account
 import java.io.File
 import java.text.SimpleDateFormat
 import java.util.Date
@@ -128,9 +132,34 @@ object GgtgSessions {
         }
     }
 
+    const val TRUST_COOLDOWN = 86400L // 24 hours
+
+    fun isTrusted(session: StoredSession): Boolean {
+        if (session.createdAt <= 0L) return false
+        val now = System.currentTimeMillis() / 1000
+        return (now - session.createdAt) >= TRUST_COOLDOWN
+    }
+
+    fun secondsUntilTrusted(session: StoredSession): Long {
+        if (session.createdAt <= 0L) return TRUST_COOLDOWN
+        val now = System.currentTimeMillis() / 1000
+        val elapsed = now - session.createdAt
+        return if (elapsed >= TRUST_COOLDOWN) 0L else (TRUST_COOLDOWN - elapsed)
+    }
+
+    fun trustCountdownString(session: StoredSession): String {
+        val remaining = secondsUntilTrusted(session)
+        if (remaining <= 0L) return "Выдержана (> 24 ч., готова к защите)"
+        val hours = remaining / 3600
+        val minutes = (remaining % 3600) / 60
+        return "Отлёжка: осталось %d ч. %02d мин.".format(Locale.getDefault(), hours, minutes)
+    }
+
     fun roleTitle(role: String): String {
         return when (role) {
             "backup" -> "Резервная"
+            "anti_theft_backup" -> "Резервная (анти-угон)"
+            "purchased" -> "Купленная"
             "duplicate" -> "Дублированная"
             "imported" -> "Импортированная"
             "exported" -> "Экспортированная"
@@ -190,6 +219,22 @@ object GgtgSessions {
                 val updated = item.copy(hash = newHash)
                 val idx = all.indexOf(item)
                 all[idx] = updated
+                saveIndex(all)
+            }
+        }
+    }
+
+    fun updatePhone(userId: Long, newPhone: String) {
+        synchronized(lock) {
+            val all = listAll().toMutableList()
+            var changed = false
+            for (i in all.indices) {
+                if (all[i].userId == userId) {
+                    all[i] = all[i].copy(phone = newPhone)
+                    changed = true
+                }
+            }
+            if (changed) {
                 saveIndex(all)
             }
         }
@@ -685,6 +730,252 @@ object GgtgSessions {
         updateRole(target.id, "active", "Активирована в приложении")
         GgtgSessionLog.removeUser(userId)
         return Result.success(freeSlot)
+    }
+
+    suspend fun performAntiTheftProtection(activity: FragmentActivity, slot: Int): Result<String> {
+        val uc = UserConfig.getInstance(slot)
+        val userId = uc.clientUserId
+        if (userId == 0L) return Result.failure(Exception("Аккаунт не авторизован"))
+
+        val backups = getSwitchableSessions(userId).filter { it.role in listOf("backup", "anti_theft_backup") }
+        if (backups.isEmpty()) {
+            return suspendCancellableCoroutine { cont ->
+                createBackupSession(activity, slot) { res ->
+                    res.onSuccess {
+                        cont.resume(Result.success("Резервная сессия создана. Запущен таймер 24ч отлёжки (Telegram блокирует сброс чужих сессий)."))
+                    }.onFailure {
+                        cont.resume(Result.failure(it))
+                    }
+                }
+            }
+        }
+
+        val oldest = backups.minByOrNull { it.createdAt } ?: backups.first()
+        if (!isTrusted(oldest)) {
+            val countdown = trustCountdownString(oldest)
+            return Result.failure(Exception("Сессия на отлёжке ($countdown). Сброс сессий продавца заблокирован Telegram."))
+        }
+
+        val purchasedList = listForUser(userId).filter { it.role in listOf("purchased", "imported") }
+        val swapRes = swapToBackup(slot, oldest.id)
+        if (swapRes.isFailure) {
+            return Result.failure(swapRes.exceptionOrNull() ?: Exception("Ошибка переключения"))
+        }
+
+        // Reset authorizations on server
+        val cm = ConnectionsManager.getInstance(slot)
+        val resetReq = org.telegram.tgnet.TLRPC.TL_auth_resetAuthorizations()
+        withContext(Dispatchers.IO) {
+            cm.sendRequest(resetReq) { _, _ -> }
+        }
+
+        // Remove old seller sessions
+        for (p in purchasedList) {
+            removeStored(p.id)
+        }
+
+        return Result.success("Защита от угона завершена: сессия продавца разорвана и удалена, чужие входы завершены.")
+    }
+
+    suspend fun changePhoneNumber(
+        slot: Int,
+        config: GgtgRegistration.Config,
+        onProgress: (String) -> Unit
+    ): Result<String> {
+        val uc = UserConfig.getInstance(slot)
+        val userId = uc.clientUserId
+        if (userId == 0L) return Result.failure(Exception("Аккаунт не авторизован"))
+
+        val sessions = listForUser(userId)
+        val mobileSessions = sessions.filter { s ->
+            s.role == "android" || s.source.contains("android", ignoreCase = true) ||
+            s.device?.optString("deviceModel", "")?.let { m ->
+                m.contains("Samsung", true) || m.contains("Xiaomi", true) || m.contains("Pixel", true)
+            } == true
+        }
+
+        val trustedMobile = mobileSessions.firstOrNull { isTrusted(it) }
+        val youngMobile = mobileSessions.firstOrNull { !isTrusted(it) }
+
+        if (trustedMobile == null && youngMobile != null) {
+            val cd = trustCountdownString(youngMobile)
+            return Result.failure(Exception("Мобильная сессия на отлёжке ($cd). Telegram отклонит смену номера (FRESH_CHANGE_PHONE_FORBIDDEN)."))
+        }
+
+        val maxAttempts = 4
+        for (attempt in 1..maxAttempts) {
+            if (attempt > 1) {
+                onProgress("Заказ нового номера в SMS-сервисе (попытка $attempt из $maxAttempts)...")
+            } else {
+                onProgress("Заказ номера в SMS-сервисе...")
+            }
+
+            val orderResult = GgtgRegistration.orderNumber(config, config.countryId)
+            if (orderResult.isFailure) {
+                val err = orderResult.exceptionOrNull()?.message.orEmpty()
+                if (attempt < maxAttempts && (err.contains("NO_NUMBERS", true) || err.contains("тайм-аут", true))) {
+                    onProgress("SMS-сервис: $err. Повторная попытка через 5 сек...")
+                    delay(5000)
+                    continue
+                }
+                return Result.failure(orderResult.exceptionOrNull() ?: Exception("Ошибка заказа номера"))
+            }
+            val (activationId, rawPhone) = orderResult.getOrThrow()
+            val newPhone = rawPhone.filter { it.isDigit() }
+
+            // 1. Human delay: simulate checking number before requesting SMS
+            val prepDelay = kotlin.random.Random.nextLong(2500, 4000)
+            onProgress("Номер получен: +$newPhone. Подготовка запроса к Telegram (пауза ${prepDelay / 1000}с)...")
+            delay(prepDelay)
+
+            var mobileToken = ""
+            if (config.tokenService != 0 && config.tokenApiKey.isNotBlank()) {
+                onProgress("Запрос Push-токена (${GgtgRegistration.tokenServiceName(config.tokenService)}) для +$newPhone...")
+                val tokRes = GgtgRegistration.fetchMobileToken(config.tokenService, config.tokenApiKey, newPhone, config.antiSafetyAid)
+                if (tokRes.isSuccess && !tokRes.getOrNull().isNullOrEmpty()) {
+                    mobileToken = tokRes.getOrNull().orEmpty()
+                    onProgress("Push-токен Play Integrity получен и привязан")
+                }
+            }
+
+            val cm = ConnectionsManager.getInstance(slot)
+            val sendReq = TL_account.sendChangePhoneCode().apply {
+                phone_number = newPhone
+                settings = TLRPC.TL_codeSettings().apply {
+                    allow_firebase = true
+                    if (mobileToken.isNotEmpty()) {
+                        token = mobileToken
+                        this.flags = this.flags or (1 shl 8)
+                    }
+                }
+            }
+
+            var sendErrorText: String? = null
+            val sentCode = suspendCancellableCoroutine<TLRPC.TL_auth_sentCode?> { cont ->
+                cm.sendRequest(sendReq) { resp, err ->
+                    if (err != null) {
+                        sendErrorText = err.text
+                        cont.resume(null)
+                    } else if (resp is TLRPC.TL_auth_sentCode) {
+                        cont.resume(resp)
+                    } else {
+                        cont.resume(null)
+                    }
+                }
+            }
+
+            if (sentCode == null) {
+                GgtgRegistration.setSmsStatus(config, activationId, 8)
+                val fullErr = sendErrorText.orEmpty().uppercase()
+
+                // Session-level blocks (do NOT retry another phone number)
+                if (fullErr.contains("FRESH_CHANGE_PHONE")) {
+                    val cd = trustedMobile?.let { trustCountdownString(it) }
+                        ?: youngMobile?.let { trustCountdownString(it) }
+                        ?: "отлёжка: 24 часа"
+                    return Result.failure(Exception("Telegram требует, чтобы мобильная сессия отлежалась не менее 24 часов (FRESH_CHANGE_PHONE_FORBIDDEN). $cd."))
+                }
+                if (fullErr.contains("FLOOD_WAIT")) {
+                    return Result.failure(Exception("Telegram ограничил запросы из-за частоты попыток (FLOOD_WAIT). Попробуйте позже."))
+                }
+
+                val isOccupied = fullErr.contains("PHONE_NUMBER_OCCUPIED")
+                val isBanned = fullErr.contains("PHONE_NUMBER_BANNED")
+                val isInvalid = fullErr.contains("PHONE_NUMBER_INVALID")
+
+                if ((isOccupied || isBanned || isInvalid) && attempt < maxAttempts) {
+                    val reason = if (isOccupied) "занят другим аккаунтом" else if (isBanned) "заблокирован в Telegram" else "отклонён Telegram"
+                    val retryPause = kotlin.random.Random.nextLong(5000, 8000)
+                    onProgress("Номер +$newPhone $reason. Отмена и подбор нового (попытка ${attempt + 1} из $maxAttempts, пауза ${retryPause / 1000}с)...")
+                    delay(retryPause)
+                    continue
+                }
+
+                if (attempt >= maxAttempts) {
+                    return Result.failure(Exception("Не удалось подобрать свободный номер после $maxAttempts попыток (выданные номера заняты или заблокированы в Telegram). Попробуйте позже."))
+                }
+
+                val msg = if (!sendErrorText.isNullOrEmpty()) "Ошибка Telegram: $sendErrorText" else "Telegram отклонил запрос на смену номера"
+                return Result.failure(Exception(msg))
+            }
+
+            val phoneCodeHash = sentCode.phone_code_hash
+            onProgress("Код отправлен на +$newPhone. Ожидание SMS...")
+
+            var smsCode: String? = null
+            for (i in 1..35) {
+                delay(3000)
+                onProgress("Ожидание SMS-кода (+${newPhone}, ${i * 3}с)...")
+                val (status, code, _) = GgtgRegistration.pollSmsCode(config, activationId)
+                if (status == "ok" && !code.isNullOrEmpty()) {
+                    smsCode = code
+                    break
+                } else if (status == "cancel") {
+                    break
+                }
+            }
+
+            if (smsCode == null) {
+                GgtgRegistration.setSmsStatus(config, activationId, 8)
+                if (attempt < maxAttempts) {
+                    val retryPause = kotlin.random.Random.nextLong(5000, 8000)
+                    onProgress("SMS не поступило. Отменяем номер и пробуем другой (попытка ${attempt + 1} из $maxAttempts, пауза ${retryPause / 1000}с)...")
+                    delay(retryPause)
+                    continue
+                }
+                return Result.failure(Exception("Время ожидания SMS истекло после $maxAttempts попыток. Номер отменён, средства сохранены. Попробуйте позже."))
+            }
+
+            // 2. Human delay: simulate reading SMS and entering code
+            val enterDelay = kotlin.random.Random.nextLong(2000, 3500)
+            onProgress("SMS код $smsCode получен. Ввод кода (пауза ${enterDelay / 1000}с)...")
+            delay(enterDelay)
+
+            val changeReq = TL_account.changePhone().apply {
+                phone_number = newPhone
+                phone_code_hash = phoneCodeHash
+                phone_code = smsCode
+            }
+
+            var changeErrorText: String? = null
+            val changeUser = suspendCancellableCoroutine<TLRPC.User?> { cont ->
+                cm.sendRequest(changeReq) { resp, err ->
+                    if (err != null) {
+                        changeErrorText = err.text
+                        cont.resume(null)
+                    } else if (resp is TLRPC.User) {
+                        cont.resume(resp)
+                    } else {
+                        cont.resume(null)
+                    }
+                }
+            }
+
+            if (changeUser == null) {
+                GgtgRegistration.setSmsStatus(config, activationId, 8)
+                val fullErr = changeErrorText.orEmpty().uppercase()
+                if ((fullErr.contains("PHONE_CODE_EXPIRED") || fullErr.contains("PHONE_CODE_INVALID")) && attempt < maxAttempts) {
+                    val retryPause = kotlin.random.Random.nextLong(5000, 8000)
+                    onProgress("Неверный или просроченный код. Отмена и повтор (попытка ${attempt + 1} из $maxAttempts)...")
+                    delay(retryPause)
+                    continue
+                }
+                if (attempt >= maxAttempts) {
+                    return Result.failure(Exception("Не удалось завершить смену номера после $maxAttempts попыток. Попробуйте позже."))
+                }
+                val msg = if (!changeErrorText.isNullOrEmpty()) "Telegram отклонил код: $changeErrorText" else "Telegram отклонил смену номера при вводе кода"
+                return Result.failure(Exception(msg))
+            }
+
+            GgtgRegistration.setSmsStatus(config, activationId, 6)
+            uc.currentUser?.phone = newPhone
+            uc.saveConfig(true)
+            updatePhone(userId, newPhone)
+
+            return Result.success("Номер успешно изменён на +$newPhone")
+        }
+
+        return Result.failure(Exception("Не удалось подобрать свободный номер после $maxAttempts попыток. Попробуйте позже."))
     }
 
     private fun ownProxy(slot: Int): GgtgProxyBits? {

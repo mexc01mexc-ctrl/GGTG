@@ -1238,6 +1238,8 @@ PRIVATE
     history/history_view_pull_to_next_channel.h
     history/history_view_swipe_back_session.cpp
     history/history_view_swipe_back_session.h
+    history/ggtg_sms_templates_panel.h
+    history/ggtg_typing_imitation.h
     history/history_widget.cpp
     history/history_widget.h
     info/bot/earn/info_bot_earn_list.cpp

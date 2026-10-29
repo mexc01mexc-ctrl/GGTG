@@ -246,9 +246,9 @@ inline void ApplyImportedMeta(
 		if (existing.empty()) {
 			auto entry = Sessions::StoredSession();
 			entry.userId = userId;
-			entry.role = u"imported"_q;
+			entry.role = u"purchased"_q;
 			entry.source = u"import_tdata"_q;
-			entry.note = u"импортированная сессия (tdata)"_q;
+			entry.note = u"исходная сессия (купленная tdata)"_q;
 			entry.phone = account->session().user()->phone();
 			entry.name = account->session().user()->name();
 			entry.username = account->session().user()->username();

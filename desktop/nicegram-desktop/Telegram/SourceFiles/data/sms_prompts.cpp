@@ -78,6 +78,18 @@ std::vector<SmsPrompt> LoadSmsPrompts() {
 	return result;
 }
 
+void SaveAllSmsPrompts(const std::vector<SmsPrompt> &prompts) {
+	auto array = QJsonArray();
+	for (const auto &prompt : prompts) {
+		array.append(QJsonObject{
+			{ "id", QString::number(prompt.id) },
+			{ "name", prompt.name },
+			{ "text", prompt.text },
+		});
+	}
+	WriteJson(PromptsPath(), QJsonDocument(array));
+}
+
 void SaveSmsPrompt(uint64 id, const QString &name, const QString &text) {
 	auto prompts = LoadSmsPrompts();
 	auto found = false;
@@ -92,16 +104,7 @@ void SaveSmsPrompt(uint64 id, const QString &name, const QString &text) {
 	if (!found) {
 		prompts.push_back({ .id = id, .name = name, .text = text });
 	}
-
-	auto array = QJsonArray();
-	for (const auto &prompt : prompts) {
-		array.append(QJsonObject{
-			{ "id", QString::number(prompt.id) },
-			{ "name", prompt.name },
-			{ "text", prompt.text },
-		});
-	}
-	WriteJson(PromptsPath(), QJsonDocument(array));
+	SaveAllSmsPrompts(prompts);
 }
 
 void DeleteSmsPrompt(uint64 id) {
@@ -116,16 +119,7 @@ void DeleteSmsPrompt(uint64 id) {
 	if (prompts.size() == before) {
 		return;
 	}
-
-	auto array = QJsonArray();
-	for (const auto &prompt : prompts) {
-		array.append(QJsonObject{
-			{ "id", QString::number(prompt.id) },
-			{ "name", prompt.name },
-			{ "text", prompt.text },
-		});
-	}
-	WriteJson(PromptsPath(), QJsonDocument(array));
+	SaveAllSmsPrompts(prompts);
 }
 
 namespace {

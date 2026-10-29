@@ -68,6 +68,10 @@ class GgtgAddAccountsActivity : BaseFragment() {
             "Автоматическая регистрация аккаунтов в N потоков через SMS-сервисы с 2FA и прокси.") {
             presentFragment(GgtgRegistrationActivity())
         })
+        GgtgUi.addCard(column, GgtgUi.actionCard(context, "", "Смена номера (миграция)",
+            "Смена номера на существующих аккаунтах через SMS-сервисы с учётом отлёжки 24 часа.") {
+            presentFragment(GgtgPhoneMigrationActivity())
+        })
         GgtgUi.addCard(column, GgtgUi.actionCard(context, "", "Импорт Сессия + JSON",
             "Файлы .session и .json (Telethon / Pyrogram / софт): zip-архив или папка с 2FA и прокси.") {
             presentFragment(GgtgSessionJsonImportActivity())

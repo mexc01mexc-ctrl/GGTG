@@ -132,6 +132,7 @@ object GgtgRegistration {
         val reset2faOnOccupied: Boolean = false,
         val tokenService: Int = 0, // 0 = None, 1 = TokenFast, 2 = AntiSafety
         val tokenApiKey: String = "",
+        val antiSafetyAid: String = "308aba4e-5680-466b-81a5-477ac6befa95",
         val captchaService: Int = 0, // 0 = Auto, 1 = TokenFast, 2 = AntiSafety, 3 = NextCaptcha
         val captchaApiKey: String = "",
         val autoSetBio: Boolean = false,
@@ -145,9 +146,10 @@ object GgtgRegistration {
     fun loadConfig(): Config {
         val prefs = ApplicationLoader.applicationContext.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
         val singleName = prefs.getBoolean("singleNameForAll", !prefs.getBoolean("autoRandomNames", true))
+        val sid = prefs.getString("serviceId", "hero-sms") ?: "hero-sms"
         return Config(
-            serviceId = prefs.getString("serviceId", "hero-sms") ?: "hero-sms",
-            apiKey = prefs.getString("apiKey", "") ?: "",
+            serviceId = sid,
+            apiKey = apiKeyFor(sid),
             customUrl = prefs.getString("customUrl", "") ?: "",
             countryId = prefs.getInt("countryId", 0),
             countryName = prefs.getString("countryName", "") ?: "",
@@ -182,6 +184,9 @@ object GgtgRegistration {
             reset2faOnOccupied = prefs.getBoolean("reset2faOnOccupied", false),
             tokenService = prefs.getInt("tokenService", 0),
             tokenApiKey = prefs.getString("tokenApiKey", "") ?: "",
+            antiSafetyAid = prefs.getString("antiSafetyAid", "308aba4e-5680-466b-81a5-477ac6befa95") ?: "308aba4e-5680-466b-81a5-477ac6befa95",
+            captchaService = prefs.getInt("captchaService", 0),
+            captchaApiKey = prefs.getString("captchaApiKey", "") ?: "",
             autoSetBio = prefs.getBoolean("autoSetBio", false),
             customBio = prefs.getString("customBio", "") ?: "",
             autoSetUsername = prefs.getBoolean("autoSetUsername", false),
@@ -228,6 +233,9 @@ object GgtgRegistration {
             .putBoolean("reset2faOnOccupied", cfg.reset2faOnOccupied)
             .putInt("tokenService", cfg.tokenService)
             .putString("tokenApiKey", cfg.tokenApiKey)
+            .putString("antiSafetyAid", cfg.antiSafetyAid)
+            .putInt("captchaService", cfg.captchaService)
+            .putString("captchaApiKey", cfg.captchaApiKey)
             .putBoolean("autoSetBio", cfg.autoSetBio)
             .putString("customBio", cfg.customBio)
             .putBoolean("autoSetUsername", cfg.autoSetUsername)
@@ -241,6 +249,11 @@ object GgtgRegistration {
         return prefs.getString("apiKey_$serviceId", null)
             ?: (if (prefs.getString("serviceId", "hero-sms") == serviceId) prefs.getString("apiKey", "") else "")
             ?: ""
+    }
+
+    fun saveApiKeyFor(serviceId: String, key: String) {
+        val prefs = ApplicationLoader.applicationContext.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+        prefs.edit().putString("apiKey_$serviceId", key).apply()
     }
 
     /** Numbers that already failed (registered, banned, invalid): kept between runs so they are never paid for twice. */
@@ -547,6 +560,25 @@ object GgtgRegistration {
     // Email Activation API for Hero-SMS and SMSBower (when Telegram requires setup email)
     // -----------------------------------------------------------------------------
     suspend fun orderEmail(config: Config): Result<Pair<String, String>> = withContext(Dispatchers.IO) {
+        val isAntiSafety = (config.emailService == "antisafety") || (config.emailService == "auto" && config.tokenService == 2)
+        if (isAntiSafety) {
+            val asfKey = config.emailApiKey.ifBlank { config.tokenApiKey.ifBlank { config.apiKey } }.trim()
+            if (asfKey.isEmpty()) return@withContext Result.failure(Exception("Не указан API-ключ AntiSafety"))
+            val aid = config.antiSafetyAid.ifBlank { "308aba4e-5680-466b-81a5-477ac6befa95" }.trim()
+            val url = "https://antisafety.net/api/tasks/email/create?api_key=$asfKey&aid=$aid&type=premium"
+            return@withContext fetchApiGet(url).mapCatching { resp ->
+                val obj = JSONObject(resp)
+                if (obj.optString("status") == "ok") {
+                    val id = obj.optString("id", "")
+                    val email = obj.optString("email", "")
+                    if (id.isNotEmpty() && email.isNotEmpty()) {
+                        return@mapCatching id to email
+                    }
+                }
+                throw Exception(obj.optString("message", resp))
+            }
+        }
+
         val key = config.emailApiKey.ifBlank { config.apiKey }.trim()
         if (key.isEmpty()) return@withContext Result.failure(Exception("Не указан API-ключ для почты"))
 
@@ -600,6 +632,28 @@ object GgtgRegistration {
     }
 
     suspend fun pollEmailCode(config: Config, mailId: String): Triple<String, String?, String?> = withContext(Dispatchers.IO) {
+        val isAntiSafety = (config.emailService == "antisafety") || (config.emailService == "auto" && config.tokenService == 2)
+        if (isAntiSafety) {
+            val asfKey = config.emailApiKey.ifBlank { config.tokenApiKey.ifBlank { config.apiKey } }.trim()
+            val aid = config.antiSafetyAid.ifBlank { "308aba4e-5680-466b-81a5-477ac6befa95" }.trim()
+            val url = "https://antisafety.net/api/tasks/email/get?api_key=$asfKey&aid=$aid&id=$mailId"
+            val res = fetchApiGet(url).getOrNull() ?: return@withContext Triple("wait", null, null)
+            val obj = try { JSONObject(res) } catch (_: Throwable) { return@withContext Triple("wait", null, null) }
+            val status = obj.optString("status", "")
+            if (status == "ok") {
+                val code = obj.optString("result", obj.optString("code", ""))
+                if (code.isNotEmpty()) {
+                    val match = Regex("\\b(\\d{5,6})\\b").find(code)
+                    return@withContext Triple("ok", match?.groupValues?.get(1) ?: code, null)
+                }
+                return@withContext Triple("wait", null, null)
+            }
+            if (status == "error") {
+                return@withContext Triple("error", null, obj.optString("message", res))
+            }
+            return@withContext Triple("wait", null, null)
+        }
+
         val key = config.emailApiKey.ifBlank { config.apiKey }.trim()
         val useSmsBower = (config.emailService == "smsbower") || (config.emailService == "auto" && config.serviceId == "smsbower")
 
@@ -650,7 +704,21 @@ object GgtgRegistration {
         else -> "Нет"
     }
 
-    suspend fun fetchTokenBalance(tokenService: Int, tokenApiKey: String): Result<String> {
+    fun captchaServiceName(id: Int): String = when (id) {
+        1 -> "TokenFast"
+        2 -> "AntiSafety"
+        3 -> "NextCaptcha"
+        else -> "Авто (по сервису токенов)"
+    }
+
+    fun emailServiceName(id: String): String = when (id) {
+        "hero-sms" -> "Hero-SMS"
+        "smsbower" -> "SMSBower"
+        "antisafety" -> "AntiSafety"
+        else -> "Авто"
+    }
+
+    suspend fun fetchTokenBalance(tokenService: Int, tokenApiKey: String, aid: String = "308aba4e-5680-466b-81a5-477ac6befa95"): Result<String> {
         val key = tokenApiKey.trim()
         if (key.isEmpty()) return Result.failure(Exception("Введите API-ключ сервиса токенов"))
         return when (tokenService) {
@@ -669,42 +737,18 @@ object GgtgRegistration {
             }
             2 -> {
                 val apiKey = key.trim()
-                val url = "https://antisafety.net/api/auth/user"
-                val headers = mapOf(
-                    "Authorization" to "Bearer $apiKey",
-                    "X-API-Key" to apiKey,
-                    "Accept" to "application/json"
-                )
-                fetchApiGet(url, headers).map { resp ->
+                val aidStr = aid.ifBlank { "308aba4e-5680-466b-81a5-477ac6befa95" }.trim()
+                val url = "https://antisafety.net/api/tasks/balance?api_key=$apiKey&aid=$aidStr"
+                fetchApiGet(url).map { resp ->
                     try {
                         val obj = JSONObject(resp)
-                        val status = obj.optString("status", "")
-                        if (status == "error" || obj.has("message") || obj.has("detail")) {
-                            val msg = obj.optString("message", "")
-                            if (msg.contains("validate credentials", ignoreCase = true)
-                                || msg.contains("authenticated", ignoreCase = true)
-                                || msg.contains("not found", ignoreCase = true)) {
-                                throw Exception("AntiSafety: неверный Master API key")
-                            }
-                            throw Exception("AntiSafety: ${if (msg.isNotEmpty()) msg else resp}")
-                        }
-                        val userObj = obj.optJSONObject("user")
-                        if (userObj != null && userObj.has("balance_usd")) {
-                            val balUsd = userObj.optDouble("balance_usd", 0.0) / 1000000.0
-                            String.format(java.util.Locale.US, "%.2f USD", balUsd)
-                        } else if (obj.has("balance_usd")) {
-                            val balUsd = obj.optDouble("balance_usd", 0.0) / 1000000.0
-                            String.format(java.util.Locale.US, "%.2f USD", balUsd)
-                        } else if (userObj != null && userObj.has("balance")) {
-                            var balVal = userObj.optDouble("balance", 0.0)
-                            if (balVal >= 10000.0) balVal /= 1000000.0
-                            String.format(java.util.Locale.US, "%.2f USD", balVal)
-                        } else if (obj.has("balance")) {
-                            var balVal = obj.optDouble("balance", 0.0)
-                            if (balVal >= 10000.0) balVal /= 1000000.0
-                            String.format(java.util.Locale.US, "%.2f USD", balVal)
+                        if (obj.optString("status") == "ok" && obj.has("balance")) {
+                            val bal = obj.optDouble("balance", 0.0) / 1000000.0
+                            val cur = obj.optString("currency", "USD")
+                            String.format(java.util.Locale.US, "%.2f %s", bal, cur)
                         } else {
-                            resp
+                            val msg = obj.optString("message", resp)
+                            throw Exception("AntiSafety: $msg")
                         }
                     } catch (e: Exception) {
                         throw e
@@ -717,14 +761,14 @@ object GgtgRegistration {
         }
     }
 
-    suspend fun fetchMobileToken(tokenService: Int, tokenApiKey: String, phone: String): Result<String> {
+    suspend fun fetchMobileToken(tokenService: Int, tokenApiKey: String, phone: String, aid: String = "308aba4e-5680-466b-81a5-477ac6befa95"): Result<String> {
         val key = tokenApiKey.trim()
         if (tokenService == 0 || key.isEmpty()) return Result.success("")
         val formattedPhone = if (phone.startsWith("+")) phone else "+$phone"
 
         return when (tokenService) {
             1 -> fetchTokenFast(key, formattedPhone)
-            2 -> fetchAntiSafety(key, formattedPhone)
+            2 -> fetchAntiSafety(key, aid.ifBlank { "308aba4e-5680-466b-81a5-477ac6befa95" })
             else -> Result.success("")
         }
     }
@@ -783,27 +827,42 @@ object GgtgRegistration {
         }
     }
 
-    private suspend fun fetchAntiSafety(apiKey: String, phone: String): Result<String> {
-        val headers = mapOf(
-            "X-API-Key" to apiKey,
-            "Authorization" to "Bearer $apiKey"
-        )
-        val body = JSONObject().apply {
-            put("service", "telegram")
-            put("phone", phone)
-        }.toString()
-
-        val res = fetchApiPostJson("https://antisafety.net/api/v1/tokens/get", body, headers)
-        if (res.isFailure) return Result.failure(Exception("Ошибка AntiSafety: ${res.exceptionOrNull()?.message}"))
-
+    private suspend fun fetchAntiSafety(apiKey: String, aid: String): Result<String> {
+        val createUrl = "https://antisafety.net/api/tasks/android-push/create?api_key=${apiKey.trim()}&aid=${aid.trim()}"
+        val res = fetchApiGet(createUrl)
+        if (res.isFailure) return Result.failure(Exception("Ошибка AntiSafety create push: ${res.exceptionOrNull()?.message}"))
         val resp = res.getOrThrow()
         val obj = try { JSONObject(resp) } catch (_: Throwable) {
             return Result.failure(Exception("Некорректный ответ AntiSafety: $resp"))
         }
-        val token = obj.optString("token", "")
-            .ifEmpty { obj.optJSONObject("data")?.optString("token", "") ?: "" }
-        return if (token.isNotEmpty()) Result.success(token)
-        else Result.failure(Exception(obj.optString("message", resp)))
+        if (obj.optString("status") == "ok") {
+            val taskId = obj.optString("id", "")
+            if (taskId.isNotEmpty()) {
+                return pollAntiSafetyPushToken(apiKey, aid, taskId, 20)
+            }
+        }
+        return Result.failure(Exception("AntiSafety: ${obj.optString("message", resp)}"))
+    }
+
+    private suspend fun pollAntiSafetyPushToken(apiKey: String, aid: String, taskId: String, attemptsLeft: Int): Result<String> {
+        if (attemptsLeft <= 0) return Result.failure(Exception("Тайм-аут ожидания токена AntiSafety (taskId: $taskId)"))
+        val pollUrl = "https://antisafety.net/api/tasks/android-push/get?api_key=${apiKey.trim()}&aid=${aid.trim()}&id=$taskId"
+        val res = fetchApiGet(pollUrl)
+        if (res.isFailure) return Result.failure(Exception("Ошибка AntiSafety poll: ${res.exceptionOrNull()?.message}"))
+        val resp = res.getOrThrow()
+        val obj = try { JSONObject(resp) } catch (_: Throwable) {
+            return Result.failure(Exception("Некорректный ответ AntiSafety: $resp"))
+        }
+        val status = obj.optString("status", "")
+        if (status == "ok") {
+            val token = obj.optString("token", "")
+            if (token.isNotEmpty()) return Result.success(token)
+        }
+        if (status == "error") {
+            return Result.failure(Exception("AntiSafety: ${obj.optString("message", resp)}"))
+        }
+        delay(1500)
+        return pollAntiSafetyPushToken(apiKey, aid, taskId, attemptsLeft - 1)
     }
 
     // -----------------------------------------------------------------------------
@@ -923,27 +982,45 @@ object GgtgRegistration {
         return pollNextCaptcha(apiKey, taskId, attemptsLeft - 1)
     }
 
-    suspend fun solveAntiSafetyCaptcha(apiKey: String, action: String, keyId: String): Result<String> {
-        val headers = mapOf(
-            "X-API-Key" to apiKey.trim(),
-            "Authorization" to "Bearer ${apiKey.trim()}"
-        )
-        val body = JSONObject().apply {
-            put("service", "telegram")
-            put("action", action)
-            put("key_id", keyId)
-            put("type", "recaptcha")
-        }.toString()
-
-        val res = fetchApiPostJson("https://antisafety.net/api/v1/tokens/get", body, headers)
-        if (res.isFailure) return Result.failure(Exception("Ошибка AntiSafety: ${res.exceptionOrNull()?.message}"))
+    suspend fun solveAntiSafetyCaptcha(apiKey: String, aid: String, action: String, keyId: String): Result<String> {
+        val act = action.trim().ifEmpty { "login" }
+        val aidStr = aid.ifBlank { "308aba4e-5680-466b-81a5-477ac6befa95" }.trim()
+        val createUrl = "https://antisafety.net/api/tasks/recaptcha/create?api_key=${apiKey.trim()}&aid=$aidStr&action=$act&app_key=${keyId.trim()}&score=high"
+        val res = fetchApiGet(createUrl)
+        if (res.isFailure) return Result.failure(Exception("Ошибка AntiSafety recaptcha: ${res.exceptionOrNull()?.message}"))
 
         val resp = res.getOrThrow()
         val obj = try { JSONObject(resp) } catch (_: Throwable) {
-            return Result.failure(Exception("Некорректный ответ AntiSafety: $resp"))
+            return Result.failure(Exception("Некорректный ответ AntiSafety recaptcha: $resp"))
         }
-        val token = obj.optString("token", obj.optJSONObject("data")?.optString("token", "").orEmpty())
-        return if (token.isNotEmpty()) Result.success(token) else Result.failure(Exception("AntiSafety: ${obj.optString("message", resp)}"))
+        if (obj.optString("status") == "ok") {
+            val taskId = obj.optString("id", "")
+            if (taskId.isNotEmpty()) {
+                return pollAntiSafetyCaptcha(apiKey, aidStr, taskId, 25)
+            }
+        }
+        return Result.failure(Exception("AntiSafety: ${obj.optString("message", resp)}"))
+    }
+
+    private suspend fun pollAntiSafetyCaptcha(apiKey: String, aid: String, taskId: String, attemptsLeft: Int): Result<String> {
+        if (attemptsLeft <= 0) return Result.failure(Exception("Тайм-аут ожидания reCAPTCHA AntiSafety (taskId: $taskId)"))
+        val pollUrl = "https://antisafety.net/api/tasks/recaptcha/get?api_key=${apiKey.trim()}&aid=${aid.trim()}&id=$taskId"
+        val res = fetchApiGet(pollUrl)
+        if (res.isFailure) return Result.failure(Exception("Ошибка AntiSafety recaptcha poll: ${res.exceptionOrNull()?.message}"))
+        val resp = res.getOrThrow()
+        val obj = try { JSONObject(resp) } catch (_: Throwable) {
+            return Result.failure(Exception("Некорректный ответ AntiSafety recaptcha: $resp"))
+        }
+        val status = obj.optString("status", "")
+        if (status == "ok") {
+            val token = obj.optString("token", "")
+            if (token.isNotEmpty()) return Result.success(token)
+        }
+        if (status == "error") {
+            return Result.failure(Exception("AntiSafety recaptcha: ${obj.optString("message", resp)}"))
+        }
+        delay(2000)
+        return pollAntiSafetyCaptcha(apiKey, aid, taskId, attemptsLeft - 1)
     }
 
     suspend fun solveAppCaptcha(config: Config, action: String, keyId: String): Result<String> {
@@ -973,8 +1050,16 @@ object GgtgRegistration {
 
         return when (service) {
             3 -> solveNextCaptcha(key, action, keyId)
-            2 -> solveAntiSafetyCaptcha(key, action, keyId)
+            2 -> solveAntiSafetyCaptcha(key, config.antiSafetyAid, action, keyId)
             else -> solveTokenFastCaptcha(key, action, keyId)
+        }
+    }
+
+    @JvmStatic
+    fun solveAppCaptchaAsync(config: Config, action: String, keyId: String, callback: (String?) -> Unit) {
+        kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.Dispatchers.IO).launch {
+            val res = solveAppCaptcha(config, action, keyId)
+            callback(res.getOrNull())
         }
     }
 
@@ -1639,7 +1724,7 @@ object GgtgRegistration {
                         log("[Поток $threadId] Взят токен Play Integrity из резерва (в резерве: ${tokenReserve.size})")
                     } else {
                         log("[Поток $threadId] Запрос токена в ${tokenServiceName(config.tokenService)}...")
-                        val tokenRes = fetchMobileToken(config.tokenService, config.tokenApiKey, digits)
+                        val tokenRes = fetchMobileToken(config.tokenService, config.tokenApiKey, digits, config.antiSafetyAid)
                         if (tokenRes.isFailure) {
                             log("[Поток $threadId] Предупреждение сервиса токенов: ${tokenRes.exceptionOrNull()?.message}")
                         } else {
@@ -1693,7 +1778,7 @@ object GgtgRegistration {
                         floodRetries++
                         log("[Поток $threadId] Флуд на токене: заменяю токен новым (попытка $floodRetries из 2)...")
                         delay(2000)
-                        val tokenRes = fetchMobileToken(config.tokenService, config.tokenApiKey, digits)
+                        val tokenRes = fetchMobileToken(config.tokenService, config.tokenApiKey, digits, config.antiSafetyAid)
                         mobileToken = tokenRes.getOrDefault("")
                         continue
                     }

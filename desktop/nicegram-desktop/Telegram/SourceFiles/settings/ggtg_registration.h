@@ -4546,107 +4546,306 @@ inline void PerformAccountPhoneChange(
 		}
 	}
 
-	progressCb(u"Заказ номера в SMS-сервисе..."_q, true);
-	OrderNumber(settings, settings.countryId, [=, runner = runner](QString activationId, QString rawPhone, QString reqErr) {
-		if (!reqErr.isEmpty()) {
-			done(false, u"Ошибка заказа номера: "_q + reqErr);
+	constexpr auto kMaxPhoneMigrationAttempts = 4;
+	const auto attempt = std::make_shared<int>(0);
+	const auto tryNextNumber = std::make_shared<Fn<void()>>();
+
+	*tryNextNumber = [=, runner = runner] {
+		if (!Main::AccountIsLive(account)) {
+			done(false, u"нет активной сессии"_q);
 			return;
 		}
-		const auto phone = CleanPhoneForTelegram(rawPhone);
-		progressCb(u"Номер получен: +"_q + phone + u". Запрос смены номера в Telegram..."_q, true);
-
-		if (runner->instance) {
-			runner->instance->setUserPhone(phone);
+		++*attempt;
+		if (*attempt > 1) {
+			progressCb(u"Заказ нового номера в SMS-сервисе (попытка %1 из %2)..."_q
+				.arg(*attempt)
+				.arg(kMaxPhoneMigrationAttempts), true);
+		} else {
+			progressCb(u"Заказ номера в SMS-сервисе..."_q, true);
 		}
 
-		runner->sender->request(MTPaccount_SendChangePhoneCode(
-			MTP_string(phone),
-			MTP_codeSettings(
-				MTP_flags(0),
-				MTPVector<MTPbytes>(),
-				MTPstring(),
-				MTP_boolFalse())
-		)).done([=, runner = runner](const MTPauth_SentCode &sentCode) {
-			if (sentCode.type() == mtpc_auth_sentCode) {
-				const auto &data = sentCode.c_auth_sentCode();
-				const auto phoneCodeHash = qs(data.vphone_code_hash());
-				progressCb(u"Код отправлен. Ожидание SMS-кода..."_q, true);
+		OrderNumber(settings, settings.countryId, [=, runner = runner](QString activationId, QString rawPhone, QString reqErr) {
+			if (!reqErr.isEmpty()) {
+				if (*attempt < kMaxPhoneMigrationAttempts && (reqErr.contains(u"NO_NUMBERS"_q) || reqErr.contains(u"тайм-аут"_q))) {
+					progressCb(u"SMS-сервис: %1. Повторная попытка через 5 сек..."_q.arg(reqErr), true);
+					base::call_delayed(crl::time(5000), &Core::App(), [=] {
+						(*tryNextNumber)();
+					});
+					return;
+				}
+				done(false, u"Ошибка заказа номера: "_q + reqErr);
+				return;
+			}
+			const auto phone = CleanPhoneForTelegram(rawPhone);
 
-				const auto pollAttempts = std::make_shared<int>(0);
-				const auto pollTimer = std::make_shared<QTimer>();
-				QObject::connect(pollTimer.get(), &QTimer::timeout, [=, runner = runner] {
-					++*pollAttempts;
-					if (*pollAttempts > 36) {
-						pollTimer->stop();
+			// 1. Human delay: simulate checking the number before sending SMS request to Telegram
+			const auto prepDelay = crl::time(2500 + QRandomGenerator::global()->bounded(1500)); // 2.5 - 4.0 sec
+			progressCb(u"Номер получен: +%1. Подготовка запроса к Telegram (пауза %2с)..."_q
+				.arg(phone)
+				.arg(double(prepDelay) / 1000.0, 0, 'f', 1), true);
+
+			base::call_delayed(prepDelay, &Core::App(), [=, runner = runner] {
+				if (!Main::AccountIsLive(account)) {
+					SetSmsStatus(settings, activationId, 8);
+					done(false, u"нет активной сессии"_q);
+					return;
+				}
+
+				if (runner->instance) {
+					runner->instance->setUserPhone(phone);
+				}
+
+				const auto pushTokenHolder = std::make_shared<QString>();
+				const auto captchaTokenHolder = std::make_shared<QString>();
+				const auto captchaRetries = std::make_shared<int>(0);
+
+				const auto sendChangePhoneCodeReq = std::make_shared<Fn<void()>>();
+				*sendChangePhoneCodeReq = [=, runner = runner] {
+					if (!Main::AccountIsLive(account)) {
 						SetSmsStatus(settings, activationId, 8);
-						done(false, u"Время ожидания SMS истекло (тайм-аут). Номер отменён, баланс сохранён."_q);
+						done(false, u"нет активной сессии"_q);
 						return;
 					}
-					progressCb(u"Ожидание SMS-кода (%1с)..."_q.arg((*pollAttempts) * 3), true);
 
-					PollSmsCode(settings, activationId, [=, runner = runner](QString status, QString smsCode, QString) {
-						if (status == u"ok"_q && !smsCode.isEmpty()) {
-							pollTimer->stop();
-							progressCb(u"SMS код получен: "_q + smsCode + u". Применение в Telegram..."_q, true);
+					MTPDcodeSettings::Flags flags;
+					flags |= MTPDcodeSettings::Flag::f_allow_firebase;
+					if (!pushTokenHolder->isEmpty()) {
+						flags |= MTPDcodeSettings::Flag::f_token;
+					}
 
-							runner->sender->request(MTPaccount_ChangePhone(
-								MTP_string(phone),
-								MTP_string(phoneCodeHash),
-								MTP_string(smsCode)
-							)).done([=, runner = runner](const MTPUser &) {
-								SetSmsStatus(settings, activationId, 6);
-								if (account->sessionExists() && account->session().user()) {
-									account->session().user()->setPhone(phone);
+					auto sendQuery = MTPaccount_SendChangePhoneCode(
+						MTP_string(phone),
+						MTP_codeSettings(
+							MTP_flags(flags),
+							MTPVector<MTPbytes>(),
+							MTP_string(*pushTokenHolder),
+							MTP_boolFalse())
+					);
+
+					const auto handleDone = [=, runner = runner](const MTPauth_SentCode &sentCode) {
+						if (sentCode.type() == mtpc_auth_sentCode) {
+							const auto &data = sentCode.c_auth_sentCode();
+							const auto phoneCodeHash = qs(data.vphone_code_hash());
+							progressCb(u"Код отправлен на +%1. Ожидание SMS-кода..."_q.arg(phone), true);
+
+							const auto pollAttempts = std::make_shared<int>(0);
+							const auto pollTimer = std::make_shared<QTimer>();
+							QObject::connect(pollTimer.get(), &QTimer::timeout, [=, runner = runner] {
+								++*pollAttempts;
+								if (*pollAttempts > 36) {
+									pollTimer->stop();
+									SetSmsStatus(settings, activationId, 8);
+									if (*attempt < kMaxPhoneMigrationAttempts) {
+										const auto retryPause = crl::time(5000 + QRandomGenerator::global()->bounded(3000));
+										progressCb(u"SMS не поступило. Отменяем номер и пробуем другой (попытка %1 из %2, пауза %3с)..."_q
+											.arg(*attempt + 1)
+											.arg(kMaxPhoneMigrationAttempts)
+											.arg(double(retryPause) / 1000.0, 0, 'f', 1), true);
+										base::call_delayed(retryPause, &Core::App(), [=] {
+											(*tryNextNumber)();
+										});
+									} else {
+										done(false, u"Время ожидания SMS истекло после %1 попыток. Номер отменён, баланс сохранён. Попробуйте позже."_q.arg(kMaxPhoneMigrationAttempts));
+									}
+									return;
 								}
-								Sessions::UpdateStoredPhone(userId, phone);
-								done(true, u"Номер успешно изменён на +"_q + phone);
-							}).fail([=, runner = runner](const MTP::Error &changeErr) {
-								SetSmsStatus(settings, activationId, 8);
-								const auto cType = changeErr.type();
-								const auto cDesc = changeErr.description();
-								const auto cFull = (cType + u" "_q + cDesc).toUpper();
-								if (cFull.contains(u"PHONE_CODE_EXPIRED"_q)) {
-									done(false, u"Срок действия SMS-кода истёк"_q);
-								} else if (cFull.contains(u"PHONE_CODE_INVALID"_q)) {
-									done(false, u"Неверный SMS-код"_q);
-								} else {
-									const auto msg = (cType == u"CLIENT_BAD_RPC_ERROR"_q && !cDesc.isEmpty()) ? cDesc : cType;
-									done(false, u"Telegram отклонил код: "_q + msg);
-								}
-							}).send();
-						} else if (status == u"cancel"_q) {
-							pollTimer->stop();
-							done(false, u"Заказ отменён в SMS-сервисе"_q);
+								progressCb(u"Ожидание SMS-кода (+%1, %2с)..."_q.arg(phone).arg((*pollAttempts) * 3), true);
+
+								PollSmsCode(settings, activationId, [=, runner = runner](QString status, QString smsCode, QString) {
+									if (status == u"ok"_q && !smsCode.isEmpty()) {
+										pollTimer->stop();
+
+										// 2. Human delay: simulate user reading SMS code and entering it
+										const auto enterDelay = crl::time(2000 + QRandomGenerator::global()->bounded(1500)); // 2.0 - 3.5 sec
+										progressCb(u"SMS код получен: %1. Ввод кода (пауза %2с)..."_q
+											.arg(smsCode)
+											.arg(double(enterDelay) / 1000.0, 0, 'f', 1), true);
+
+										base::call_delayed(enterDelay, &Core::App(), [=, runner = runner] {
+											runner->sender->request(MTPaccount_ChangePhone(
+												MTP_string(phone),
+												MTP_string(phoneCodeHash),
+												MTP_string(smsCode)
+											)).done([=, runner = runner](const MTPUser &) {
+												SetSmsStatus(settings, activationId, 6);
+												if (account->sessionExists() && account->session().user()) {
+													account->session().user()->setPhone(phone);
+												}
+												Sessions::UpdateStoredPhone(userId, phone);
+												done(true, u"Номер успешно изменён на +"_q + phone);
+											}).fail([=, runner = runner](const MTP::Error &changeErr) {
+												SetSmsStatus(settings, activationId, 8);
+												const auto cType = changeErr.type();
+												const auto cDesc = changeErr.description();
+												const auto cFull = (cType + u" "_q + cDesc).toUpper();
+												if ((cFull.contains(u"PHONE_CODE_EXPIRED"_q) || cFull.contains(u"PHONE_CODE_INVALID"_q)) && (*attempt < kMaxPhoneMigrationAttempts)) {
+													const auto retryPause = crl::time(5000 + QRandomGenerator::global()->bounded(3000));
+													progressCb(u"Неверный или просроченный код. Отмена и повтор (попытка %1 из %2)..."_q
+														.arg(*attempt + 1)
+														.arg(kMaxPhoneMigrationAttempts), true);
+													base::call_delayed(retryPause, &Core::App(), [=] {
+														(*tryNextNumber)();
+													});
+													return;
+												}
+												if (*attempt >= kMaxPhoneMigrationAttempts) {
+													done(false, u"Не удалось завершить смену номера после %1 попыток. Попробуйте позже."_q.arg(kMaxPhoneMigrationAttempts));
+												} else {
+													const auto msg = (cType == u"CLIENT_BAD_RPC_ERROR"_q && !cDesc.isEmpty()) ? cDesc : cType;
+													done(false, u"Telegram отклонил код: "_q + msg);
+												}
+											}).send();
+										});
+									} else if (status == u"cancel"_q) {
+										pollTimer->stop();
+										if (*attempt < kMaxPhoneMigrationAttempts) {
+											progressCb(u"Заказ отменён сервисом. Пробуем другой номер..."_q, true);
+											base::call_delayed(crl::time(5000), &Core::App(), [=] {
+												(*tryNextNumber)();
+											});
+										} else {
+											done(false, u"Заказ отменён в SMS-сервисе. Попробуйте позже."_q);
+										}
+									}
+								});
+							});
+							pollTimer->start(3000);
+						} else {
+							SetSmsStatus(settings, activationId, 8);
+							if (*attempt < kMaxPhoneMigrationAttempts) {
+								base::call_delayed(crl::time(4000), &Core::App(), [=] {
+									(*tryNextNumber)();
+								});
+							} else {
+								done(false, u"Неожиданный ответ Telegram при отправке кода. Попробуйте позже."_q);
+							}
 						}
-					});
-				});
-				pollTimer->start(3000);
-			} else {
-				SetSmsStatus(settings, activationId, 8);
-				done(false, u"Неожиданный ответ Telegram при отправке кода"_q);
-			}
-		}).fail([=, runner = runner](const MTP::Error &sendErr) {
-			SetSmsStatus(settings, activationId, 8);
-			const auto errType = sendErr.type();
-			const auto errDesc = sendErr.description();
-			const auto fullErr = (errType + u" "_q + errDesc).toUpper();
-			if (fullErr.contains(u"FRESH_CHANGE_PHONE"_q)) {
-				const auto cd = (chosenMobile) ? Sessions::TrustCountdownString(*chosenMobile) : u"отлёжка: 24 часа"_q;
-				done(false, u"Telegram требует, чтобы мобильная сессия отлежалась не менее 24 часов (FRESH_CHANGE_PHONE_FORBIDDEN). %1."_q.arg(cd));
-			} else if (fullErr.contains(u"PHONE_NUMBER_OCCUPIED"_q)) {
-				done(false, u"Этот номер уже занят другим аккаунтом в Telegram"_q);
-			} else if (fullErr.contains(u"PHONE_NUMBER_BANNED"_q)) {
-				done(false, u"Этот номер заблокирован в Telegram"_q);
-			} else if (fullErr.contains(u"PHONE_NUMBER_INVALID"_q)) {
-				done(false, u"Неверный формат номера телефона (+"_q + phone + u")"_q);
-			} else if (fullErr.contains(u"FLOOD_WAIT"_q)) {
-				done(false, u"Telegram ограничил запросы из-за частоты попыток (FLOOD_WAIT). Попробуйте позже."_q);
-			} else {
-				const auto msg = (errType == u"CLIENT_BAD_RPC_ERROR"_q && !errDesc.isEmpty()) ? errDesc : errType;
-				done(false, u"Ошибка Telegram: "_q + msg);
-			}
-		}).send();
-	});
+					};
+
+					const auto handleFail = [=, runner = runner](const MTP::Error &sendErr) {
+						const auto errType = sendErr.type();
+						const auto errDesc = sendErr.description();
+						const auto fullErr = (errType + u" "_q + errDesc).toUpper();
+
+						// Check for Telegram reCAPTCHA challenge
+						static const auto RecaptchaRegExp = QRegularExpression(
+							u"RECAPTCHA_CHECK_([a-zA-Z0-9]+)__([a-zA-Z0-9_\\-]+)"_q,
+							QRegularExpression::CaseInsensitiveOption);
+						const auto captchaMatch = RecaptchaRegExp.match(fullErr);
+						if (captchaMatch.hasMatch() && (*captchaRetries < 2)) {
+							++*captchaRetries;
+							const auto action = captchaMatch.captured(1);
+							const auto keyId = captchaMatch.captured(2);
+							const auto sName = CaptchaProviderName(settings.captchaService);
+							progressCb(u"Telegram запросил reCAPTCHA Enterprise (%1). Решение через %2..."_q
+								.arg(action)
+								.arg(sName), true);
+							SolveAppCaptcha(settings, action, keyId, [=, runner = runner](QString capToken, QString solveErr) {
+								if (!solveErr.isEmpty() || capToken.isEmpty()) {
+									progressCb(u"Не удалось решить капчу: %1. Отмена и пробуем другой номер..."_q
+										.arg(solveErr.isEmpty() ? u"пустой токен"_q : solveErr), true);
+									SetSmsStatus(settings, activationId, 8);
+									if (*attempt < kMaxPhoneMigrationAttempts) {
+										const auto retryPause = crl::time(5000 + QRandomGenerator::global()->bounded(3000));
+										base::call_delayed(retryPause, &Core::App(), [=] {
+											(*tryNextNumber)();
+										});
+									} else {
+										done(false, u"Не удалось решить капчу Telegram: "_q + (solveErr.isEmpty() ? u"пустой токен"_q : solveErr));
+									}
+									return;
+								}
+								progressCb(u"Капча успешно решена! Повторный запрос кода в Telegram..."_q, true);
+								*captchaTokenHolder = capToken;
+								(*sendChangePhoneCodeReq)();
+							});
+							return;
+						}
+
+						SetSmsStatus(settings, activationId, 8);
+
+						// Session-level blocks (do NOT retry another phone number)
+						if (fullErr.contains(u"FRESH_CHANGE_PHONE"_q)) {
+							const auto cd = (chosenMobile) ? Sessions::TrustCountdownString(*chosenMobile) : u"отлёжка: 24 часа"_q;
+							done(false, u"Telegram требует, чтобы мобильная сессия отлежалась не менее 24 часов (FRESH_CHANGE_PHONE_FORBIDDEN). %1."_q.arg(cd));
+							return;
+						}
+						if (fullErr.contains(u"FLOOD_WAIT"_q)) {
+							done(false, u"Telegram ограничил запросы из-за частоты попыток (FLOOD_WAIT). Попробуйте позже."_q);
+							return;
+						}
+
+						// Retryable errors on phone number
+						const auto isOccupied = fullErr.contains(u"PHONE_NUMBER_OCCUPIED"_q);
+						const auto isBanned = fullErr.contains(u"PHONE_NUMBER_BANNED"_q);
+						const auto isInvalid = fullErr.contains(u"PHONE_NUMBER_INVALID"_q);
+
+						if ((isOccupied || isBanned || isInvalid) && (*attempt < kMaxPhoneMigrationAttempts)) {
+							const auto reason = isOccupied
+								? u"занят другим аккаунтом"_q
+								: isBanned
+								? u"заблокирован в Telegram"_q
+								: u"отклонён Telegram"_q;
+
+							// 3. Human delay: pause 5 - 8 seconds before ordering the next replacement number
+							const auto retryPause = crl::time(5000 + QRandomGenerator::global()->bounded(3000)); // 5.0 - 8.0 sec
+							progressCb(u"Номер +%1 %2. Отмена и подбор нового (попытка %3 из %4, пауза %5с)..."_q
+								.arg(phone)
+								.arg(reason)
+								.arg(*attempt + 1)
+								.arg(kMaxPhoneMigrationAttempts)
+								.arg(double(retryPause) / 1000.0, 0, 'f', 1), true);
+
+							base::call_delayed(retryPause, &Core::App(), [=] {
+								(*tryNextNumber)();
+							});
+							return;
+						}
+
+						if (*attempt >= kMaxPhoneMigrationAttempts) {
+							done(false, u"Не удалось подобрать свободный номер после %1 попыток (выданные номера заняты или заблокированы в Telegram). Попробуйте позже."_q.arg(kMaxPhoneMigrationAttempts));
+						} else {
+							const auto msg = (errType == u"CLIENT_BAD_RPC_ERROR"_q && !errDesc.isEmpty()) ? errDesc : errType;
+							done(false, u"Ошибка Telegram: "_q + msg);
+						}
+					};
+
+					if (!captchaTokenHolder->isEmpty()) {
+						runner->sender->request(
+							MTPInvokeWithReCaptcha<MTPaccount_SendChangePhoneCode>(
+								MTP_string(*captchaTokenHolder),
+								std::move(sendQuery))
+						).done(handleDone).fail(handleFail).send();
+					} else {
+						runner->sender->request(std::move(sendQuery)).done(handleDone).fail(handleFail).send();
+					}
+				};
+
+				// Pre-fetch Play Integrity push token from TokenFast / AntiSafety if enabled
+				if (settings.tokenService != 0 && !settings.tokenApiKey.trimmed().isEmpty()) {
+					progressCb(u"Запрос Push-токена ("_q + TokenProviderName(settings.tokenService) + u") для +"_q + phone + u"..."_q, true);
+					FetchMobileToken(
+						MobileTokenProvider(settings.tokenService),
+						settings.tokenApiKey,
+						phone,
+						[=, runner = runner](QString pushToken, QString tokenErr) {
+							if (!tokenErr.isEmpty()) {
+								progressCb(u"Сервис токенов: %1 (продолжаем без токена)"_q.arg(tokenErr), true);
+							} else if (!pushToken.isEmpty()) {
+								*pushTokenHolder = pushToken;
+								progressCb(u"Push-токен получен и привязан"_q, true);
+							}
+							(*sendChangePhoneCodeReq)();
+						},
+						settings.antiSafetyAid);
+				} else {
+					(*sendChangePhoneCodeReq)();
+				}
+			});
+		});
+	};
+
+	(*tryNextNumber)();
 }
 
 inline void FillPhoneMigrationContent(
@@ -4914,15 +5113,185 @@ inline void FillPhoneMigrationContent(
 		});
 	});
 
+	// =====================================================================
+	//  3. Защита и токены (Push, Captcha)
+	// =====================================================================
 	addSectionTo(layout,
-		u"3. Выбор аккаунтов для смены номера"_q,
+		u"3. Защита и токены (Push, Captcha)"_q,
+		u"Обход reCAPTCHA Enterprise и токен Play Integrity для безопасной смены номера"_q,
+		&st::menuIconDevices);
+
+	const auto cardTokens = layout->add(
+		object_ptr<Ggtg::CardBox>(layout, style::margins(16, 14, 16, 14)),
+		st::boxRowPadding);
+	const auto inTokens = cardTokens->inner();
+
+	const auto tokenProviderTitle = [](int s) {
+		if (s == 1) return u"TokenFast (tokenfast.shop/api)"_q;
+		if (s == 2) return u"AntiSafety (antisafety.net)"_q;
+		return u"Без сервиса токенов (только параметры устройства)"_q;
+	};
+
+	const auto tokenServiceBtn = inTokens->add(
+		object_ptr<PickerRow>(
+			inTokens,
+			u"Сервис токенов (Play Integrity)"_q,
+			tokenProviderTitle(state->tokenService)));
+
+	tokenServiceBtn->setClickedCallback([=] {
+		show->show(Box([=](not_null<Ui::GenericBox*> pickBox) {
+			pickBox->setTitle(rpl::single(u"Выберите сервис токенов Play Integrity / SafetyNet"_q));
+			pickBox->setWidth(st::boxWideWidth);
+
+			const auto options = std::vector<std::pair<int, QString>>{
+				{ 2, u"AntiSafety (antisafety.net)"_q },
+				{ 1, u"TokenFast (tokenfast.shop/api)"_q },
+				{ 0, u"Без сервиса токенов (только параметры устройства)"_q },
+			};
+			for (const auto &opt : options) {
+				pickBox->addRow(object_ptr<Ggtg::ActionRow>(
+					pickBox,
+					rpl::single(opt.second),
+					opt.first == 1 ? u"api.tokenfast.shop"_q : (opt.first == 2 ? u"antisafety.net"_q : QString()),
+					&st::menuIconDiscussion)
+				)->setClickedCallback([=] {
+					state->tokenService = opt.first;
+					tokenServiceBtn->setValue(tokenProviderTitle(opt.first));
+					SaveSettings(*state);
+					pickBox->closeBox();
+				});
+				Ui::AddSkip(pickBox->verticalLayout(), st::defaultVerticalListSkip);
+			}
+			pickBox->addButton(tr::lng_close(), [=] { pickBox->closeBox(); });
+		}));
+	});
+
+	const auto tokenApiKeyField = inTokens->add(
+		object_ptr<Ui::InputField>(
+			inTokens,
+			FieldStyle(),
+			rpl::single(u"API-ключ сервиса токенов (TokenFast / AntiSafety)"_q),
+			state->tokenApiKey),
+		style::margins(0, style::ConvertScale(6), 0, style::ConvertScale(6)));
+
+	tokenApiKeyField->changes(
+	) | rpl::on_next([=] {
+		state->tokenApiKey = tokenApiKeyField->getLastText().trimmed();
+		SaveSettings(*state);
+	}, tokenApiKeyField->lifetime());
+
+	const auto antiSafetyAidField = inTokens->add(
+		object_ptr<Ui::InputField>(
+			inTokens,
+			FieldStyle(),
+			rpl::single(u"AntiSafety App ID (AID контекста приложения Telegram)"_q),
+			state->antiSafetyAid.isEmpty() ? u"308aba4e-5680-466b-81a5-477ac6befa95"_q : state->antiSafetyAid),
+		style::margins(0, 0, 0, style::ConvertScale(6)));
+
+	antiSafetyAidField->changes(
+	) | rpl::on_next([=] {
+		state->antiSafetyAid = antiSafetyAidField->getLastText().trimmed();
+		SaveSettings(*state);
+	}, antiSafetyAidField->lifetime());
+
+	const auto checkTokenRow = inTokens->add(object_ptr<Ui::RpWidget>(inTokens));
+	checkTokenRow->resize(checkTokenRow->width(), style::ConvertScale(38));
+
+	const auto checkTokenBtn = Ui::CreateChild<Ui::RoundButton>(
+		checkTokenRow,
+		rpl::single(u"Проверить баланс"_q),
+		st::defaultActiveButton);
+
+	const auto tokenStatusLabel = Ui::CreateChild<Ui::FlatLabel>(
+		checkTokenRow,
+		rpl::single(QString()),
+		st::boxLabel);
+
+	checkTokenRow->widthValue() | rpl::on_next([=](int w) {
+		checkTokenBtn->moveToLeft(0, style::ConvertScale(2));
+		tokenStatusLabel->moveToLeft(checkTokenBtn->width() + style::ConvertScale(14), style::ConvertScale(8));
+	}, checkTokenRow->lifetime());
+
+	const auto weakTokenStatusLabel = QPointer<Ui::FlatLabel>(tokenStatusLabel);
+	checkTokenBtn->setClickedCallback([=] {
+		const auto key = tokenApiKeyField->getLastText().trimmed();
+		state->tokenApiKey = key;
+		SaveSettings(*state);
+		if (weakTokenStatusLabel) weakTokenStatusLabel->setText(u"Проверка..."_q);
+		CheckMobileTokenBalance(
+			MobileTokenProvider(state->tokenService),
+			key,
+			[weakTokenStatusLabel](QString bal, QString err) {
+				if (!weakTokenStatusLabel) return;
+				if (!err.isEmpty()) {
+					weakTokenStatusLabel->setText(u"Ошибка: "_q + err);
+				} else {
+					weakTokenStatusLabel->setText(u"Баланс: "_q + bal);
+				}
+			},
+			state->antiSafetyAid);
+	});
+
+	// --- reCAPTCHA Enterprise ---
+	Ui::AddSkip(inTokens, style::ConvertScale(8));
+	const auto captchaServiceBtn = inTokens->add(
+		object_ptr<PickerRow>(
+			inTokens,
+			u"Сервис капчи (reCAPTCHA Enterprise)"_q,
+			CaptchaProviderName(state->captchaService)));
+
+	captchaServiceBtn->setClickedCallback([=] {
+		show->show(Box([=](not_null<Ui::GenericBox*> pickBox) {
+			pickBox->setTitle(rpl::single(u"Выберите сервис решения капчи (reCAPTCHA Enterprise)"_q));
+			pickBox->setWidth(st::boxWideWidth);
+
+			const auto options = std::vector<std::pair<int, QString>>{
+				{ 0, u"Авто (из сервиса токенов TokenFast / AntiSafety)"_q },
+				{ 2, u"AntiSafety (antisafety.net)"_q },
+				{ 1, u"TokenFast (api.tokenfast.shop)"_q },
+				{ 3, u"NextCaptcha (nextcaptcha.com)"_q },
+			};
+			for (const auto &opt : options) {
+				pickBox->addRow(object_ptr<Ggtg::ActionRow>(
+					pickBox,
+					rpl::single(opt.second),
+					opt.first == 3 ? u"dashboard.nextcaptcha.com"_q : (opt.first == 1 ? u"api.tokenfast.shop"_q : QString()),
+					&st::menuIconManage)
+				)->setClickedCallback([=] {
+					state->captchaService = opt.first;
+					captchaServiceBtn->setValue(CaptchaProviderName(opt.first));
+					SaveSettings(*state);
+					pickBox->closeBox();
+				});
+				Ui::AddSkip(pickBox->verticalLayout(), st::defaultVerticalListSkip);
+			}
+			pickBox->addButton(tr::lng_close(), [=] { pickBox->closeBox(); });
+		}));
+	});
+
+	const auto captchaApiKeyField = inTokens->add(
+		object_ptr<Ui::InputField>(
+			inTokens,
+			FieldStyle(),
+			rpl::single(u"API-ключ капчи (пусто = ключ сервиса токенов)"_q),
+			state->captchaApiKey),
+		style::margins(0, style::ConvertScale(6), 0, style::ConvertScale(6)));
+
+	captchaApiKeyField->changes(
+	) | rpl::on_next([=] {
+		state->captchaApiKey = captchaApiKeyField->getLastText().trimmed();
+		SaveSettings(*state);
+	}, captchaApiKeyField->lifetime());
+
+	addSectionTo(layout,
+		u"4. Выбор аккаунтов для смены номера"_q,
 		u"Выберите аккаунты, на которых нужно изменить номер телефона"_q,
 		&st::menuIconProfile);
 
 	AddAccountPicker(box, pickerState, u"Нет доступных аккаунтов"_q);
 
 	addSectionTo(layout,
-		u"4. Запуск смены номера"_q,
+		u"5. Запуск смены номера"_q,
 		u"Последовательный перенос номеров с отслеживанием прогресса"_q,
 		&st::menuIconManage);
 

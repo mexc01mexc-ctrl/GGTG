@@ -136,6 +136,8 @@ class GgtgAccountInfoActivity(private val slot: Int, private val onChanged: () -
         line(context, account, "Сессии аккаунта", backupText, accent = true) {
             val act = context as? androidx.fragment.app.FragmentActivity ?: return@line
             val items = ArrayList<String>()
+            items.add("Защита от угона (Анти-угон)")
+            items.add("Смена номера (миграция)")
             if (hasBackup) {
                 if (backups.size == 1) {
                     items.add("Перейти на ${GgtgSessions.roleTitle(backups[0].role).lowercase()}")
@@ -208,6 +210,60 @@ class GgtgAccountInfoActivity(private val slot: Int, private val onChanged: () -
                                     Toast.makeText(context, "Ошибка: ${it.message}", Toast.LENGTH_LONG).show()
                                 }
                             }
+                        }
+                        chosen == "Защита от угона (Анти-угон)" -> {
+                            val backupSessions = GgtgSessions.getSwitchableSessions(uc.clientUserId)
+                                .filter { it.role in listOf("backup", "anti_theft_backup") }
+                                .sortedBy { it.createdAt }
+
+                            val bld = androidx.appcompat.app.AlertDialog.Builder(context)
+                                .setTitle("Защита от угона (Анти-угон)")
+
+                            if (backupSessions.isEmpty()) {
+                                bld.setMessage("Для защиты купленного аккаунта требуется создать резервную сессию программы и дать ей отлежаться 24 часа в Telegram (сервер блокирует сброс чужих сессий для новых авторизаций).\n\nНажмите «Создать сессию», чтобы запустить 24ч таймер.")
+                                bld.setPositiveButton("Создать сессию") { _, _ ->
+                                    val progress = app.ggtg.ui.TdataImportProgressDialog(act, "Анти-угон")
+                                    progress.setWorkingText("Создание резервной сессии…")
+                                    GgtgSessions.createBackupSession(act, slot, progress) { res ->
+                                        progress.dismiss()
+                                        res.onSuccess {
+                                            Toast.makeText(context, "Резервная сессия создана. Таймер 24ч отлёжки запущен.", Toast.LENGTH_LONG).show()
+                                            onChanged(); rebuild()
+                                        }.onFailure {
+                                            Toast.makeText(context, "Ошибка: ${it.message}", Toast.LENGTH_LONG).show()
+                                        }
+                                    }
+                                }
+                            } else {
+                                val oldest = backupSessions.first()
+                                val isTrust = GgtgSessions.isTrusted(oldest)
+                                val countdown = GgtgSessions.trustCountdownString(oldest)
+                                val desc = "Статус резервной сессии: $countdown\n\n" +
+                                    if (isTrust) "Сессия выдержана (> 24ч) и готова к защите. Нажмите «Защитить аккаунт», чтобы переключиться на неё, сбросить сессию продавца и удалить её."
+                                    else "Telegram заблокирует сброс сессий до завершения 24 часов (ошибка FRESH_RESET_AUTHORISATION_FORBIDDEN). Дождитесь окончания отлёжки."
+
+                                bld.setMessage(desc)
+                                if (isTrust) {
+                                    bld.setPositiveButton("Защитить аккаунт") { _, _ ->
+                                        val progress = app.ggtg.ui.TdataImportProgressDialog(act, "Анти-угон")
+                                        progress.setWorkingText("Выполнение защиты…")
+                                        kotlinx.coroutines.MainScope().launch {
+                                            val res = GgtgSessions.performAntiTheftProtection(act, slot)
+                                            progress.dismiss()
+                                            res.onSuccess { msg ->
+                                                Toast.makeText(context, msg, Toast.LENGTH_LONG).show()
+                                                onChanged(); rebuild()
+                                            }.onFailure { err ->
+                                                Toast.makeText(context, "Ошибка: ${err.message}", Toast.LENGTH_LONG).show()
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                            bld.setNegativeButton("Закрыть", null).show()
+                        }
+                        chosen == "Смена номера (миграция)" -> {
+                            presentFragment(GgtgPhoneMigrationActivity(listOf(slot)))
                         }
                         chosen.contains("сессии") -> {
                             presentFragment(SessionsActivity(0))

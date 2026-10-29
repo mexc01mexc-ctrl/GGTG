@@ -130,6 +130,7 @@ class PullToNextChannel;
 struct SelectedQuote;
 class SuggestOptionsBar;
 enum class SuggestMode;
+class SmsTemplatesPanel;
 } // namespace HistoryView
 
 namespace HistoryView::Controls {
@@ -574,6 +575,9 @@ private:
 	void updateFieldSize();
 	void updateSmsTemplatesVisibility();
 	void showSmsTemplatesMenu();
+	void showSmsTemplates();
+	void toggleSmsTemplates();
+	void createSmsTemplatesPanel();
 	// The "ИИ" button next to the paperclip: reads the chat and suggests
 	// replies (see settings/ggtg_ai_chat.h); right click - more actions.
 	void updateAiAssistVisibility();
@@ -966,6 +970,8 @@ private:
 	// "Отправка SMS" templates (see showSmsTemplatesMenu).
 	object_ptr<Ui::IconButton> _smsTemplates;
 	base::unique_qptr<Ui::PopupMenu> _smsTemplatesMenu;
+	base::unique_qptr<HistoryView::SmsTemplatesPanel> _smsTemplatesPanel;
+	base::Timer _smsHoverTimer;
 	object_ptr<Ui::IconButton> _aiAssist;
 	base::unique_qptr<Ui::PopupMenu> _aiAssistMenu;
 	bool _aiWriting = false;

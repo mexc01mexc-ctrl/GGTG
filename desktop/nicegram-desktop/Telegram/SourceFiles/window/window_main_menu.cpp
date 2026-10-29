@@ -2780,6 +2780,18 @@ void FillGgtgShell(
 		},
 	});
 	sections.push_back({
+		.key = u"phone_migration"_q,
+		.group = u"Аккаунты"_q,
+		.icon = &st::menuIconPhone,
+		.label = rpl::single(u"Смена номера"_q),
+		.title = u"Смена номера (миграция)"_q,
+		.subtitle = u"Замена страны и номера на существующих аккаунтах через SMS."_q,
+		.description = u"Перенос существующих аккаунтов на новые номера телефонов через сервисы SMS-активаций (SMS-Activate, 5SIM, Vak-SMS, SMSHub и др.). Сервер Telegram требует мобильную сессию (Android/iOS) старше 24 часов (иначе FRESH_CHANGE_PHONE_FORBIDDEN). Программа проверяет наличие сессии, при необходимости создает её и запускает таймер отлёжки, заказывает номер, принимает SMS и переносит аккаунт."_q,
+		.makeBox = [=](not_null<Ui::SeparatePanel*>) {
+			return Settings::MakePhoneMigrationBox(controller);
+		},
+	});
+	sections.push_back({
 		.key = u"proxies"_q,
 		.group = u"Аккаунты"_q,
 		.icon = &st::menuIconNetwork,

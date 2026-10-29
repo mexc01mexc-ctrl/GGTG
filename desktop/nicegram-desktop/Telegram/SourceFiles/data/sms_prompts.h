@@ -32,6 +32,7 @@ struct SmsPrompt {
 // `id`, new name/text).
 void SaveSmsPrompt(uint64 id, const QString &name, const QString &text);
 void DeleteSmsPrompt(uint64 id);
+void SaveAllSmsPrompts(const std::vector<SmsPrompt> &prompts);
 
 // A fresh id for a new prompt - collisions are astronomically unlikely
 // for a personal list of a few dozen entries, so unlike
