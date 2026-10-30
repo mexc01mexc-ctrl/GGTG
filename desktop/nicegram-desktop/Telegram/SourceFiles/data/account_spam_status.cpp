@@ -55,7 +55,14 @@ void WriteJson(const QString &path, const QJsonDocument &document) {
 	}
 }
 
-[[nodiscard]] QString StateToString(AccountSpamState state) {
+[[nodiscard]] rpl::event_stream<uint64> &Changes() {
+	static auto result = rpl::event_stream<uint64>();
+	return result;
+}
+
+} // namespace
+
+QString StateToString(AccountSpamState state) {
 	switch (state) {
 	case AccountSpamState::Temporary: return u"temporary"_q;
 	case AccountSpamState::Permanent: return u"permanent"_q;
@@ -63,7 +70,7 @@ void WriteJson(const QString &path, const QJsonDocument &document) {
 	}
 }
 
-[[nodiscard]] AccountSpamState StateFromString(const QString &raw) {
+AccountSpamState StateFromString(const QString &raw) {
 	if (raw == u"temporary"_q) {
 		return AccountSpamState::Temporary;
 	} else if (raw == u"permanent"_q) {
@@ -72,12 +79,44 @@ void WriteJson(const QString &path, const QJsonDocument &document) {
 	return AccountSpamState::Clear;
 }
 
-[[nodiscard]] rpl::event_stream<uint64> &Changes() {
-	static auto result = rpl::event_stream<uint64>();
-	return result;
+QJsonObject AllAccountSpamStatusesJson() {
+	return ReadJson(StatusPath()).object();
 }
 
-} // namespace
+int MergeAccountSpamStatusesJson(const QJsonObject &statuses) {
+	auto local = ReadJson(StatusPath()).object();
+	int updated = 0;
+	bool changed = false;
+	for (auto it = statuses.begin(); it != statuses.end(); ++it) {
+		const auto key = it.key();
+		const auto userId = key.toULongLong();
+		if (!userId) {
+			continue;
+		}
+		const auto remoteEntry = it.value().toObject();
+		const auto remoteCheckedAt = remoteEntry["checkedAt"].toString().toLongLong();
+		if (local.contains(key)) {
+			const auto localEntry = local[key].toObject();
+			const auto localCheckedAt = localEntry["checkedAt"].toString().toLongLong();
+			if (remoteCheckedAt <= localCheckedAt) {
+				continue;
+			}
+		}
+		auto updatedEntry = QJsonObject{
+			{ "state", remoteEntry["state"].toString(u"clear"_q) },
+			{ "until", remoteEntry["until"].toString(u"0"_q) },
+			{ "checkedAt", QString::number(remoteCheckedAt ? remoteCheckedAt : qint64(base::unixtime::now())) },
+		};
+		local[key] = updatedEntry;
+		changed = true;
+		++updated;
+		Changes().fire_copy(userId);
+	}
+	if (changed) {
+		WriteJson(StatusPath(), QJsonDocument(local));
+	}
+	return updated;
+}
 
 std::optional<AccountSpamStatus> FindAccountSpamStatus(uint64 userId) {
 	const auto key = QString::number(userId);

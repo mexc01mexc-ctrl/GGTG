@@ -25,8 +25,13 @@ class GgtgForegroundService : Service() {
         // startForegroundService() obliges us to call startForeground() - even when the operation
         // already finished before we got here (a short bulk action), or Android kills the app
         startForeground(NOTIFICATION_ID, buildNotification())
+        GgtgWakeLock.acquire("foreground_service")
         GgtgProcess.addListener(listener)
-        if (GgtgProcess.runningCount() == 0) { stopSelf(); return START_NOT_STICKY }
+        if (GgtgProcess.runningCount() == 0) {
+            GgtgWakeLock.release("foreground_service")
+            stopSelf()
+            return START_NOT_STICKY
+        }
         return START_NOT_STICKY
     }
 
@@ -58,6 +63,7 @@ class GgtgForegroundService : Service() {
 
     override fun onDestroy() {
         super.onDestroy()
+        GgtgWakeLock.release("foreground_service")
         GgtgProcess.removeListener(listener)
         runCatching { stopForeground(true) }
         NotificationManagerCompat.from(ApplicationLoader.applicationContext).cancel(NOTIFICATION_ID)

@@ -138,7 +138,9 @@ object GgtgRegistration {
         val autoSetBio: Boolean = false,
         val customBio: String = "",
         val autoSetUsername: Boolean = false,
-        val precheckProxy: Boolean = true
+        val precheckProxy: Boolean = true,
+        val manualPhone: String = "",
+        val mode: Int = 0 // 0 = Auto SMS, 1 = Manual Phone
     )
 
     private const val PREFS_NAME = "ggtg_android_registration"
@@ -190,7 +192,9 @@ object GgtgRegistration {
             autoSetBio = prefs.getBoolean("autoSetBio", false),
             customBio = prefs.getString("customBio", "") ?: "",
             autoSetUsername = prefs.getBoolean("autoSetUsername", false),
-            precheckProxy = prefs.getBoolean("precheckProxy", true)
+            precheckProxy = prefs.getBoolean("precheckProxy", true),
+            manualPhone = prefs.getString("manualPhone", "") ?: "",
+            mode = prefs.getInt("mode", 0)
         )
     }
 
@@ -240,6 +244,8 @@ object GgtgRegistration {
             .putString("customBio", cfg.customBio)
             .putBoolean("autoSetUsername", cfg.autoSetUsername)
             .putBoolean("precheckProxy", cfg.precheckProxy)
+            .putString("manualPhone", cfg.manualPhone)
+            .putInt("mode", cfg.mode)
             .apply()
     }
 
@@ -1081,6 +1087,8 @@ object GgtgRegistration {
         if (token.isNotBlank()) tokenReserve.add(token)
     }
 
+    fun tokenReserveCount(): Int = tokenReserve.size
+
     fun popReservedToken(): String? {
         synchronized(tokenReserve) {
             return if (tokenReserve.isNotEmpty()) tokenReserve.removeAt(tokenReserve.size - 1) else null
@@ -1287,7 +1295,7 @@ object GgtgRegistration {
         private val engineScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
         private val logHistory = ArrayList<String>()
 
-        private val reservedSlots = ConcurrentHashMap.newKeySet<Int>()
+        internal val reservedSlots = ConcurrentHashMap.newKeySet<Int>()
         private val inUseProxies = ConcurrentHashMap.newKeySet<String>()
         private val proxyCursor = AtomicInteger(0)
 
@@ -1780,7 +1788,7 @@ object GgtgRegistration {
                     }, flags, ConnectionsManager.DEFAULT_DATACENTER_ID, "sendCode", 25_000)
 
                     if (res == null) {
-                        log("[Поток $threadId] ⚠️ Telegram не ответил на запрос кода за 25 сек (таймаут сети/прокси). Отменяю номер и возвращаю средства...")
+                        log("[Поток $threadId] Telegram не ответил на запрос кода за 25 сек (таймаут сети/прокси). Отменяю номер и возвращаю средства...")
                         enqueueRefund(config, activationId, phone, orderedAt)
                         return false
                     }
@@ -1814,7 +1822,7 @@ object GgtgRegistration {
                             enqueueRefund(config, activationId, phone, orderedAt)
                             return false
                         }
-                        log("[Поток $threadId] ✓ Токен reCAPTCHA получен! Отправка решения...")
+                        log("[Поток $threadId] Токен reCAPTCHA получен! Отправка решения...")
                         delay(1000)
                         continue
                     }
@@ -1844,16 +1852,36 @@ object GgtgRegistration {
                 var phoneCodeHash = sentCode.phone_code_hash
                 tokenSpent = true
 
+                val isSms = (sentCode.type is TLRPC.TL_auth_sentCodeTypeSms) ||
+                            (sentCode.type is TLRPC.TL_auth_sentCodeTypeSmsWord) ||
+                            (sentCode.type is TLRPC.TL_auth_sentCodeTypeSmsPhrase) ||
+                            (sentCode.type is TLRPC.TL_auth_sentCodeTypeFirebaseSms)
+
+                if (sentCode.type is TLRPC.TL_auth_sentCodeTypeApp) {
+                    addBadNumber(digits)
+                    log("[Поток $threadId] Telegram отправил код в приложение на других устройствах (номер уже кем-то используется). Номер отменяется, возврат средств и подбор нового...")
+                    enqueueRefund(config, activationId, phone, orderedAt)
+                    return false
+                }
+
+                if (!isSms) {
+                    addBadNumber(digits)
+                    val reason = if (sentCode.type is TLRPC.TL_auth_sentCodeTypeCall ||
+                                     sentCode.type is TLRPC.TL_auth_sentCodeTypeMissedCall ||
+                                     sentCode.type is TLRPC.TL_auth_sentCodeTypeFlashCall) {
+                        "звонком (виртуальные номера не принимают звонки)"
+                    } else {
+                        "не по SMS"
+                    }
+                    log("[Поток $threadId] Telegram отправил код $reason вместо SMS. Номер отменяется, возврат средств и подбор нового...")
+                    enqueueRefund(config, activationId, phone, orderedAt)
+                    return false
+                }
+
                 if (sentCode.type is TLRPC.TL_auth_sentCodeTypeSms) {
-                    log("[Поток $threadId] ✓ Telegram подтвердил отправку SMS на номер +$digits! Ожидаем поступления SMS от сервиса...")
-                } else if (sentCode.type is TLRPC.TL_auth_sentCodeTypeApp) {
-                    log("[Поток $threadId] ⚠️ Telegram отправил код в активное приложение на этом номере, а не в SMS: номер уже кем-то используется.")
-                } else if (sentCode.type is TLRPC.TL_auth_sentCodeTypeCall) {
-                    log("[Поток $threadId] Telegram отправляет звонок на номер +$digits")
-                } else if (sentCode.type is TLRPC.TL_auth_sentCodeTypeFlashCall) {
-                    log("[Поток $threadId] Telegram выполняет Flash-call на номер +$digits")
-                } else if (sentCode.type is TLRPC.TL_auth_sentCodeTypeMissedCall) {
-                    log("[Поток $threadId] Telegram выполняет обратный звонок на номер +$digits")
+                    log("[Поток $threadId] Telegram подтвердил отправку сотового SMS на номер +$digits! Ожидаем поступления SMS от сервиса...")
+                } else if (sentCode.type is TLRPC.TL_auth_sentCodeTypeFirebaseSms) {
+                    log("[Поток $threadId] Telegram подтвердил отправку SMS через Push Notifications на номер +$digits! Ожидаем SMS...")
                 } else {
                     log("[Поток $threadId] Telegram подтвердил запрос кода. Ожидаем код...")
                 }
@@ -1868,15 +1896,6 @@ object GgtgRegistration {
                         this.flags = this.flags or 4
                     }
                     cm.sendSuspend(req, flags, ConnectionsManager.DEFAULT_DATACENTER_ID, "requestFirebaseSms")
-                }
-                if (sentCode.type is TLRPC.TL_auth_sentCodeTypeApp) {
-                    addBadNumber(digits)
-                    if (config.skipAppCode) {
-                        log("[Поток $threadId] Telegram отправил код в приложение (номер уже зарегистрирован). Отмена, запрос возврата средств.")
-                        enqueueRefund(config, activationId, phone, orderedAt)
-                        return false
-                    }
-                    log("[Поток $threadId] Telegram отправил код в приложение, а не SMS: номер, возможно, уже зарегистрирован.")
                 }
 
                 // Handle email setup requirement if Telegram demands email verification
@@ -1950,25 +1969,23 @@ object GgtgRegistration {
                         val loginSentCode = verifyResp.sent_code
                         if (loginSentCode is TLRPC.TL_auth_sentCode) {
                             phoneCodeHash = loginSentCode.phone_code_hash
+                            val loginIsSms = (loginSentCode.type is TLRPC.TL_auth_sentCodeTypeSms) ||
+                                             (loginSentCode.type is TLRPC.TL_auth_sentCodeTypeSmsWord) ||
+                                             (loginSentCode.type is TLRPC.TL_auth_sentCodeTypeSmsPhrase) ||
+                                             (loginSentCode.type is TLRPC.TL_auth_sentCodeTypeFirebaseSms)
                             if (loginSentCode.type is TLRPC.TL_auth_sentCodeTypeApp) {
                                 addBadNumber(digits)
-                                if (config.skipAppCode) {
-                                    log("[Поток $threadId] Telegram отправил код в активное приложение на номере (траст, номер уже занят). Отмена, средства возвращены.")
-                                    enqueueRefund(config, activationId, phone, orderedAt)
-                                    return false
-                                }
-                                log("[Поток $threadId] ⚠️ Telegram отправил код в активное приложение на этом номере, а не в SMS: номер уже кем-то используется.")
-                            } else if (loginSentCode.type is TLRPC.TL_auth_sentCodeTypeSms) {
-                                log("[Поток $threadId] ✓ Telegram подтвердил отправку SMS на номер +$digits! Ожидаем код от сервиса...")
-                            } else if (loginSentCode.type is TLRPC.TL_auth_sentCodeTypeCall) {
-                                log("[Поток $threadId] ✓ Telegram отправляет звонок на номер +$digits")
-                            } else if (loginSentCode.type is TLRPC.TL_auth_sentCodeTypeFlashCall) {
-                                log("[Поток $threadId] ✓ Telegram выполняет Flash-call на номер +$digits")
-                            } else if (loginSentCode.type is TLRPC.TL_auth_sentCodeTypeMissedCall) {
-                                log("[Поток $threadId] ✓ Telegram выполняет обратный звонок на номер +$digits")
-                            } else {
-                                log("[Поток $threadId] ✓ Telegram подтвердил запрос кода для номера +$digits")
+                                log("[Поток $threadId] Telegram отправил код в приложение на других устройствах (номер уже кем-то используется). Номер отменяется, возврат средств и подбор нового...")
+                                enqueueRefund(config, activationId, phone, orderedAt)
+                                return false
                             }
+                            if (!loginIsSms) {
+                                addBadNumber(digits)
+                                log("[Поток $threadId] Telegram отправил код не по SMS. Номер отменяется, возврат средств и подбор нового...")
+                                enqueueRefund(config, activationId, phone, orderedAt)
+                                return false
+                            }
+                            log("[Поток $threadId] Telegram подтвердил отправку SMS на номер +$digits! Ожидаем код от сервиса...")
                         } else if (loginSentCode is TLRPC.TL_auth_sentCodePaymentRequired) {
                             addBadNumber(digits)
                             log("[Поток $threadId] Telegram требует платную отправку SMS / Premium для номера +$digits. Отмена, возврат средств.")
@@ -2131,14 +2148,14 @@ object GgtgRegistration {
                             "Hey there! I am using Telegram.",
                             "Busy, text only.",
                             "Available on Telegram.",
-                            "Digital creator 🚀",
+                            "Digital creator",
                             "Tech & crypto enthusiast"
                         )
                         presets.random()
                     }
                     if (bioText.isNotEmpty()) {
                         val (bioOk, _) = GgtgBulk.updateProfile(slot, null, null, bioText.take(70))
-                        if (bioOk) log("[Поток $threadId] ✓ Установлен профиль Bio: «$bioText»")
+                        if (bioOk) log("[Поток $threadId] Установлен профиль Bio: «$bioText»")
                     }
                 }
                 if (config.autoSetUsername) {
@@ -2147,7 +2164,7 @@ object GgtgRegistration {
                     val baseName = (cleanFirst + "_" + cleanLast).trim('_').ifEmpty { "user" }
                     val candidate = (baseName + "_" + Random.nextInt(100, 9999)).take(32)
                     val (userOk, userRes) = GgtgBulk.updateUsername(slot, candidate)
-                    if (userOk) log("[Поток $threadId] ✓ Установлен @username: $userRes")
+                    if (userOk) log("[Поток $threadId] Установлен @username: $userRes")
                 }
 
                 // 14. Reset other sessions if configured
@@ -2174,7 +2191,7 @@ object GgtgRegistration {
                 // 17. Proxy consumed only upon confirmed successful registration
                 if (proxyEntry != null && config.proxyListName.isNotEmpty()) {
                     GgtgProxyPoolStore.removeEntry(config.proxyListName, proxyEntry.host, proxyEntry.port)
-                    log("[Поток $threadId] ✓ Прокси ${proxyEntry.host}:${proxyEntry.port} закреплён за аккаунтом и удалён из пула.")
+                    log("[Поток $threadId] Прокси ${proxyEntry.host}:${proxyEntry.port} закреплён за аккаунтом и удалён из пула.")
                 }
 
                 // Make the account directly available and active in Android without any desktop duplication
@@ -2192,7 +2209,7 @@ object GgtgRegistration {
                     NotificationCenter.getInstance(slot).postNotificationName(NotificationCenter.dialogsNeedReload)
                 }
 
-                log("[Поток $threadId] ✓ Аккаунт +$phone (${user.first_name}) готов к использованию в приложении Android (слот #$slot)!")
+                log("[Поток $threadId] Аккаунт +$phone (${user.first_name}) готов к использованию в приложении Android (слот #$slot)!")
                 return true
 
             } catch (t: Throwable) {
@@ -2218,6 +2235,419 @@ object GgtgRegistration {
                     ConnectionsManager.getInstance(slot).cleanup(true)
                     UserConfig.getInstance(slot).clearConfig()
                     reservedSlots.remove(slot)
+                }
+            }
+        }
+    }
+
+    object ManualSession {
+        var onLog: ((String) -> Unit)? = null
+        var onStatus: ((String, Boolean, Boolean) -> Unit)? = null
+        var onStateChanged: ((isRequesting: Boolean, codeSent: Boolean) -> Unit)? = null
+
+        private val sessionScope = CoroutineScope(Dispatchers.IO + SupervisorJob())
+        private var currentSlot: Int? = null
+        private var currentPhone: String = ""
+        private var currentPhoneCodeHash: String = ""
+        private var currentMobileToken: String = ""
+        private var tokenSpent: Boolean = false
+        private var currentProxyEntry: GgtgProxyPoolStore.Entry? = null
+        private var currentConfig: Config? = null
+        private val isBusy = AtomicBoolean(false)
+        private val logHistory = ArrayList<String>()
+
+        fun isRequestActive(): Boolean = isBusy.get()
+        fun isCodeSent(): Boolean = currentPhoneCodeHash.isNotEmpty()
+
+        fun getLogHistory(): List<String> = synchronized(logHistory) { ArrayList(logHistory) }
+
+        fun log(msg: String) {
+            val ts = SimpleDateFormat("HH:mm:ss", Locale.getDefault()).format(Date())
+            val line = "[$ts] $msg"
+            synchronized(logHistory) {
+                logHistory.add(line)
+                if (logHistory.size > 200) logHistory.removeAt(0)
+            }
+            AndroidUtilities.runOnUIThread { onLog?.invoke(line) }
+        }
+
+        fun status(msg: String, isError: Boolean = false, isSuccess: Boolean = false) {
+            AndroidUtilities.runOnUIThread { onStatus?.invoke(msg, isError, isSuccess) }
+        }
+
+        fun cancel(customStatus: String? = null) {
+            if (currentMobileToken.isNotEmpty() && !tokenSpent) {
+                reserveToken(currentMobileToken)
+                log("Неиспользованный push-токен сохранён в резерв (в резерве: ${tokenReserveCount()})")
+                currentMobileToken = ""
+            }
+            val slot = currentSlot
+            if (slot != null && !UserConfig.getInstance(slot).isClientActivated) {
+                ConnectionsManager.getInstance(slot).cleanup(true)
+                UserConfig.getInstance(slot).clearConfig()
+                Engine.reservedSlots.remove(slot)
+            }
+            currentSlot = null
+            currentPhoneCodeHash = ""
+            currentProxyEntry = null
+            isBusy.set(false)
+            AndroidUtilities.runOnUIThread { onStateChanged?.invoke(false, false) }
+            if (customStatus != null) {
+                status(customStatus, isError = true)
+            } else {
+                status("Регистрация отменена")
+            }
+        }
+
+        fun requestManualCode(phoneInput: String, config: Config) {
+            if (isBusy.getAndSet(true)) return
+            sessionScope.launch {
+                try {
+                    val rawDigits = phoneInput.filter(Char::isDigit)
+                    val digits = cleanPhoneForTelegram(rawDigits)
+                    if (digits.length < 7) {
+                        status("Введите корректный номер телефона", isError = true)
+                        isBusy.set(false)
+                        return@launch
+                    }
+                    currentPhone = digits
+                    currentConfig = config
+                    currentPhoneCodeHash = ""
+                    tokenSpent = false
+
+                    AndroidUtilities.runOnUIThread { onStateChanged?.invoke(true, false) }
+                    log("========================================")
+                    log("Ручная регистрация номера +$digits")
+                    status("Подготовка сессии Telegram для +$digits...")
+
+                    // 1. Claim a free account slot
+                    val slot = (0 until UserConfig.MAX_ACCOUNT_COUNT).firstOrNull { s ->
+                        !UserConfig.getInstance(s).isClientActivated && Engine.reservedSlots.add(s)
+                    }
+                    if (slot == null) {
+                        status("Ошибка: нет свободных слотов для аккаунтов в приложении", isError = true)
+                        isBusy.set(false)
+                        AndroidUtilities.runOnUIThread { onStateChanged?.invoke(false, false) }
+                        return@launch
+                    }
+                    currentSlot = slot
+
+                    // 2. Assign proxy
+                    if (config.proxyListName.isNotEmpty()) {
+                        val entries = GgtgProxyPoolStore.getListEntries(config.proxyListName)
+                        if (entries.isNotEmpty()) {
+                            val p = entries.first()
+                            currentProxyEntry = p
+                            log("Прокси: ${p.host}:${p.port}")
+                            ConnectionsManager.setProxySettingsForAccount(
+                                slot, true, p.host, p.port, p.username, p.password, ""
+                            )
+                            UserConfig.getInstance(slot).apply {
+                                ncgProxyEnabled = true
+                                ncgProxyAddress = p.host
+                                ncgProxyPort = p.port
+                                ncgProxyUsername = p.username
+                                ncgProxyPassword = p.password
+                                saveConfig(false)
+                            }
+                        }
+                    }
+
+                    // 3. Android device profile with country-matched timezone
+                    val phoneGeo = GgtgGeo.matchForPhone(digits)
+                    val deviceProfile = GgtgAndroidProfiles.random()
+                    GgtgDevice.save(
+                        slot, deviceProfile.deviceModel, deviceProfile.systemVersion,
+                        phoneGeo.systemLang, phoneGeo.cloudLang, phoneGeo.tzOffset,
+                        deviceProfile.appVersion, "android", 6, "eb06d4abfb49dc3eeb1aeb98ae0f581e"
+                    )
+                    log("Устройство: ${deviceProfile.deviceModel} | Гео: ${phoneGeo.country} → ${phoneGeo.systemLang}, UTC${GgtgDevice.formatOffset(phoneGeo.tzOffset)}")
+
+                    // 4. Push Notifications (FCM) token
+                    currentMobileToken = ""
+                    if (config.tokenService != 0 && config.tokenApiKey.isNotBlank()) {
+                        val reserved = popReservedToken()
+                        if (!reserved.isNullOrBlank()) {
+                            currentMobileToken = reserved
+                            log("Push-токен взят из резерва (в резерве: ${tokenReserveCount()})")
+                        } else {
+                            log("Запрос Push-токена в ${tokenServiceName(config.tokenService)}...")
+                            status("Запрос push-токена в сервисе...")
+                            val tokenRes = fetchMobileToken(config.tokenService, config.tokenApiKey, digits, config.antiSafetyAid)
+                            if (tokenRes.isFailure) {
+                                log("Предупреждение сервиса токенов: ${tokenRes.exceptionOrNull()?.message}")
+                            } else {
+                                currentMobileToken = tokenRes.getOrDefault("")
+                                if (currentMobileToken.isNotEmpty()) {
+                                    log("Push-токен (FCM) успешно получен и привязан")
+                                }
+                            }
+                        }
+                    }
+
+                    // 5. Send code via MTProto
+                    val cm = ConnectionsManager.getInstance(slot)
+                    val flags = ConnectionsManager.RequestFlagWithoutLogin or ConnectionsManager.RequestFlagFailOnServerErrors or
+                        ConnectionsManager.RequestFlagTryDifferentDc or ConnectionsManager.RequestFlagEnableUnauthorized
+
+                    status("Отправка запроса кода в Telegram...")
+                    log("Отправка запроса MTPauth_SendCode в Telegram для +$digits...")
+
+                    var captchaRetries = 0
+                    var captchaToken: String? = null
+                    var sent: TLObject? = null
+                    var sendErr: TLRPC.TL_error? = null
+
+                    while (captchaRetries <= 2) {
+                        val sendReq = TLRPC.TL_auth_sendCode().apply {
+                            phone_number = digits
+                            api_id = BuildVars.APP_ID
+                            api_hash = BuildVars.APP_HASH
+                            settings = TLRPC.TL_codeSettings().apply {
+                                allow_firebase = true
+                                if (currentMobileToken.isNotEmpty()) {
+                                    token = currentMobileToken
+                                    this.flags = this.flags or (1 shl 8)
+                                }
+                            }
+                        }
+                        val reqObject: TLObject = if (!captchaToken.isNullOrEmpty()) {
+                            org.telegram.tgnet.TL_invokeWithReCaptcha(captchaToken, sendReq)
+                        } else {
+                            sendReq
+                        }
+
+                        val res = cm.sendSuspend(reqObject, flags, ConnectionsManager.DEFAULT_DATACENTER_ID, "sendCode", 25_000)
+                        if (res == null) {
+                            log("Telegram не ответил на запрос кода за 25 сек (таймаут сети/прокси).")
+                            status("Таймаут подключения к Telegram (25 сек)", isError = true)
+                            cancel()
+                            return@launch
+                        }
+
+                        sent = res.first
+                        sendErr = res.second
+
+                        val errText = sendErr?.text.orEmpty()
+                        val captchaRegex = Regex("RECAPTCHA_CHECK_([a-zA-Z0-9]+)__([a-zA-Z0-9_\\-]+)")
+                        val match = captchaRegex.find(errText)
+                        if (match != null && captchaRetries < 2) {
+                            captchaRetries++
+                            val action = match.groupValues[1]
+                            val keyId = match.groupValues[2]
+                            log("Telegram запросил reCAPTCHA Enterprise ($action). Решение...")
+                            status("Решение reCAPTCHA Enterprise ($action)...")
+                            val capRes = solveAppCaptcha(config, action, keyId)
+                            val capToken = capRes.getOrNull()
+                            if (capToken.isNullOrEmpty()) {
+                                log("Не удалось решить капчу: ${capRes.exceptionOrNull()?.message}")
+                                status("Ошибка решения капчи", isError = true)
+                                cancel()
+                                return@launch
+                            }
+                            log("Токен reCAPTCHA получен! Отправка решения...")
+                            captchaToken = capToken
+                            delay(1000)
+                            continue
+                        }
+                        break
+                    }
+
+                    if (sendErr != null) {
+                        val errText = sendErr?.text ?: "Ошибка sendCode"
+                        log("Ошибка Telegram: $errText")
+                        status("Ошибка Telegram: $errText", isError = true)
+                        cancel()
+                        return@launch
+                    }
+
+                    if (sent is TLRPC.TL_auth_sentCodePaymentRequired) {
+                        log("Telegram требует платную отправку SMS / Premium для номера +$digits.")
+                        status("Telegram требует Premium для отправки SMS", isError = true)
+                        cancel()
+                        return@launch
+                    }
+
+                    val sentCode = sent as? TLRPC.TL_auth_sentCode ?: run {
+                        val name = sent?.javaClass?.simpleName ?: "null"
+                        log("Неизвестный ответ Telegram на sendCode ($name)")
+                        status("Неизвестный ответ Telegram", isError = true)
+                        cancel()
+                        return@launch
+                    }
+
+                    currentPhoneCodeHash = sentCode.phone_code_hash
+                    val codeType = sentCode.type
+                    when (codeType) {
+                        is TLRPC.TL_auth_sentCodeTypeApp -> {
+                            addBadNumber(digits)
+                            log("Telegram отправил код в приложение на других устройствах (номер уже кем-то используется). Номер отклонён.")
+                            cancel("Telegram отправил код в приложение (номер занят). Введите другой номер.")
+                            return@launch
+                        }
+                        is TLRPC.TL_auth_sentCodeTypeSms -> {
+                            log("Telegram подтвердил отправку сотового SMS на номер +$digits (длина кода: ${codeType.length} цифр)! Ожидаем ввод SMS...")
+                            status("SMS отправлено на номер +$digits! Введите код.")
+                        }
+                        is TLRPC.TL_auth_sentCodeTypeFirebaseSms -> {
+                            log("Telegram подтвердил отправку SMS через Push Notifications на номер +$digits! Введите полученный код.")
+                            status("SMS отправлено! Введите полученный код.")
+                        }
+                        else -> {
+                            log("Telegram подтвердил запрос кода на номер +$digits! Введите полученный код.")
+                            status("Код отправлен! Введите полученный код.")
+                        }
+                    }
+                    isBusy.set(false)
+                    AndroidUtilities.runOnUIThread { onStateChanged?.invoke(false, true) }
+
+                } catch (t: Throwable) {
+                    log("Исключение: ${t.message ?: t.javaClass.simpleName}")
+                    status("Ошибка: ${t.message}", isError = true)
+                    cancel()
+                }
+            }
+        }
+
+        fun submitManualCode(code: String, firstName: String, lastName: String, twoFactorPassword: String) {
+            val slot = currentSlot ?: return
+            val hash = currentPhoneCodeHash
+            if (hash.isEmpty()) {
+                status("Сначала запросите код в Telegram", isError = true)
+                return
+            }
+            if (isBusy.getAndSet(true)) return
+
+            sessionScope.launch {
+                try {
+                    status("Авторизация в Telegram...")
+                    log("Авторизация в Telegram с кодом $code...")
+                    val cm = ConnectionsManager.getInstance(slot)
+                    val flags = ConnectionsManager.RequestFlagWithoutLogin or ConnectionsManager.RequestFlagFailOnServerErrors or
+                        ConnectionsManager.RequestFlagTryDifferentDc or ConnectionsManager.RequestFlagEnableUnauthorized
+
+                    val (signed, signErr) = cm.sendSuspend(TLRPC.TL_auth_signIn().apply {
+                        this.flags = this.flags or 1
+                        phone_number = currentPhone
+                        phone_code_hash = hash
+                        phone_code = code.trim()
+                    }, flags, ConnectionsManager.DEFAULT_DATACENTER_ID, "signIn") ?: (null to null)
+
+                    var auth = signed as? TLRPC.TL_auth_authorization
+
+                    if (signErr != null) {
+                        when (signErr.text) {
+                            "PHONE_CODE_INVALID" -> {
+                                log("Неверный SMS-код Telegram. Проверьте код и повторите ввод.")
+                                status("Неверный SMS-код! Попробуйте ещё раз.", isError = true)
+                                isBusy.set(false)
+                                return@launch
+                            }
+                            "PHONE_CODE_EXPIRED" -> {
+                                log("Срок действия SMS-кода истёк. Запросите код заново.")
+                                status("Срок действия кода истёк", isError = true)
+                                cancel()
+                                return@launch
+                            }
+                            "PHONE_NUMBER_UNOCCUPIED" -> {
+                                val fName = firstName.trim().ifEmpty { "Пользователь" }
+                                val lName = lastName.trim()
+                                log("Регистрация нового аккаунта: $fName $lName...")
+                                status("Регистрация нового профиля...")
+                                val (signedUp, signUpErr) = cm.sendSuspend(TLRPC.TL_auth_signUp().apply {
+                                    phone_number = currentPhone
+                                    phone_code_hash = hash
+                                    first_name = fName
+                                    last_name = lName
+                                }, flags, ConnectionsManager.DEFAULT_DATACENTER_ID, "signUp") ?: (null to null)
+
+                                if (signUpErr != null) {
+                                    log("Ошибка регистрации нового профиля: ${signUpErr.text}")
+                                    status("Ошибка: ${signUpErr.text}", isError = true)
+                                    isBusy.set(false)
+                                    return@launch
+                                }
+                                auth = signedUp as? TLRPC.TL_auth_authorization
+                            }
+                            else -> {
+                                log("Ошибка входа: ${signErr.text}")
+                                status("Ошибка входа: ${signErr.text}", isError = true)
+                                isBusy.set(false)
+                                return@launch
+                            }
+                        }
+                    }
+
+                    if (auth == null) {
+                        log("Не удалось завершить авторизацию Telegram")
+                        status("Не удалось завершить авторизацию", isError = true)
+                        isBusy.set(false)
+                        return@launch
+                    }
+
+                    val user = auth.user
+                    cm.setUserId(user.id)
+                    val dcId = cm.currentDatacenterId
+                    if (dcId != ConnectionsManager.DEFAULT_DATACENTER_ID) {
+                        cm.setDefaultDatacenterId(dcId)
+                    }
+
+                    // 2FA setup
+                    val final2fa = twoFactorPassword.trim()
+                    if (final2fa.isNotEmpty()) {
+                        UserConfig.getInstance(slot).ncgTwoFactor = final2fa
+                        GgtgTwoFaStore.save(user.id, final2fa)
+                        log("Пароль 2FA установлен: $final2fa")
+                    }
+
+                    val cfg = currentConfig
+                    if (cfg != null && cfg.folderTag.isNotEmpty()) {
+                        UserConfig.getInstance(slot).ncgFolder = cfg.folderTag
+                    }
+
+                    // Proxy consumed
+                    val p = currentProxyEntry
+                    if (p != null && cfg != null && cfg.proxyListName.isNotEmpty()) {
+                        GgtgProxyPoolStore.removeEntry(cfg.proxyListName, p.host, p.port)
+                        log("Прокси ${p.host}:${p.port} закреплён за аккаунтом и удалён из пула.")
+                    }
+
+                    // Activate slot in Android
+                    val activateRes = GgtgImportSupport.activateSlot(slot, user)
+                    if (activateRes.isFailure) {
+                        log("Ошибка активации слота: ${activateRes.exceptionOrNull()?.message}")
+                        status("Ошибка активации", isError = true)
+                        isBusy.set(false)
+                        return@launch
+                    }
+
+                    AndroidUtilities.runOnUIThread {
+                        val users = ArrayList<TLRPC.User>()
+                        users.add(user)
+                        MessagesStorage.getInstance(slot).putUsersAndChats(users, null, true, true)
+                        MessagesController.getInstance(slot).putUser(user, false)
+                        MessagesController.getInstance(slot).checkPromoInfo(true)
+                        MessagesController.getInstance(slot).loadAppConfig()
+                        ConnectionsManager.getInstance(slot).updateDcSettings()
+                        GgtgImportSupport.selectImportedSlotIfIdle(slot)
+                        NotificationCenter.getInstance(slot).postNotificationName(NotificationCenter.mainUserInfoChanged)
+                        NotificationCenter.getGlobalInstance().postNotificationName(NotificationCenter.mainUserInfoChanged)
+                        NotificationCenter.getInstance(slot).postNotificationName(NotificationCenter.dialogsNeedReload)
+                    }
+
+                    tokenSpent = true
+                    log("Аккаунт +$currentPhone (${user.first_name}) успешно зарегистрирован и активирован в приложении (слот #$slot)!")
+                    status("Аккаунт +$currentPhone успешно зарегистрирован!", isSuccess = true)
+
+                    currentSlot = null
+                    currentPhoneCodeHash = ""
+                    isBusy.set(false)
+                    AndroidUtilities.runOnUIThread { onStateChanged?.invoke(false, false) }
+
+                } catch (t: Throwable) {
+                    log("Исключение при вводе кода: ${t.message ?: t.javaClass.simpleName}")
+                    status("Ошибка: ${t.message}", isError = true)
+                    isBusy.set(false)
                 }
             }
         }

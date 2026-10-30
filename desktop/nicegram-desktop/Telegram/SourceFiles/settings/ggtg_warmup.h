@@ -36,6 +36,7 @@
 #include "ui/wrap/slide_wrap.h"
 #include "ui/wrap/vertical_layout.h"
 #include "window/window_session_controller.h"
+#include "window/ggtg_widgets.h"
 #include "settings/bulk_accounts_actions.h"
 #include "styles/style_boxes.h"
 #include "styles/style_window_main_menu.h"
@@ -356,6 +357,11 @@ inline rpl::producer<QString> WarmupIndicatorLabel() {
 // Active Warmup Runner (Crash-Proof with std::enable_shared_from_this)
 // -----------------------------------------------------------------------------
 
+class WarmupRunner;
+inline void BuildWarmupProgressBox(
+	std::shared_ptr<Ui::Show> show,
+	std::shared_ptr<WarmupRunner> runner);
+
 class WarmupRunner final
 	: public std::enable_shared_from_this<WarmupRunner>
 	, public QObject {
@@ -363,26 +369,43 @@ public:
 	WarmupRunner(
 		std::vector<not_null<Main::Account*>> accounts,
 		WarmupConfig config,
-		Fn<void(QString)> logCb,
-		Fn<void(int current, int total)> progressCb,
-		Fn<void(bool ok)> doneCb)
+		Fn<void(QString)> logCb = nullptr,
+		Fn<void(int current, int total)> progressCb = nullptr,
+		Fn<void(bool ok)> doneCb = nullptr)
 	: _accounts(std::move(accounts))
 	, _config(std::move(config))
 	, _logCb(std::move(logCb))
 	, _progressCb(std::move(progressCb))
-	, _doneCb(std::move(doneCb)) {
+	, _doneCb(std::move(doneCb))
+	, _statusText(u"Инициализация прогрева..."_q) {
 	}
 
-	void start() {
+	[[nodiscard]] const std::vector<QString> &logHistory() const { return _logHistory; }
+	[[nodiscard]] QString statusText() const { return _statusText; }
+	[[nodiscard]] bool finished() const { return _finished; }
+	void setLogCallback(Fn<void(QString)> cb) { _logCb = std::move(cb); }
+	void setProgressCallback(Fn<void(int, int)> cb) { _progressCb = std::move(cb); }
+	void setDoneCallback(Fn<void(bool)> cb) { _doneCb = std::move(cb); }
+
+	void start(not_null<Window::SessionController*> controller) {
 		if (_accounts.empty()) {
 			finish(true);
 			return;
 		}
 		_totalSteps = int(_accounts.size());
 		_currentStep = 0;
+		_statusText = u"Инициализация прогрева..."_q;
+		const auto weak = base::make_weak(controller);
+		const auto selfWeak = std::weak_ptr<WarmupRunner>(shared_from_this());
 		_processHandle = Core::App().processes().start(
 			u"Прогрев аккаунтов"_q,
-			nullptr,
+			[=] {
+				if (const auto alive = selfWeak.lock()) {
+					if (const auto c = CurrentSessionController(weak.get())) {
+						BuildWarmupProgressBox(c->uiShow(), alive);
+					}
+				}
+			},
 			Core::ProcessKind::Warmup);
 		WarmupIndicatorVariable() = WarmupIndicator::Running;
 
@@ -419,6 +442,7 @@ private:
 
 	void log(const QString &text) {
 		const auto line = QDateTime::currentDateTime().toString(u"hh:mm:ss"_q) + u" | "_q + text;
+		_logHistory.push_back(line);
 		if (_logCb) _logCb(line);
 		if (_processHandle) _processHandle->log(line);
 		LOG((line));
@@ -449,6 +473,7 @@ private:
 
 		const auto account = _accounts[_currentStep];
 		_currentStep++;
+		_statusText = u"Прогрев: шаг %1 из %2"_q.arg(_currentStep).arg(_totalSteps);
 		if (_progressCb) _progressCb(_currentStep, _totalSteps);
 		if (_processHandle) _processHandle->progress(_currentStep, _totalSteps);
 
@@ -724,6 +749,9 @@ private:
 			}
 			const auto pair = pairs[*pairIdx];
 			(*pairIdx)++;
+			_currentStep = int(*pairIdx);
+			_totalSteps = int(pairs.size());
+			_statusText = u"Прогрев: диалог %1 из %2"_q.arg(_currentStep).arg(_totalSteps);
 			if (_progressCb) _progressCb(int(*pairIdx), int(pairs.size()));
 			if (_processHandle) _processHandle->progress(int(*pairIdx), int(pairs.size()));
 
@@ -948,6 +976,10 @@ private:
 	}
 
 	void finish(bool ok) {
+		_finished = true;
+		_statusText = ok
+			? u"Прогрев успешно завершён. Траст всех аккаунтов повышен."_q
+			: u"Прогрев завершён или остановлен."_q;
 		WarmupIndicatorVariable() = WarmupIndicator::Done;
 		if (_processHandle) {
 			if (ok) {
@@ -969,6 +1001,9 @@ private:
 	Fn<void(bool)> _doneCb;
 
 	std::shared_ptr<Core::ProcessHandle> _processHandle;
+	std::vector<QString> _logHistory;
+	QString _statusText;
+	bool _finished = false;
 	bool _cancelled = false;
 	int _totalSteps = 0;
 	int _currentStep = 0;
@@ -995,6 +1030,81 @@ inline not_null<Ui::ScrollArea*> AddWarmupScrollArea(
 	return scroll;
 }
 
+inline void BuildWarmupProgressBox(
+		std::shared_ptr<Ui::Show> show,
+		std::shared_ptr<WarmupRunner> runner) {
+	if (!runner) return;
+	show->show(Box([=](not_null<Ui::GenericBox*> progBox) {
+		progBox->setWidth(st::accountsBoxWidth);
+		progBox->setTitle(rpl::single(u"Прогрев аккаунтов в процессе..."_q));
+
+		Ggtg::AddProcessHideButton(progBox, [=](std::shared_ptr<Ui::Show> to) {
+			BuildWarmupProgressBox(std::move(to), runner);
+		});
+		Ggtg::AddCloseCross(progBox);
+
+		const auto pCont = progBox->verticalLayout();
+		Ui::AddSkip(pCont, st::defaultVerticalListSkip);
+
+		const auto statusLabel = pCont->add(
+			object_ptr<Ui::FlatLabel>(
+				pCont,
+				rpl::single(runner->statusText()),
+				st::defaultFlatLabel));
+
+		Ui::AddSkip(pCont, st::defaultVerticalListSkip);
+
+		const auto logScroll = AddWarmupScrollArea(pCont, style::ConvertScale(220));
+		const auto logInner = logScroll->setOwnedWidget(object_ptr<Ui::VerticalLayout>(logScroll));
+
+		logScroll->widthValue(
+		) | rpl::on_next([=](int width) {
+			if (logInner) {
+				logInner->resizeToWidth(std::max(width - style::ConvertScale(12), style::ConvertScale(100)));
+			}
+		}, logInner->lifetime());
+
+		const auto appendLineToInner = [=](const QString &line) {
+			if (!logInner) return;
+			const auto label = logInner->add(
+				object_ptr<Ui::FlatLabel>(
+					logInner,
+					rpl::single(line),
+					st::boxDividerLabel),
+				style::margins(style::ConvertScale(6), style::ConvertScale(2), style::ConvertScale(6), style::ConvertScale(2)));
+			label->setTryMakeSimilarLines(false);
+			Ui::PostponeCall(logScroll, [=] {
+				if (logScroll) logScroll->scrollToY(logScroll->scrollTopMax());
+			});
+		};
+
+		for (const auto &line : runner->logHistory()) {
+			appendLineToInner(line);
+		}
+
+		runner->setLogCallback([=](const QString &line) {
+			appendLineToInner(line);
+		});
+		runner->setProgressCallback([=](int cur, int tot) {
+			if (statusLabel) {
+				statusLabel->setText(u"Прогрев: шаг %1 из %2"_q.arg(cur).arg(tot));
+			}
+		});
+		runner->setDoneCallback([=](bool ok) {
+			if (statusLabel) {
+				statusLabel->setText(ok
+					? u"Прогрев успешно завершён. Траст всех аккаунтов повышен."_q
+					: u"Прогрев завершён или остановлен."_q);
+			}
+		});
+
+		progBox->addButton(rpl::single(u"Остановить"_q), [=] {
+			runner->cancel();
+			progBox->closeBox();
+		});
+	}));
+}
+
 // -----------------------------------------------------------------------------
 // UI: MakeWarmupBox (Strictly 2 Modes, Accordion Picker, Safe Stop)
 // -----------------------------------------------------------------------------
@@ -1015,18 +1125,9 @@ inline object_ptr<Ui::BoxContent> MakeWarmupBox(
 		Ui::AddSkip(content, st::defaultVerticalListSkip);
 
 		// If a warmup is already active, show the live progress screen directly
-		if (CurrentWarmupRunner() && !CurrentWarmupRunner()->isCancelled()) {
-			box->addRow(object_ptr<Ui::FlatLabel>(
-				box,
-				rpl::single(u"В данный момент выполняется прогрев аккаунтов..."_q),
-				st::boxDividerLabel));
-			box->addButton(rpl::single(u"Остановить прогрев"_q), [=] {
-				if (const auto runner = CurrentWarmupRunner()) {
-					runner->cancel();
-				}
-				box->closeBox();
-			});
-			box->addButton(tr::lng_close(), [=] { box->closeBox(); });
+		if (const auto runner = CurrentWarmupRunner(); runner && !runner->isCancelled() && !runner->finished()) {
+			BuildWarmupProgressBox(box->uiShow(), runner);
+			box->closeBox();
 			return;
 		}
 
@@ -1232,71 +1333,12 @@ inline object_ptr<Ui::BoxContent> MakeWarmupBox(
 					state->selected.begin(),
 					state->selected.end());
 
-				controller->uiShow()->showBox(Box([=](not_null<Ui::GenericBox*> progBox) {
-					progBox->setWidth(st::accountsBoxWidth);
-					progBox->setTitle(rpl::single(u"Прогрев аккаунтов в процессе..."_q));
-
-					const auto pCont = progBox->verticalLayout();
-					Ui::AddSkip(pCont, st::defaultVerticalListSkip);
-
-					const auto statusLabel = pCont->add(
-						object_ptr<Ui::FlatLabel>(
-							pCont,
-							rpl::single(u"Инициализация прогрева..."_q),
-							st::defaultFlatLabel));
-
-					Ui::AddSkip(pCont, st::defaultVerticalListSkip);
-
-					const auto logScroll = AddWarmupScrollArea(pCont, style::ConvertScale(220));
-					const auto logInner = logScroll->setOwnedWidget(object_ptr<Ui::VerticalLayout>(logScroll));
-
-					const auto appendLog = [=](const QString &line) {
-						if (!logInner) return;
-						logInner->add(
-							object_ptr<Ui::FlatLabel>(
-								logInner,
-								rpl::single(line),
-								st::boxDividerLabel),
-							style::margins(style::ConvertScale(6), style::ConvertScale(2), style::ConvertScale(6), style::ConvertScale(2)));
-						Ui::PostponeCall(logScroll, [=] {
-							if (logScroll) logScroll->scrollToY(logScroll->scrollTopMax());
-						});
-					};
-
-					CurrentWarmupRunner() = std::make_shared<WarmupRunner>(
-						selectedAccounts,
-						finalCfg,
-						appendLog,
-						[=](int cur, int tot) {
-							if (statusLabel) {
-								statusLabel->setText(u"Прогрев: шаг %1 из %2"_q.arg(cur).arg(tot));
-							}
-						},
-						[=](bool ok) {
-							if (statusLabel) {
-								statusLabel->setText(ok
-									? u"Прогрев успешно завершён. Траст всех аккаунтов повышен."_q
-									: u"Прогрев завершён или остановлен."_q);
-							}
-							Ui::PostponeCall([=] {
-								CurrentWarmupRunner() = nullptr;
-							});
-						});
-
-					progBox->addButton(rpl::single(u"Остановить"_q), [=] {
-						if (const auto runner = CurrentWarmupRunner()) {
-							runner->cancel();
-						}
-						progBox->closeBox();
-					});
-
-					progBox->addButton(tr::lng_close(), [=] {
-						progBox->closeBox();
-					});
-
-					CurrentWarmupRunner()->start();
-				}));
-
+				const auto runner = std::make_shared<WarmupRunner>(
+					std::move(selectedAccounts),
+					finalCfg);
+				CurrentWarmupRunner() = runner;
+				BuildWarmupProgressBox(controller->uiShow(), runner);
+				runner->start(controller);
 				box->closeBox();
 			},
 			st::defaultActiveButton);

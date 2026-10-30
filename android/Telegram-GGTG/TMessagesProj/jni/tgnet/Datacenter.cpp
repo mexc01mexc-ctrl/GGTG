@@ -1111,9 +1111,12 @@ ByteArray *Datacenter::getAuthKey(ConnectionType connectionType, bool perm, int6
 }
 
 NativeByteBuffer *Datacenter::createRequestsData(std::vector<std::unique_ptr<NetworkMessage>> &requests, int32_t *quickAckId, Connection *connection, bool pfsInit) {
+    if (connection == nullptr) {
+        return nullptr;
+    }
     int64_t authKeyId;
     ByteArray *authKey = getAuthKey(connection->getConnectionType(), pfsInit, &authKeyId, 1);
-    if (authKey == nullptr) {
+    if (authKey == nullptr || authKey->bytes == nullptr || authKey->length < 256) {
         return nullptr;
     }
 

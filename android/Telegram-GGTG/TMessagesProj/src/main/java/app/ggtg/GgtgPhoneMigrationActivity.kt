@@ -20,6 +20,9 @@ import org.telegram.ui.ActionBar.AlertDialog
 import org.telegram.ui.ActionBar.BaseFragment
 import org.telegram.ui.ActionBar.Theme
 import org.telegram.ui.Components.LayoutHelper
+import android.text.Spannable
+import android.text.SpannableStringBuilder
+import android.text.style.ForegroundColorSpan
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -132,11 +135,11 @@ class GgtgPhoneMigrationActivity(
         // -------------------------------------------------------------------------
         // 3. Защита и токены (Push, Captcha)
         // -------------------------------------------------------------------------
-        root.addView(sectionHeader(context, "3. Защита и токены (Push, Captcha)", "Play Integrity и обход reCAPTCHA Enterprise", R.drawable.msg_secret))
+        root.addView(sectionHeader(context, "3. Защита и токены (Push, Captcha)", "Push Notifications (FCM) и обход reCAPTCHA Enterprise", R.drawable.msg_secret))
         val tokCard = GgtgUi.card(context)
 
         val currentTokenName = GgtgRegistration.tokenServiceName(currentConfig.tokenService)
-        tokenServiceView = pickerRow(context, tokCard, "Сервис токенов Play Integrity", currentTokenName) { showTokenServicePicker(context) }
+        tokenServiceView = pickerRow(context, tokCard, "Сервис Push-токенов (FCM)", currentTokenName) { showTokenServicePicker(context) }
 
         tokenApiKeyInput = GgtgUi.input(context, "API-ключ токенов", currentConfig.tokenApiKey)
         tokenApiKeyInput.addTextChangedListener(object : android.text.TextWatcher {
@@ -226,9 +229,9 @@ class GgtgPhoneMigrationActivity(
             text = "Лог смены номеров готов..."
             textSize = 12f
             typeface = Typeface.MONOSPACE
-            setTextColor(GgtgUi.color(Theme.key_windowBackgroundWhiteBlackText))
-            setPadding(GgtgUi.dp(8f), GgtgUi.dp(8f), GgtgUi.dp(8f), GgtgUi.dp(8f))
-            background = GgtgUi.rounded(GgtgUi.color(Theme.key_windowBackgroundGray), GgtgUi.dp(8f).toFloat())
+            setTextColor(0xFFFFFFFF.toInt())
+            setPadding(GgtgUi.dp(10f), GgtgUi.dp(10f), GgtgUi.dp(10f), GgtgUi.dp(10f))
+            background = GgtgUi.rounded(0xFF14181C.toInt(), GgtgUi.dp(8f).toFloat())
         }
         execCard.addView(logConsoleView)
         GgtgUi.addCard(root, execCard)
@@ -236,6 +239,50 @@ class GgtgPhoneMigrationActivity(
         root.addView(GgtgUi.spacer(context, 24f))
 
         return frame
+    }
+
+    private data class ConsoleLine(val text: String, val color: Int, val isWaiting: Boolean)
+    private val consoleLines = mutableListOf<ConsoleLine>()
+
+    private fun classifyLog(raw: String): Pair<Int, Boolean> {
+        val lower = raw.lowercase()
+        val isWaiting = lower.contains("ожида") || lower.contains("пауз") || lower.contains("осталось") ||
+                lower.contains("сек)") || lower.contains("тайм-аут") || lower.contains("повтор через") ||
+                lower.contains("[автовозврат]") || lower.contains("[очередь возврата]") ||
+                lower.contains("с)...")
+        val color = when {
+            lower.contains("успешно") || lower.contains("[ok]") || lower.contains("✓") ||
+                    lower.contains("успех") || lower.contains("готов к использованию") || lower.contains("авторизация успешна") -> 0xFF4CAF50.toInt() // Green
+            lower.contains("ошибк") || lower.contains("[ошибка]") || lower.contains("не удалось") ||
+                    lower.contains("отклон") || lower.contains("исключение") || lower.contains("banned") ||
+                    lower.contains("тайм-аут ожидания") || lower.contains("отменен") || lower.contains("отменён") -> 0xFFEF5350.toInt() // Red
+            isWaiting -> 0xFFFFA726.toInt() // Orange
+            else -> 0xFFFFFFFF.toInt() // White
+        }
+        return color to isWaiting
+    }
+
+    private fun appendOrUpdateLog(msg: String) {
+        AndroidUtilities.runOnUIThread {
+            if (!::logConsoleView.isInitialized) return@runOnUIThread
+            val (color, isWaiting) = classifyLog(msg)
+            val last = consoleLines.lastOrNull()
+            if (isWaiting && last != null && last.isWaiting) {
+                consoleLines[consoleLines.size - 1] = ConsoleLine(msg, color, true)
+            } else {
+                consoleLines.add(ConsoleLine(msg, color, isWaiting))
+                if (consoleLines.size > 200) consoleLines.removeAt(0)
+            }
+            val ssb = SpannableStringBuilder()
+            for (i in consoleLines.indices) {
+                val line = consoleLines[i]
+                val start = ssb.length
+                ssb.append(line.text)
+                if (i < consoleLines.size - 1) ssb.append("\n")
+                ssb.setSpan(ForegroundColorSpan(line.color), start, ssb.length, Spannable.SPAN_EXCLUSIVE_EXCLUSIVE)
+            }
+            logConsoleView.text = ssb
+        }
     }
 
     private fun startPhoneMigration() {
@@ -265,7 +312,8 @@ class GgtgPhoneMigrationActivity(
 
         setStatus(statusView, "Смена номеров выполняется...", R.drawable.msg_recent)
         val timeStr = SimpleDateFormat("HH:mm:ss", Locale.getDefault()).format(Date())
-        logConsoleView.text = "[$timeStr] Запуск смены номеров для ${slots.size} аккаунтов...\n"
+        consoleLines.clear()
+        appendOrUpdateLog("[$timeStr] Запуск смены номеров для ${slots.size} аккаунтов...")
 
         scope.launch {
             var successCount = 0
@@ -273,18 +321,18 @@ class GgtgPhoneMigrationActivity(
                 val label = GgtgAccounts.label(slot)
                 val statusPrefix = "Аккаунт $label: "
                 progress?.setWorkingText(statusPrefix + "проверка доверенной сессии...")
-                logConsoleView.append("\n$statusPrefix запуск...")
+                appendOrUpdateLog("$statusPrefix запуск...")
 
                 val res = GgtgSessions.changePhoneNumber(slot, currentConfig) { st ->
                     progress?.setWorkingText(statusPrefix + st)
-                    logConsoleView.append("\n  › $st")
+                    appendOrUpdateLog("  › $st")
                 }
 
                 res.onSuccess {
                     successCount++
-                    logConsoleView.append("\n  [OK] Номер успешно изменён!")
+                    appendOrUpdateLog("  [OK] Номер успешно изменён!")
                 }.onFailure { err ->
-                    logConsoleView.append("\n  [ОШИБКА] ${err.message}")
+                    appendOrUpdateLog("  [ОШИБКА] ${err.message}")
                     Toast.makeText(context, "$label: ${err.message}", Toast.LENGTH_LONG).show()
                 }
             }
@@ -429,7 +477,7 @@ class GgtgPhoneMigrationActivity(
     private fun showTokenServicePicker(context: Context) {
         val options = arrayOf("Нет (без токенов)", "TokenFast (tokenfast.shop/api)", "AntiSafety (antisafety.net)")
         AlertDialog.Builder(context).apply {
-            setTitle("Выберите сервис токенов Play Integrity")
+            setTitle("Выберите сервис Push-токенов (FCM)")
             setItems(options) { _, which ->
                 currentConfig = currentConfig.copy(tokenService = which)
                 if (::tokenServiceView.isInitialized) {

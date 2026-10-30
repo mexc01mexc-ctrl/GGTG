@@ -227,9 +227,9 @@ public class SessionCell extends FrameLayout {
                     stringBuilder.append(session.system_version);
                 }
             }
-            if (stored != null) {
-                stringBuilder.append(" • (резервная)");
-            }
+            boolean isCurrent = (session.hash == 0);
+            String suffix = app.ggtg.GgtgSessions.formatSessionSuffix(stored, isCurrent);
+            stringBuilder.append(suffix);
             nameTextView.setText(stringBuilder);
 
             String timeText;
@@ -317,6 +317,37 @@ public class SessionCell extends FrameLayout {
         if (showStub) {
             showStub = false;
             invalidate();
+        }
+    }
+
+    public void setStoredSession(app.ggtg.GgtgSessions.StoredSession stored, boolean needDivider) {
+        showStub = false;
+        this.needDivider = needDivider;
+        setWillNotDraw(!needDivider);
+
+        String devModel = "";
+        if (stored.getDevice() != null) {
+            devModel = stored.getDevice().optString("deviceModel");
+        }
+        if (devModel.isEmpty()) {
+            devModel = app.ggtg.GgtgSessions.roleTitle(stored.getRole());
+        }
+
+        imageView.setImageDrawable(createDrawable(42, devModel.toLowerCase()));
+
+        StringBuilder sb = new StringBuilder();
+        sb.append(devModel);
+        sb.append(app.ggtg.GgtgSessions.formatSessionSuffix(stored, false));
+        nameTextView.setText(sb);
+
+        setTag(Theme.key_windowBackgroundWhiteValueText);
+        onlineTextView.setText("Сохранена");
+        onlineTextView.setTextColor(Theme.getColor(Theme.key_windowBackgroundWhiteValueText));
+
+        String dateStr = LocaleController.formatDateTime(stored.getCreatedAt(), false);
+        detailTextView.setText("Хранилище сессий GGTG · " + dateStr);
+        if (detailExTextView != null) {
+            detailExTextView.setText(app.ggtg.GgtgSessions.roleTitle(stored.getRole()) + (stored.getNote().isEmpty() ? "" : (" · " + stored.getNote())));
         }
     }
 

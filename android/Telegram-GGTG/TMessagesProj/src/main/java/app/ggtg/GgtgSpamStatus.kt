@@ -49,7 +49,9 @@ object GgtgSpamStatus {
         return s.state == State.Permanent || (s.state == State.Temporary && s.until > System.currentTimeMillis() / 1000)
     }
 
-    private fun set(userId: Long, status: Status) {
+    fun all(): Map<Long, Status> = synchronized(lock) { ensureLoaded(); HashMap(statuses) }
+
+    fun set(userId: Long, status: Status) {
         synchronized(lock) {
             ensureLoaded()
             statuses[userId] = status
@@ -63,6 +65,15 @@ object GgtgSpamStatus {
             }
         }
         fire()
+    }
+
+    fun merge(userId: Long, status: Status): Boolean {
+        val local = find(userId)
+        if (local == null || status.checkedAt > local.checkedAt) {
+            set(userId, status)
+            return true
+        }
+        return false
     }
 
     private fun ensureLoaded() {
@@ -202,6 +213,35 @@ object GgtgSpamStatus {
             }
             jobs.forEach { it.join() }
             process.succeed("Проверено: ${live.size}, со спам-блоком: $blocked")
+        }
+        return live.size
+    }
+
+    /**
+     * Auto-appeals to @SpamBot for accounts with spam blocks.
+     * Staggered 3-5 seconds between accounts. Logged to "Процессы". Returns count of accounts started.
+     */
+    fun autoAppealMany(slots: List<Int>): Int {
+        val live = slots.filter { UserConfig.getInstance(it).isClientActivated }
+        if (live.isEmpty()) return 0
+        val process = GgtgProcess.start("Авто-апелляция @SpamBot (${live.size})", GgtgProcess.Kind.Other)
+        CoroutineScope(SupervisorJob() + Dispatchers.IO).launch {
+            var done = 0
+            var appealed = 0
+            for ((index, slot) in live.withIndex()) {
+                val label = GgtgAccounts.label(slot)
+                val err = runCatching { autoAppeal(slot) }.getOrElse { it.message ?: "ошибка" }
+                done++
+                if (err != null) {
+                    process.log("[$label] ошибка: $err")
+                } else {
+                    appealed++
+                    process.log("[$label] апелляция успешно отправлена")
+                }
+                process.progress(done, live.size)
+                if (index < live.size - 1) delay((3000L..5000L).random())
+            }
+            process.succeed("Завершено. Отправлено апелляций: $appealed из ${live.size}")
         }
         return live.size
     }

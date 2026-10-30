@@ -33,6 +33,8 @@ android/Telegram-GGTG/TMessagesProj/lib/**/app/
 android/Telegram-GGTG/**/build/
 android/Telegram-GGTG/.gradle/
 android/Telegram-GGTG/**/.gradle/
+android/Telegram-GGTG/.kotlin/
+android/Telegram-GGTG/**/.kotlin/
 android/Telegram-GGTG/.idea/
 android/Telegram-GGTG/local.properties
 android/Telegram-GGTG/*.iml

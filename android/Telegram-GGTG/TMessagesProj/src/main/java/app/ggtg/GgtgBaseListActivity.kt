@@ -70,6 +70,31 @@ class GgtgBaseListActivity(private val baseId: Long, private val isGroups: Boole
     private var countView: TextView? = null
     private var opening = false
     private var searchQuery = ""
+    private var activeAccountSlot: Int = UserConfig.selectedAccount
+
+    private fun showAccountPicker(onChosen: (Int) -> Unit) {
+        val ctx = context ?: return
+        val activated = GgtgAccounts.activated()
+        if (activated.isEmpty()) {
+            toast("Нет подключённых аккаунтов")
+            return
+        }
+        val items = activated.map { ref ->
+            val label = GgtgAccounts.label(ref.slot)
+            val folder = if (ref.folder.isNotEmpty()) " [${GgtgAccounts.folderTitle(ref.folder)}]" else ""
+            val check = if (ref.slot == activeAccountSlot) "● " else "○ "
+            check + label + folder
+        }.toTypedArray()
+
+        org.telegram.ui.ActionBar.AlertDialog.Builder(ctx)
+            .setTitle("Выберите аккаунт для переписки")
+            .setItems(items) { _, which ->
+                val chosen = activated.getOrNull(which)?.slot ?: return@setItems
+                onChosen(chosen)
+            }
+            .setNegativeButton("Отмена", null)
+            .show()
+    }
 
     private fun sortTitle(order: SortOrder) = when (order) {
         SortOrder.Base -> "Как в базе"
@@ -291,7 +316,7 @@ class GgtgBaseListActivity(private val baseId: Long, private val isGroups: Boole
         val list = RecyclerListView(context)
         list.setLayoutManager(LinearLayoutManager(context))
         list.adapter = Adapter(context)
-        list.setOnItemClickListener { _, position, _, _ -> rows.getOrNull(position)?.let { open(it) } }
+        list.setOnItemClickListener { _, position, _, _ -> rows.getOrNull(position)?.let { open(it, preferChat = true) } }
         // long press: the extras (the icons on the right stay as they were)
         list.setOnItemLongClickListener(RecyclerListView.OnItemLongClickListener { _, position ->
             val row = rows.getOrNull(position) ?: return@OnItemLongClickListener false
@@ -329,6 +354,47 @@ class GgtgBaseListActivity(private val baseId: Long, private val isGroups: Boole
             LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT).apply { topMargin = AndroidUtilities.dp(2f) })
         head.addView(GgtgUi.body(context, "Долгое нажатие на строке — действия.", 12f),
             LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT).apply { topMargin = AndroidUtilities.dp(4f) })
+
+        val accountCard = LinearLayout(context).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            background = GgtgUi.rounded(Theme.getColor(Theme.key_windowBackgroundGray), AndroidUtilities.dp(8f).toFloat())
+            setPadding(AndroidUtilities.dp(10f), AndroidUtilities.dp(8f), AndroidUtilities.dp(10f), AndroidUtilities.dp(8f))
+        }
+        val accIcon = android.widget.ImageView(context).apply {
+            setImageDrawable(GgtgUi.icon(context, R.drawable.msg_contacts, Theme.getColor(Theme.key_windowBackgroundWhiteBlueText)))
+        }
+        val accText = TextView(context).apply {
+            textSize = 13f
+            setTypeface(null, Typeface.BOLD)
+            setTextColor(Theme.getColor(Theme.key_windowBackgroundWhiteBlueText))
+            setPadding(AndroidUtilities.dp(8f), 0, AndroidUtilities.dp(4f), 0)
+        }
+        val accChevron = TextView(context).apply {
+            text = "▾"
+            textSize = 14f
+            setTypeface(null, Typeface.BOLD)
+            setTextColor(Theme.getColor(Theme.key_windowBackgroundWhiteBlueText))
+        }
+        fun refreshAccText() {
+            val label = GgtgAccounts.label(activeAccountSlot)
+            accText.text = "Писать с: $label"
+        }
+        refreshAccText()
+        accountCard.addView(accIcon, LinearLayout.LayoutParams(AndroidUtilities.dp(18f), AndroidUtilities.dp(18f)))
+        accountCard.addView(accText, LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f))
+        accountCard.addView(accChevron)
+        accountCard.setOnClickListener {
+            showAccountPicker { slot ->
+                activeAccountSlot = slot
+                refreshAccText()
+                toast("Аккаунт переключен: ${GgtgAccounts.label(slot)}")
+            }
+        }
+        head.addView(accountCard,
+            LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT).apply {
+                topMargin = AndroidUtilities.dp(8f)
+            })
 
         val search = android.widget.EditText(context).apply {
             hint = "Поиск по имени, @username или ID"
@@ -373,24 +439,32 @@ class GgtgBaseListActivity(private val baseId: Long, private val isGroups: Boole
         return frame
     }
 
-    private fun open(row: Row, preferChat: Boolean = false) {
+    private fun open(row: Row, preferChat: Boolean = true) {
         val context = context ?: return
+        val account = activeAccountSlot
         if (row.username.isEmpty()) {
             Browser.openUrl(context, row.fallbackUrl)
             return
         }
+        if (account != UserConfig.selectedAccount) {
+            org.telegram.ui.LaunchActivity.instance?.switchToAccount(account, false)
+        }
         if (row.user != null) {
             val args = Bundle().apply { putLong("user_id", row.user.id) }
-            if (preferChat) {
-                presentFragment(ChatActivity(args))
+            val fragment = if (preferChat) {
+                ChatActivity(args)
             } else {
-                presentFragment(ProfileActivity(args))
+                ProfileActivity(args)
             }
+            fragment.setCurrentAccount(account)
+            presentFragment(fragment)
             return
         }
         if (row.chat != null) {
             val args = Bundle().apply { putLong("chat_id", row.chat.id) }
-            presentFragment(ChatActivity(args))
+            val fragment = ChatActivity(args)
+            fragment.setCurrentAccount(account)
+            presentFragment(fragment)
             return
         }
         if (opening) return
@@ -399,7 +473,6 @@ class GgtgBaseListActivity(private val baseId: Long, private val isGroups: Boole
             return
         }
         opening = true
-        val account = UserConfig.selectedAccount
         scope.launch {
             val req = TLRPC.TL_contacts_resolveUsername().apply { username = row.username }
             val pair = GgtgAccounts.request(account, req, ConnectionsManager.RequestFlagFailOnServerErrors)
@@ -424,16 +497,20 @@ class GgtgBaseListActivity(private val baseId: Long, private val isGroups: Boole
             val chat = resp.chats.firstOrNull()
             if (chat != null) {
                 args.putLong("chat_id", chat.id)
-                presentFragment(ChatActivity(args))
+                val fragment = ChatActivity(args)
+                fragment.setCurrentAccount(account)
+                presentFragment(fragment)
             } else {
                 val user = resp.users.firstOrNull()
                 if (user == null) { toast("Не найдено: @${row.username}"); return@launch }
                 args.putLong("user_id", user.id)
-                if (preferChat) {
-                    presentFragment(ChatActivity(args))
+                val fragment = if (preferChat) {
+                    ChatActivity(args)
                 } else {
-                    presentFragment(ProfileActivity(args))
+                    ProfileActivity(args)
                 }
+                fragment.setCurrentAccount(account)
+                presentFragment(fragment)
             }
         }
     }
@@ -553,7 +630,7 @@ class GgtgBaseListActivity(private val baseId: Long, private val isGroups: Boole
         private fun dp(v: Float) = AndroidUtilities.dp(v)
 
         override fun onCreateViewHolder(parent: ViewGroup, viewType: Int): RecyclerView.ViewHolder {
-            val glyphs = if (isGroups) listOf("✕", "⬇", "🦑") else listOf("💬", "✕")
+            val glyphs = if (isGroups) listOf("✕", "⬇", "🦑") else listOf("👁", "✕")
             val wrap = LinearLayout(ctx).apply {
                 orientation = LinearLayout.HORIZONTAL
                 gravity = Gravity.CENTER_VERTICAL
@@ -602,9 +679,9 @@ class GgtgBaseListActivity(private val baseId: Long, private val isGroups: Boole
             wrap.addView(texts, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
 
             for (glyph in glyphs) {
-                // Telegram's own icons: message/chat, remove, download members, look up via Squidward
+                // Telegram's own icons: profile/info (eye), remove, download members, look up via Squidward
                 val res = when (glyph) {
-                    "💬" -> R.drawable.msg_message
+                    "👁", "💬" -> R.drawable.msg_views
                     "✕" -> R.drawable.msg_delete
                     "⬇" -> R.drawable.msg_download
                     else -> R.drawable.msg_squidward
@@ -689,7 +766,7 @@ class GgtgBaseListActivity(private val baseId: Long, private val isGroups: Boole
             for (i in 2 until wrap.childCount) {
                 val b = wrap.getChildAt(i)
                 when (b.tag) {
-                    "💬" -> b.setOnClickListener { open(row, preferChat = true) }
+                    "👁", "💬" -> b.setOnClickListener { open(row, preferChat = false) }
                     "🦑" -> b.setOnClickListener { viaSquidward(row) }
                     "⬇" -> {
                         b.alpha = if (row.username.isEmpty()) 0.3f else 1f

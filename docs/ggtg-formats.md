@@ -77,7 +77,9 @@
   "sent":  { "username": { "status": "ok|spam_acc|not_found|restricted|peer_limit|account_fail|suspected_fake|long_ago",
                            "account": "…", "at": "…", "base": "id", "source": "…", "note": "…" } },
   "tomb":  { "base:<id>": "unix", "sent:<username>": "unix" },
-  "files": { "ai_profile.json": { "mtime": "unix", "text": "…" }, "ai_knowledge/<id>.json": {…} }
+  "files": { "ai_profile.json": { "mtime": "unix", "text": "…" }, "ai_knowledge/<id>.json": {…} },
+  "account_statuses": { "<userId>": { "userId": "…", "phone": "…", "state": "clear|temporary|permanent", "until": "0", "checkedAt": "unix", "folder": "…", "trashed": false, "offline": false, "sentToday": 0 } },
+  "session_notes": [ { "id": "…", "userId": 12345, "note": "…", "role": "…", "createdAt": 1790000000, "hash": "…", "device": {…} } ]
 }
 ```
 
@@ -98,6 +100,8 @@
   `at`/`savedAt`. Метки живут 90 дней.
 - `files` (ИИ: профиль, примеры, плейбук, обучение, настройки, материалы, списки чатов): побеждает
   файл с большим `mtime`, целиком.
+- `account_statuses`: вердикт SpamBot (`state`, `until`, `checkedAt`) обновляется у аккаунта, если удалённая проверка свежее локальной (`remote.checkedAt > local.checkedAt`). Для совпадающих активированных аккаунтов также передаются `folder` (если локально папка не назначена) и `trashed` (помещение в корзину).
+- `session_notes`: примечания и роли сохранённых сессий объединяются по идентификатору и userId.
 - id баз во всех файлах — беззнаковые (ручные базы на Mac имеют старший бит; на Android это
   отрицательный Long, поэтому `GgtgDb.idToString/idFromString`).
 

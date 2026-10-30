@@ -452,11 +452,12 @@ object TdataExportHelper {
      *  "ggtg-desktop-import"); the sync carries it to the Mac. [onDone] gets the manifest (null on failure) and a
      *  user-facing summary. Always duplicates: the phone's own sessions stay separate. */
     @JvmStatic
-    fun exportForDesktop(activity: FragmentActivity, slots: List<Int>, onDone: (ByteArray?, String) -> Unit) {
+    fun exportForDesktop(activity: FragmentActivity, slots: List<Int>, sessionNote: String = "", onDone: (ByteArray?, String) -> Unit) {
         val progress = TdataImportProgressDialog(activity, "Аккаунты на Mac")
         progress.setWorkingText("Подготовка…")
         MainScope().launch {
-            try {
+            GgtgWakeLock.withLock("export_desktop") {
+                try {
                 val tempSlot = (0 until UserConfig.MAX_ACCOUNT_COUNT)
                     .firstOrNull { it != UserConfig.selectedAccount && !UserConfig.getInstance(it).isClientActivated && it !in slots }
                 if (tempSlot == null) {
@@ -513,6 +514,47 @@ object TdataExportHelper {
                             put("apiHash", GgtgDesktopProfiles.APP_HASH)
                         }
                         entry.put("device", dev)
+                        val noteText = if (sessionNote.isNotEmpty()) sessionNote else "экспорт для Desktop (${android.os.Build.MODEL})"
+                        entry.put("sessionNote", noteText)
+                        entry.put("note", noteText)
+                        entry.put("sessionRole", "desktop")
+
+                        val spam = GgtgSpamStatus.find(account.userId)
+                        if (spam != null && spam.checkedAt > 0) {
+                            entry.put("spamStatus", org.json.JSONObject().apply {
+                                put("state", when (spam.state) {
+                                    GgtgSpamStatus.State.Temporary -> "temporary"
+                                    GgtgSpamStatus.State.Permanent -> "permanent"
+                                    else -> "clear"
+                                })
+                                put("until", spam.until)
+                                put("checkedAt", spam.checkedAt)
+                            })
+                        }
+                        if (GgtgAccounts.isTrashed(slot)) {
+                            entry.put("trashed", true)
+                        }
+
+                        val exportStored = GgtgSessions.StoredSession(
+                            id = "${System.currentTimeMillis()}_${(1000..9999).random()}",
+                            userId = account.userId,
+                            role = "exported",
+                            source = "desktop_export",
+                            note = noteText,
+                            state = "ok",
+                            createdAt = System.currentTimeMillis() / 1000,
+                            phone = phone,
+                            name = listOfNotNull(uc.currentUser?.first_name, uc.currentUser?.last_name).joinToString(" ").trim(),
+                            folder = uc.ncgFolder.orEmpty(),
+                            twoFactor = uc.ncgTwoFactor.orEmpty(),
+                            mainDcId = account.mainDcId,
+                            keys = account.keys,
+                            device = dev,
+                            proxy = proxyJson
+                        )
+                        GgtgSessions.addStored(exportStored)
+                        GgtgSessions.saveToVault(exportStored, account)
+
                         accounts.put(entry)
                     }.onFailure { t ->
                         if (t is PasswordSkippedException) passwordSkipped++
@@ -546,6 +588,7 @@ object TdataExportHelper {
             }
         }
     }
+}
 
     private fun zipDir(dir: File, zip: File) {
         ZipOutputStream(zip.outputStream().buffered()).use { zos ->

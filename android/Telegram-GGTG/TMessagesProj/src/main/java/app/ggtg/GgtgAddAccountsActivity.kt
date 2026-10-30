@@ -57,39 +57,39 @@ class GgtgAddAccountsActivity : BaseFragment() {
         proxies.addView(state)
         GgtgUi.addCard(column, proxies)
         refreshProxyState()
-        GgtgUi.addCard(column, GgtgUi.actionCard(context, "", "Списки прокси",
+        GgtgUi.addCard(column, GgtgUi.actionCard(context, R.drawable.msg_language, "Списки прокси",
             "Добавьте прокси пачкой «хост:порт:логин:пароль». Каждому новому аккаунту выдаётся свой.") {
             presentFragment(GgtgProxyActivity())
         })
 
         // ---- accounts ----
         column.addView(GgtgUi.sectionLabel(context, "2. Аккаунты"))
-        GgtgUi.addCard(column, GgtgUi.actionCard(context, "", "Авторегистрация по SMS",
-            "Автоматическая регистрация аккаунтов в N потоков через SMS-сервисы с 2FA и прокси.") {
+        GgtgUi.addCard(column, GgtgUi.actionCard(context, R.drawable.msg_newphone, "Регистрация аккаунтов",
+            "Автоматическая (по SMS) и ручная регистрация новых аккаунтов с 2FA, прокси, Push-токенами (FCM) и обходом защиты.") {
             presentFragment(GgtgRegistrationActivity())
         })
-        GgtgUi.addCard(column, GgtgUi.actionCard(context, "", "Смена номера (миграция)",
+        GgtgUi.addCard(column, GgtgUi.actionCard(context, R.drawable.msg_retry, "Смена номера (миграция)",
             "Смена номера на существующих аккаунтах через SMS-сервисы с учётом отлёжки 24 часа.") {
             presentFragment(GgtgPhoneMigrationActivity())
         })
-        GgtgUi.addCard(column, GgtgUi.actionCard(context, "", "Импорт Сессия + JSON",
+        GgtgUi.addCard(column, GgtgUi.actionCard(context, R.drawable.msg_list, "Импорт Сессия + JSON",
             "Файлы .session и .json (Telethon / Pyrogram / софт): zip-архив или папка с 2FA и прокси.") {
             presentFragment(GgtgSessionJsonImportActivity())
         })
-        GgtgUi.addCard(column, GgtgUi.actionCard(context, "", "Импорт .ggtg",
+        GgtgUi.addCard(column, GgtgUi.actionCard(context, R.drawable.msg_archive, "Импорт .ggtg",
             "Файл экспорта с GGTG Desktop: аккаунты с прокси, папками и паролями 2FA.") {
             presentFragment(GgtgImportActivity())
         })
-        GgtgUi.addCard(column, GgtgUi.actionCard(context, "", "Импорт tdata",
+        GgtgUi.addCard(column, GgtgUi.actionCard(context, R.drawable.msg_folders, "Импорт tdata",
             "Папка tdata с компьютера: телефон получает свою отдельную сессию.") {
             presentFragment(GgtgTdataImportActivity())
         })
-        GgtgUi.addCard(column, GgtgUi.actionCard(context, "", "Войти по номеру телефона",
+        GgtgUi.addCard(column, GgtgUi.actionCard(context, R.drawable.msg_calls, "Войти по номеру телефона",
             "Сначала выбирается прокси: код никогда не запрашивается с адреса этого телефона.") {
             signIn(context)
         })
         if (GgtgSyncTransport.mainSlot() != null) {
-            GgtgUi.addCard(column, GgtgUi.actionCard(context, "", "Принять аккаунты с Desktop",
+            GgtgUi.addCard(column, GgtgUi.actionCard(context, R.drawable.msg_download, "Принять аккаунты с Desktop",
                 "Через синхронизацию: новой отдельной сессией, без разрыва на Desktop.") {
                 presentFragment(GgtgSyncAccountsActivity())
             })

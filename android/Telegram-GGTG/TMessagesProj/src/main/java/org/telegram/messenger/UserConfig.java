@@ -59,8 +59,9 @@ public class UserConfig extends BaseController {
 
     public boolean notificationsSettingsLoaded;
     public boolean notificationsSignUpSettingsLoaded;
-    public boolean syncContacts = true;
-    public boolean suggestContacts = true;
+    // ggtg: disable contacts sync by default to prevent mass anti-spam triggers when managing multiple accounts
+    public boolean syncContacts = false;
+    public boolean suggestContacts = false;
     public boolean showCallsTab;
     public boolean hasSecureData;
     public int loginTime;
@@ -391,9 +392,9 @@ public class UserConfig extends BaseController {
             ncgAppHash = preferences.getString("ncgAppHash", "");
             ncgTzSet = preferences.getBoolean("ncgTzSet", false);
             ncgTzOffset = preferences.getInt("ncgTzOffset", 0);
-            syncContacts = preferences.getBoolean("syncContacts", true);
+            syncContacts = preferences.getBoolean("syncContacts", false);
             showCallsTab = preferences.getBoolean("showCallsTab", false);
-            suggestContacts = preferences.getBoolean("suggestContacts", true);
+            suggestContacts = preferences.getBoolean("suggestContacts", false);
             hasSecureData = preferences.getBoolean("hasSecureData", false);
             notificationsSettingsLoaded = preferences.getBoolean("notificationsSettingsLoaded4", false);
             notificationsSignUpSettingsLoaded = preferences.getBoolean("notificationsSignUpSettingsLoaded", false);
@@ -573,9 +574,9 @@ public class UserConfig extends BaseController {
         webappRatingLoadTime = 0;
         draftsLoaded = false;
         contactsReimported = true;
-        syncContacts = true;
+        syncContacts = false;
         showCallsTab = false;
-        suggestContacts = true;
+        suggestContacts = false;
         unreadDialogsLoaded = true;
         hasValidDialogLoadIds = true;
         unacceptedTermsOfService = null;

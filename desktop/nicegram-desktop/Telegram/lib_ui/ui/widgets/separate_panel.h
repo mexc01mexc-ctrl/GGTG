@@ -57,6 +57,7 @@ struct SeparatePanelArgs {
 	Fn<bool(int zorder)> animationsPaused;
 	const style::PopupMenu *menuSt = nullptr;
 	bool noShadow = false;
+	bool isWindow = false;
 };
 
 struct TitleBadgeDescriptor {
@@ -242,6 +243,7 @@ private:
 	bool _backAllowed = false;
 	bool _closeAllowed = true;
 	bool _noShadow = false;
+	bool _isWindow = false;
 	style::margins _padding;
 
 	bool _dragging = false;

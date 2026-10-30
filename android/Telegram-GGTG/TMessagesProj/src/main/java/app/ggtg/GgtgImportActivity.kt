@@ -48,9 +48,9 @@ class GgtgImportActivity : BaseFragment() {
         fragmentView = frame
         val root = GgtgUi.page(context, frame)
 
-        GgtgUi.addCard(root, GgtgUi.infoCard(context, "", "Что это",
+        GgtgUi.addCard(root, GgtgUi.infoCard(context, R.drawable.msg_info, "Что это",
             "Файл .ggtg создаётся в GGTG Desktop (раздел «Экспорт»): каждому аккаунту там выдаётся новая отдельная сессия, папка, прокси и пароль 2FA. Здесь он ставится напрямую, без повторного дублирования."), top = 10f)
-        GgtgUi.addCard(root, GgtgUi.actionCard(context, "", "Выбрать файл .ggtg", "Откроется выбор файла на телефоне") {
+        GgtgUi.addCard(root, GgtgUi.actionCard(context, R.drawable.msg_archive, "Выбрать файл .ggtg", "Откроется выбор файла на телефоне") {
             val intent = Intent(Intent.ACTION_OPEN_DOCUMENT).apply {
                 addCategory(Intent.CATEGORY_OPENABLE)
                 type = "*/*"
@@ -76,13 +76,26 @@ class GgtgImportActivity : BaseFragment() {
             toast("Это не экспорт GGTG (.ggtg)")
             return
         }
+        val withoutProxy = GgtgPackImporter.countWithoutProxy(copy)
         val needsPool = GgtgPackImporter.needsProxyPool(copy)
-        GgtgImportSupport.askCreateBackupDialog(context) { createBackup ->
-            if (needsPool) {
-                GgtgProxyChooser.show(context) { source -> runImport(copy, source, createBackup) }
-            } else {
-                runImport(copy, null, createBackup)
+        val proceed = {
+            GgtgImportSupport.askCreateBackupDialog(context) { createBackup ->
+                if (needsPool) {
+                    GgtgProxyChooser.show(context) { source -> runImport(copy, source, createBackup) }
+                } else {
+                    runImport(copy, null, createBackup)
+                }
             }
+        }
+        if (!needsPool && withoutProxy > 1) {
+            AlertDialog.Builder(context)
+                .setTitle("Внимание: импорт без прокси")
+                .setMessage("В импортируемом файле $withoutProxy аккаунтов не имеют своего прокси и будут подключаться через прямое интернет-соединение устройства.\n\nМассовое подключение сессий с одного IP может вызвать ограничения Telegram. Продолжить?")
+                .setPositiveButton("Продолжить") { _, _ -> proceed() }
+                .setNegativeButton("Отмена") { _, _ -> copy.delete() }
+                .show()
+        } else {
+            proceed()
         }
     }
 

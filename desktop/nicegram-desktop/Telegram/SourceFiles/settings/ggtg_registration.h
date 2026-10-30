@@ -208,11 +208,12 @@ struct SettingsData {
 	bool autoRandomNames = true;
 	QString customFirstName;
 	QString customLastName;
+	QString manualPhone;
 	int mode = 0; // 0 = Auto SMS, 1 = Manual SIM
 
 	// Multi-threading and target count (Point 5)
 	int targetSuccessCount = 10;
-	int threadsCount = 2; // 1 to 10 parallel threads
+	int threadsCount = 1; // 1 to 10 parallel threads
 	int stepDelayMin = 10; // seconds between registration steps
 	int stepDelayMax = 30;
 	int accountDelayMin = 15; // seconds between accounts in a thread
@@ -231,7 +232,7 @@ struct SettingsData {
 	bool skipAppCode = true;
 	// Reject numbers that already failed before (registered / banned / invalid), before asking for a code
 	bool filterNumbers = true;
-	// Reserve of unused Play Integrity tokens; replace the token when the number hits a flood limit
+	// Reserve of unused Push Notifications (FCM) tokens; replace the token when the number hits a flood limit
 	bool replaceTokenOnFlood = true;
 
 	// Mobile emulation settings (Point 1 & 2)
@@ -310,6 +311,7 @@ inline SettingsData LoadSettings() {
 	if (obj.contains(u"autoRandomNames"_q)) result.autoRandomNames = obj[u"autoRandomNames"_q].toBool();
 	if (obj.contains(u"customFirstName"_q)) result.customFirstName = obj[u"customFirstName"_q].toString();
 	if (obj.contains(u"customLastName"_q)) result.customLastName = obj[u"customLastName"_q].toString();
+	if (obj.contains(u"manualPhone"_q)) result.manualPhone = obj[u"manualPhone"_q].toString();
 	if (obj.contains(u"mode"_q)) result.mode = obj[u"mode"_q].toInt();
 
 	if (obj.contains(u"targetSuccessCount"_q)) result.targetSuccessCount = std::max(1, obj[u"targetSuccessCount"_q].toInt());
@@ -386,6 +388,7 @@ inline void SaveSettings(const SettingsData &data) {
 	obj[u"autoRandomNames"_q] = data.autoRandomNames;
 	obj[u"customFirstName"_q] = data.customFirstName;
 	obj[u"customLastName"_q] = data.customLastName;
+	obj[u"manualPhone"_q] = data.manualPhone;
 	obj[u"mode"_q] = data.mode;
 
 	obj[u"targetSuccessCount"_q] = data.targetSuccessCount;
@@ -1189,9 +1192,10 @@ inline QMutex &LiveCountriesMutex() {
 	if (phone.startsWith(u"044"_q) && phone.length() > 11) {
 		phone = phone.mid(1); // 044... -> 44...
 	}
-	if (phone.startsWith(u"44044"_q) && phone.length() > 12) {
+	while (phone.startsWith(u"44044"_q) && phone.length() > 12) {
 		phone = u"44"_q + phone.mid(5); // 44044... -> 44...
-	} else if (phone.startsWith(u"4444"_q) && phone.length() > 12) {
+	}
+	while (phone.startsWith(u"4444"_q) && phone.length() > 12) {
 		phone = phone.mid(2); // 4444... -> 44...
 	}
 	if (phone.startsWith(u"440"_q) && phone.length() > 10) phone = u"44"_q + phone.mid(3);
@@ -1477,16 +1481,85 @@ inline std::vector<RefundTask> &RefundQueue() {
 	return list;
 }
 
+[[nodiscard]] inline QString RefundQueuePath() {
+	return Core::GgtgPaths::DbDir() + u"refund_queue.json"_q;
+}
+
+inline void SaveRefundQueue() {
+	auto file = QSaveFile(RefundQueuePath());
+	if (!file.open(QIODevice::WriteOnly)) {
+		return;
+	}
+	auto array = QJsonArray();
+	for (const auto &t : RefundQueue()) {
+		if (!t.activationId.isEmpty()) {
+			auto obj = QJsonObject();
+			obj[u"id"_q] = t.activationId;
+			obj[u"phone"_q] = t.phone;
+			obj[u"orderedAt"_q] = qint64(t.orderedAt);
+			obj[u"attempts"_q] = t.attempts;
+			obj[u"serviceId"_q] = t.settings.serviceId;
+			obj[u"apiKey"_q] = t.settings.apiKey;
+			obj[u"customUrl"_q] = t.settings.customUrl;
+			array.append(obj);
+		}
+	}
+	file.write(QJsonDocument(array).toJson(QJsonDocument::Compact));
+	file.commit();
+}
+
+inline void LoadRefundQueue() {
+	auto file = QFile(RefundQueuePath());
+	if (!file.open(QIODevice::ReadOnly)) {
+		return;
+	}
+	const auto doc = QJsonDocument::fromJson(file.readAll());
+	auto &queue = RefundQueue();
+	queue.clear();
+	for (const auto &val : doc.array()) {
+		const auto obj = val.toObject();
+		auto task = RefundTask();
+		task.activationId = obj[u"id"_q].toString();
+		task.phone = obj[u"phone"_q].toString();
+		task.orderedAt = crl::time(obj[u"orderedAt"_q].toVariant().toLongLong());
+		task.attempts = obj[u"attempts"_q].toInt();
+		task.settings.serviceId = obj[u"serviceId"_q].toString();
+		task.settings.apiKey = obj[u"apiKey"_q].toString();
+		task.settings.customUrl = obj[u"customUrl"_q].toString();
+		if (!task.activationId.isEmpty()) {
+			queue.push_back(task);
+		}
+	}
+}
+
+inline void RemoveRefundTask(const QString &activationId) {
+	auto &queue = RefundQueue();
+	for (auto it = queue.begin(); it != queue.end();) {
+		if (it->activationId == activationId) {
+			it = queue.erase(it);
+		} else {
+			++it;
+		}
+	}
+	SaveRefundQueue();
+}
+
 inline std::unique_ptr<QTimer> &RefundTimer() {
 	static auto timer = std::make_unique<QTimer>();
 	return timer;
 }
 
 inline void StartRefundSupervisor() {
+	static auto initialized = false;
+	if (!initialized) {
+		initialized = true;
+		LoadRefundQueue();
+	}
 	auto &timer = RefundTimer();
 	if (timer->isActive()) {
 		return;
 	}
+	QObject::disconnect(timer.get(), nullptr, nullptr, nullptr);
 	QObject::connect(timer.get(), &QTimer::timeout, [] {
 		auto &queue = RefundQueue();
 		if (queue.empty()) {
@@ -1494,22 +1567,41 @@ inline void StartRefundSupervisor() {
 			return;
 		}
 		const auto now = crl::now();
-		for (auto it = queue.begin(); it != queue.end();) {
-			const auto elapsedSec = (now - it->orderedAt) / 1000;
-			if (elapsedSec >= 120) {
-				it->attempts++;
-				const auto task = *it;
-				SetSmsStatus(task.settings, task.activationId, 8, [=](bool ok, QString resp, QString err) {
+		const auto snapshot = queue; // snapshot to allow safe iterations
+		for (const auto &task : snapshot) {
+			const auto elapsedSec = (now - task.orderedAt) / 1000;
+			if (elapsedSec >= 122) { // 120s SMS service requirement + 2s clock leeway
+				const auto actId = task.activationId;
+				const auto phone = task.phone;
+				const auto logCb = task.logCb;
+				const auto attempts = task.attempts + 1;
+				// update attempt count
+				for (auto &qTask : queue) {
+					if (qTask.activationId == actId) {
+						qTask.attempts = attempts;
+						break;
+					}
+				}
+				SaveRefundQueue();
+
+				SetSmsStatus(task.settings, actId, 8, [=](bool ok, QString resp, QString err) {
 					if (resp == u"ACCESS_CANCEL"_q || resp == u"ACCESS_CANCEL_ALREADY"_q || resp == u"STATUS_CANCEL"_q) {
-						if (task.logCb) {
-							task.logCb(u"[Автовозврат] Средства за номер +"_q + task.phone + u" (ID: "_q + task.activationId + u") успешно возвращены на баланс!"_q);
+						if (logCb) {
+							logCb(u"[Автовозврат] Средства за номер +"_q + phone + u" (ID: "_q + actId + u") успешно возвращены на баланс!"_q);
 						}
-						LOG(("GgtgRegistration: Auto-refund success for +%1 (ID: %2)").arg(task.phone, task.activationId));
+						LOG(("GgtgRegistration: Auto-refund success for +%1 (ID: %2)").arg(phone, actId));
+						RemoveRefundTask(actId);
+					} else if (attempts >= 15) {
+						if (logCb) {
+							logCb(u"[Автовозврат] Превышено число попыток возврата для ID: "_q + actId + u" ("_q + resp + u")"_q);
+						}
+						RemoveRefundTask(actId);
+					} else {
+						if (logCb && attempts % 3 == 0) {
+							logCb(u"[Автовозврат] Сервис ответил: "_q + (resp.isEmpty() ? err : resp) + u". Повтор через 10с (попытка "_q + QString::number(attempts) + u")..."_q);
+						}
 					}
 				});
-				it = queue.erase(it);
-			} else {
-				++it;
 			}
 		}
 	});
@@ -1525,6 +1617,7 @@ inline void EnqueueRefund(
 	if (activationId.isEmpty()) {
 		return;
 	}
+	const auto orderTime = (orderedAt > 0) ? orderedAt : crl::now();
 	if (logCb) {
 		logCb(u"Запрос отмены активации номера +"_q + phone + u" (ID: "_q + activationId + u") в SMS-сервисе..."_q);
 	}
@@ -1534,18 +1627,31 @@ inline void EnqueueRefund(
 				logCb(u"[Возврат] Номер +"_q + phone + u" (ID: "_q + activationId + u") успешно отменён, средства возвращены на баланс."_q);
 			}
 			LOG(("GgtgRegistration: Refund immediate success for +%1 (ID: %2)").arg(phone, activationId));
+			RemoveRefundTask(activationId);
 			return;
 		}
+		const auto elapsedSec = (crl::now() - orderTime) / 1000;
+		const auto waitSec = std::max(crl::time(5), 122 - elapsedSec);
 		if (logCb) {
-			logCb(u"[Очередь возврата] Ответ сервиса: "_q + (resp.isEmpty() ? err : resp) + u". Номер +"_q + phone + u" поставлен в очередь автовозврата."_q);
+			logCb(u"[Очередь возврата] Сервис требует ожидания (осталось %1с). Номер +%2 (ID: %3) поставлен в автоочередь возврата."_q
+				.arg(waitSec)
+				.arg(phone)
+				.arg(activationId));
 		}
-		RefundQueue().push_back({
-			.activationId = activationId,
-			.phone = phone,
-			.orderedAt = (orderedAt > 0) ? orderedAt : crl::now(),
-			.settings = data,
-			.logCb = logCb,
+		auto &queue = RefundQueue();
+		const auto it = std::find_if(queue.begin(), queue.end(), [&](const RefundTask &t) {
+			return t.activationId == activationId;
 		});
+		if (it == queue.end()) {
+			queue.push_back({
+				.activationId = activationId,
+				.phone = phone,
+				.orderedAt = orderTime,
+				.settings = data,
+				.logCb = logCb,
+			});
+			SaveRefundQueue();
+		}
 		StartRefundSupervisor();
 	});
 }
@@ -2471,12 +2577,103 @@ inline void AddBadNumber(const QString &phone) {
 	file.commit();
 }
 
-// Play Integrity tokens that were bought but not used (the registration was
-// stopped or failed before Telegram got the request): the next number takes
-// one from here instead of buying a new token.
+// Push Notifications (FCM) tokens that were bought but not used (the registration
+// or phone migration was cancelled or failed): the next attempt takes one from
+// here instead of buying a new token. Persisted to disk across app restarts.
+[[nodiscard]] inline QString TokenReservePath() {
+	return Core::GgtgPaths::DbDir() + u"push_tokens_reserve.json"_q;
+}
+
 [[nodiscard]] inline std::vector<QString> &TokenReserve() {
-	static auto list = std::vector<QString>();
+	static auto list = [] {
+		auto result = std::vector<QString>();
+		auto file = QFile(TokenReservePath());
+		if (file.open(QIODevice::ReadOnly)) {
+			const auto doc = QJsonDocument::fromJson(file.readAll());
+			for (const auto &val : doc.array()) {
+				const auto tok = val.toString().trimmed();
+				if (!tok.isEmpty()) {
+					result.push_back(tok);
+				}
+			}
+		}
+		return result;
+	}();
 	return list;
+}
+
+inline void SaveTokenReserve() {
+	auto file = QSaveFile(TokenReservePath());
+	if (!file.open(QIODevice::WriteOnly)) {
+		return;
+	}
+	auto array = QJsonArray();
+	for (const auto &tok : TokenReserve()) {
+		if (!tok.trimmed().isEmpty()) {
+			array.append(tok.trimmed());
+		}
+	}
+	file.write(QJsonDocument(array).toJson(QJsonDocument::Compact));
+	file.commit();
+}
+
+inline void PushTokenToReserve(const QString &token) {
+	const auto trimmed = token.trimmed();
+	if (trimmed.isEmpty()) return;
+	auto &res = TokenReserve();
+	if (std::find(res.begin(), res.end(), trimmed) == res.end()) {
+		res.push_back(trimmed);
+		SaveTokenReserve();
+	}
+}
+
+inline QString PopTokenFromReserve() {
+	auto &res = TokenReserve();
+	if (res.empty()) return QString();
+	const auto tok = res.back();
+	res.pop_back();
+	SaveTokenReserve();
+	return tok;
+}
+
+[[nodiscard]] inline int TokenReserveSize() {
+	return int(TokenReserve().size());
+}
+
+[[nodiscard]] inline std::pair<QString, bool> ClassifyLog(const QString &text) {
+	const auto lower = text.toLower();
+	const bool waiting = lower.contains(u"ожида"_q)
+		|| lower.contains(u"пауз"_q)
+		|| lower.contains(u"тайм-аут"_q)
+		|| lower.contains(u"осталось"_q)
+		|| lower.contains(u"сек)"_q)
+		|| lower.contains(u"повтор через"_q)
+		|| lower.contains(u"[автовозврат]"_q)
+		|| lower.contains(u"[очередь возврата]"_q)
+		|| lower.contains(u"с)..."_q);
+	if (lower.contains(u"успешно"_q)
+		|| lower.contains(u"[ok]"_q)
+		|| lower.contains(u"✓"_q)
+		|| lower.contains(u"успех"_q)
+		|| lower.contains(u"готов к использованию"_q)
+		|| lower.contains(u"авторизация успешна"_q)) {
+		return { u"#4CAF50"_q, false }; // Green
+	}
+	if (lower.contains(u"ошибк"_q)
+		|| lower.contains(u"[ошибка]"_q)
+		|| lower.contains(u"не удалось"_q)
+		|| lower.contains(u"отклон"_q)
+		|| lower.contains(u"исключение"_q)
+		|| lower.contains(u"banned"_q)
+		|| lower.contains(u"тайм-аут ожидания"_q)
+		|| lower.contains(u"отменен"_q)
+		|| lower.contains(u"отменён"_q)) {
+		return { u"#EF5350"_q, false }; // Red
+	}
+	if (waiting) {
+		return { u"#FFA726"_q, true }; // Orange
+	}
+	return { u"#FFFFFF"_q, false }; // White
 }
 
 [[nodiscard]] inline bool IsNetworkErrorString(const QString &err) {
@@ -2513,7 +2710,7 @@ private:
 	QString _mailId;
 	QString _email;
 	QString _phone;
-	QString _token; // Play Integrity token of this number
+	QString _token; // Push Notifications (FCM) token of this number
 	bool _tokenSpent = false; // Telegram got the request: the token is used up
 	int _floodRetries = 0;
 	QString _captchaToken;
@@ -2588,9 +2785,9 @@ public:
 		if (_token.isEmpty() || _tokenSpent) {
 			return;
 		}
-		TokenReserve().push_back(_token);
-		log(u"Неиспользованный токен отправлен в резерв (в резерве: "_q
-			+ QString::number(TokenReserve().size()) + u")"_q);
+		PushTokenToReserve(_token);
+		log(u"Неиспользованный push-токен сохранён в резерв (в резерве: "_q
+			+ QString::number(TokenReserveSize()) + u")"_q);
 		_token.clear();
 	}
 
@@ -3053,16 +3250,16 @@ private:
 			_sendCode();
 			return;
 		}
-		if (!TokenReserve().empty()) {
-			_token = TokenReserve().back();
-			TokenReserve().pop_back();
-			log(u"Токен взят из резерва (осталось в резерве: "_q
-				+ QString::number(TokenReserve().size()) + u")"_q);
+		const auto reserved = PopTokenFromReserve();
+		if (!reserved.isEmpty()) {
+			_token = reserved;
+			log(u"Push-токен взят из резерва (осталось в резерве: "_q
+				+ QString::number(TokenReserveSize()) + u")"_q);
 			_sendCode();
 			return;
 		}
-		status(u"Запрос токена в сервисе токенов..."_q, false);
-		log(u"Запрос Play Integrity токена ("_q + TokenProviderName(_settings.tokenService) + u") для +"_q + _phone + u"..."_q);
+		status(u"Запрос push-токена в сервисе токенов..."_q, false);
+		log(u"Запрос Push-токена ("_q + TokenProviderName(_settings.tokenService) + u") для +"_q + _phone + u"..."_q);
 		const auto weak = std::weak_ptr<SingleRegistrationWorker>(shared_from_this());
 		FetchMobileToken(
 			MobileTokenProvider(_settings.tokenService),
@@ -3075,7 +3272,7 @@ private:
 					strong->log(u"Предупреждение сервиса токенов: "_q + err + u" (продолжаем без токена)"_q);
 				} else if (!token.isEmpty()) {
 					strong->_token = token;
-					strong->log(u"Токен Play Integrity/Google Push успешно получен и привязан"_q);
+					strong->log(u"Push-токен (FCM) успешно получен и привязан"_q);
 				}
 				strong->_sendCode();
 			},
@@ -3207,30 +3404,43 @@ private:
 			handleEmailRequired();
 			return;
 		}
-		_tokenSpent = true;
+
 		if (codeType.type() == mtpc_auth_sentCodeTypeApp) {
 			AddBadNumber(_phone);
-			if (_settings.skipAppCode && !_activationId.isEmpty()) {
-				log(u"Telegram отправил код в активное приложение на номере +"_q + _phone + u" (номер уже кем-то используется). Отклоняем номер и возвращаем средства..."_q);
-				fail(u"Номер уже зарегистрирован в Telegram (код ушёл в приложение). Номер отменён, средства возвращены."_q);
-				return;
+			if (!_activationId.isEmpty()) {
+				log(u"Telegram отправил код в приложение на других устройствах (номер уже кем-то используется). Номер +%1 отменяется, возврат средств и подбор нового..."_q.arg(_phone));
+				fail(u"Telegram отправил код в приложение (номер уже кем-то используется). Номер отменён, средства возвращены на баланс сервиса."_q);
+			} else {
+				log(u"Telegram отправил код в приложение (номер +%1 уже занят другим пользователем). Номер отклонён."_q.arg(_phone));
+				fail(u"Telegram отправил код в приложение (номер занят другим пользователем). Введите другой номер."_q);
 			}
-			if (!_settings.skipAppCode && !_activationId.isEmpty()) {
-				const auto next = data.vnext_type();
-				if (!next || next->type() != mtpc_auth_codeTypeSms) {
-					log(u"Telegram отправил код в приложение и заблокировал отправку SMS для номера +"_q + _phone + u". Отмена номера и возврат средств..."_q);
-					fail(u"Telegram не разрешает отправку SMS для занятого номера. Отмена, средства возвращены."_q);
-					return;
-				}
-				const auto timeout = std::max(5, data.vtimeout().value_or(60));
-				waitAndResendCode(timeout);
-				return;
-			}
-			log(u"Telegram отправил код в приложение на номере +"_q + _phone + u". Введите код из приложения."_q);
-			status(u"Код отправлен в приложение Telegram! Введите код."_q, false);
 			return;
-		} else if (codeType.type() == mtpc_auth_sentCodeTypeSms) {
-			log(u"Telegram подтвердил отправку SMS на номер +"_q + _phone + u"! Ожидаем поступления SMS от сервиса..."_q);
+		}
+
+		const auto isSms = (codeType.type() == mtpc_auth_sentCodeTypeSms)
+			|| (codeType.type() == mtpc_auth_sentCodeTypeSmsWord)
+			|| (codeType.type() == mtpc_auth_sentCodeTypeSmsPhrase)
+			|| (codeType.type() == mtpc_auth_sentCodeTypeFirebaseSms);
+
+		if (!_activationId.isEmpty() && !isSms) {
+			AddBadNumber(_phone);
+			const auto reason = (codeType.type() == mtpc_auth_sentCodeTypeCall
+					|| codeType.type() == mtpc_auth_sentCodeTypeMissedCall
+					|| codeType.type() == mtpc_auth_sentCodeTypeFlashCall)
+				? u"звонком (виртуальные номера не принимают звонки)"_q
+				: u"не по SMS"_q;
+			log(u"Telegram отправил код %1 для номера +%2. Номер отменяется, возврат средств и подбор нового..."_q
+				.arg(reason)
+				.arg(_phone));
+			fail(u"Telegram отправил код %1 вместо SMS. Номер отменён, средства возвращены на баланс сервиса."_q.arg(reason));
+			return;
+		}
+
+		if (codeType.type() == mtpc_auth_sentCodeTypeSms) {
+			const auto len = codeType.c_auth_sentCodeTypeSms().vlength().v;
+			log(u"Telegram подтвердил отправку сотового SMS на номер +"_q + _phone + u" (длина кода: "_q + QString::number(len) + u" цифр)! Ожидаем поступления SMS от сервиса..."_q);
+		} else if (codeType.type() == mtpc_auth_sentCodeTypeFirebaseSms) {
+			log(u"Telegram подтвердил отправку SMS через Push Notifications на номер +"_q + _phone + u"! Ожидаем SMS..."_q);
 		} else if (codeType.type() == mtpc_auth_sentCodeTypeCall) {
 			log(u"Telegram отправляет звонок на номер +"_q + _phone);
 		} else if (codeType.type() == mtpc_auth_sentCodeTypeFlashCall) {
@@ -3299,7 +3509,10 @@ private:
 				const auto &cType = sentData.vtype();
 				if (cType.type() == mtpc_auth_sentCodeTypeApp) {
 					AddBadNumber(strong->_phone);
-					strong->fail(u"Telegram повторно отправил код в приложение и отказал в отправке SMS. Номер отменён, средства возвращены."_q);
+					const auto msg = !strong->_activationId.isEmpty()
+						? u"Telegram повторно отправил код в приложение и отказал в отправке SMS. Номер отменён, средства возвращены."_q
+						: u"Telegram повторно отправил код в приложение и отказал в отправке SMS. Номер отклонён."_q;
+					strong->fail(msg);
 					return;
 				} else if (cType.type() == mtpc_auth_sentCodeTypeSms) {
 					strong->log(u"Telegram подтвердил отправку SMS на номер +"_q + strong->_phone + u"! Ожидаем поступления SMS..."_q);
@@ -3426,6 +3639,11 @@ private:
 					strong->fail(u"На номере установлен чужой 2FA пароль. Номер отменен."_q);
 				}
 			} else if (error.type() == u"PHONE_CODE_INVALID"_q) {
+				if (strong->_activationId.isEmpty()) {
+					strong->log(u"Неверный SMS-код Telegram. Проверьте введённый код и повторите ввод."_q);
+					strong->status(u"Неверный SMS-код! Проверьте и попробуйте ещё раз."_q, true);
+					return;
+				}
 				strong->fail(u"Неверный SMS-код."_q);
 			} else if (error.type() == u"PHONE_CODE_EXPIRED"_q) {
 				strong->fail(u"Срок действия SMS-кода истёк."_q);
@@ -3438,7 +3656,9 @@ private:
 
 	void handleSignUp() {
 		if (_cancelled) return;
-		if (_settings.singleNameForAll) {
+		if (!_firstName.isEmpty() && _activationId.isEmpty()) {
+			// In manual mode, keep the user-provided first and last names!
+		} else if (_settings.singleNameForAll) {
 			_firstName = _settings.customFirstName.trimmed().isEmpty() ? GenerateRandomFirstName(_settings.countryId, _settings.gender) : _settings.customFirstName.trimmed();
 			_lastName = _settings.customLastName.trimmed().isEmpty() ? GenerateRandomLastName(_settings.countryId, _settings.gender) : _settings.customLastName.trimmed();
 		} else {
@@ -3513,6 +3733,7 @@ private:
 
 	void finishRegistration(const MTPUser &user) {
 		if (_cancelled) return;
+		_tokenSpent = true;
 		user.match([this, &user](const MTPDuser &u) {
 			auto settings = std::make_unique<Main::SessionSettings>();
 			settings->setDialogsFiltersEnabled(false);
@@ -3682,12 +3903,21 @@ public:
 	}
 
 	void setLogCallback(Fn<void(QString)> cb) { _logCallback = std::move(cb); }
+	void setLogCallbackHtml(Fn<void(QString, bool)> cb) { _logCallbackHtml = std::move(cb); }
 	void setStatusCallback(Fn<void(QString, bool isError, bool isSuccess)> cb) { _statusCallback = std::move(cb); }
 	void setBalanceCallback(Fn<void(QString)> cb) { _balanceCallback = std::move(cb); }
 	void setRunningCallback(Fn<void(bool)> cb) { _runningCallback = std::move(cb); }
 	void setPauseCallback(Fn<void(bool)> cb) { _pauseCallback = std::move(cb); }
 	[[nodiscard]] bool isPaused() const { return _isPaused; }
 	[[nodiscard]] const QStringList &logHistory() const { return _logHistory; }
+	[[nodiscard]] QString fullHtmlFromEntries() const {
+		auto result = QString();
+		result.reserve(_formattedLogs.size() * 128);
+		for (const auto &entry : _formattedLogs) {
+			result += entry.html;
+		}
+		return result;
+	}
 	void updateOverallStatus() {
 		if (!_isRunning) return;
 		if (_processHandle) {
@@ -3925,16 +4155,48 @@ public:
 private:
 	void log(const QString &msg) {
 		const auto time = QDateTime::currentDateTime().toString(u"hh:mm:ss"_q);
-		const auto full = u"["_q + time + u"] "_q + msg;
-		Core::GgtgLog::Info(u"Регистрация"_q, msg);
-		_logHistory.push_back(full);
-		if (_logHistory.size() > 200) {
-			_logHistory.pop_front();
+		const auto [colorHex, isWaiting] = ClassifyLog(msg);
+		QString prefix;
+		if (msg.startsWith('[')) {
+			const auto endIdx = msg.indexOf(']');
+			if (endIdx > 0) {
+				prefix = msg.left(endIdx + 1);
+			}
 		}
+		const auto full = u"["_q + time + u"] "_q + msg;
+		const auto html = u"<div style=\"color: %1; font-family: monospace; line-height: 1.35;\">[%2] %3</div>"_q
+			.arg(colorHex)
+			.arg(time)
+			.arg(msg.toHtmlEscaped());
+
+		const bool canReplace = isWaiting
+			&& !_formattedLogs.empty()
+			&& _formattedLogs.back().isWaiting
+			&& (prefix.isEmpty() || prefix == _formattedLogs.back().prefix);
+
+		if (canReplace) {
+			_formattedLogs.back() = { time, msg, colorHex, true, prefix, html, full };
+			if (!_logHistory.isEmpty()) {
+				_logHistory.back() = full;
+			}
+		} else {
+			_formattedLogs.push_back({ time, msg, colorHex, isWaiting, prefix, html, full });
+			_logHistory.push_back(full);
+			if (_formattedLogs.size() > 200) {
+				_formattedLogs.erase(_formattedLogs.begin());
+				_logHistory.pop_front();
+			}
+		}
+
+		Core::GgtgLog::Info(u"Регистрация"_q, msg);
 		if (_processHandle) {
 			_processHandle->log(msg);
 		}
-		if (_logCallback) _logCallback(full);
+		if (_logCallbackHtml) {
+			_logCallbackHtml(fullHtmlFromEntries(), canReplace);
+		} else if (_logCallback) {
+			_logCallback(full);
+		}
 	}
 
 	void status(const QString &msg, bool isError, bool isSuccess) {
@@ -4056,7 +4318,7 @@ private:
 					.arg(id).arg(strong->_successCount).arg(strong->_targetSuccessCount));
 			} else {
 				strong->_failedCount++;
-				strong->log(u"✗ [Поток %1] Завершился с ошибкой: %2. Всего ошибок: %3. Запускаем следующий номер..."_q
+				strong->log(u"[Поток %1] Завершился с ошибкой: %2. Всего ошибок: %3. Запускаем следующий номер..."_q
 					.arg(id).arg(error.isEmpty() ? u"Неизвестная ошибка"_q : error).arg(strong->_failedCount));
 			}
 
@@ -4139,7 +4401,19 @@ private:
 	std::shared_ptr<Core::ProcessHandle> _processHandle;
 	QStringList _logHistory;
 
+	struct FormattedLogEntry {
+		QString time;
+		QString message;
+		QString colorHex;
+		bool isWaiting = false;
+		QString prefix;
+		QString html;
+		QString plain;
+	};
+	std::vector<FormattedLogEntry> _formattedLogs;
+
 	Fn<void(QString)> _logCallback;
+	Fn<void(QString, bool)> _logCallbackHtml;
 	Fn<void(QString, bool isError, bool isSuccess)> _statusCallback;
 	Fn<void(QString)> _balanceCallback;
 	Fn<void(bool)> _runningCallback;
@@ -4617,7 +4891,7 @@ inline void PerformAccountPhoneChange(
 				*sendChangePhoneCodeReq = [=, runner = runner] {
 					if (!Main::AccountIsLive(account)) {
 						if (!pushTokenHolder->isEmpty()) {
-							TokenReserve().push_back(*pushTokenHolder);
+							PushTokenToReserve(*pushTokenHolder);
 							pushTokenHolder->clear();
 						}
 						EnqueueRefund(settings, activationId, phone, orderedAt, [=](QString msg) {
@@ -4654,16 +4928,17 @@ inline void PerformAccountPhoneChange(
 								|| (codeType.type() == mtpc_auth_sentCodeTypeFirebaseSms);
 
 							if (!isSms) {
+								AddBadNumber(phone);
 								const auto reason = (codeType.type() == mtpc_auth_sentCodeTypeApp)
-									? u"в приложение на других устройствах"_q
+									? u"в приложение на других устройствах (номер уже кем-то используется)"_q
 									: (codeType.type() == mtpc_auth_sentCodeTypeCall
 										|| codeType.type() == mtpc_auth_sentCodeTypeMissedCall
 										|| codeType.type() == mtpc_auth_sentCodeTypeFlashCall)
-									? u"звонком"_q
+									? u"звонком (виртуальные номера не принимают звонки)"_q
 									: u"не по SMS"_q;
 
 								if (!pushTokenHolder->isEmpty()) {
-									TokenReserve().push_back(*pushTokenHolder);
+									PushTokenToReserve(*pushTokenHolder);
 									pushTokenHolder->clear();
 								}
 								EnqueueRefund(settings, activationId, phone, orderedAt, [=](QString msg) {
@@ -4693,18 +4968,22 @@ inline void PerformAccountPhoneChange(
 							} else if (codeType.type() == mtpc_auth_sentCodeTypeSmsWord || codeType.type() == mtpc_auth_sentCodeTypeSmsPhrase) {
 								codeMsg = u"Telegram подтвердил отправку сотового SMS на +%1. Ожидание SMS..."_q.arg(phone);
 							} else {
-								codeMsg = u"Telegram отправил SMS через Push Firebase (Play Integrity) на +%1. Ожидание SMS..."_q.arg(phone);
+								codeMsg = u"Telegram отправил SMS через Push Notifications на +%1. Ожидание SMS..."_q.arg(phone);
 							}
 							progressCb(codeMsg, true);
 
 							const auto pollAttempts = std::make_shared<int>(0);
+							const auto pollingInProgress = std::make_shared<bool>(false);
 							const auto pollTimer = std::make_shared<QTimer>();
 							QObject::connect(pollTimer.get(), &QTimer::timeout, [=, runner = runner] {
+								if (*pollingInProgress) {
+									return;
+								}
 								++*pollAttempts;
 								if (*pollAttempts > 70) {
 									pollTimer->stop();
 									if (!pushTokenHolder->isEmpty()) {
-										TokenReserve().push_back(*pushTokenHolder);
+										PushTokenToReserve(*pushTokenHolder);
 										pushTokenHolder->clear();
 									}
 									EnqueueRefund(settings, activationId, phone, orderedAt, [=](QString msg) {
@@ -4726,7 +5005,9 @@ inline void PerformAccountPhoneChange(
 								}
 								progressCb(u"Ожидание SMS-кода (+%1, %2с)..."_q.arg(phone).arg((*pollAttempts) * 3), true);
 
+								*pollingInProgress = true;
 								PollSmsCode(settings, activationId, [=, runner = runner](QString status, QString smsCode, QString) {
+									*pollingInProgress = false;
 									if (status == u"ok"_q && !smsCode.isEmpty()) {
 										pollTimer->stop();
 
@@ -4750,7 +5031,7 @@ inline void PerformAccountPhoneChange(
 												done(true, u"Номер успешно изменён на +"_q + phone);
 											}).fail([=, runner = runner](const MTP::Error &changeErr) {
 												if (!pushTokenHolder->isEmpty()) {
-													TokenReserve().push_back(*pushTokenHolder);
+													PushTokenToReserve(*pushTokenHolder);
 													pushTokenHolder->clear();
 												}
 												EnqueueRefund(settings, activationId, phone, orderedAt, [=](QString msg) {
@@ -4780,7 +5061,7 @@ inline void PerformAccountPhoneChange(
 									} else if (status == u"cancel"_q) {
 										pollTimer->stop();
 										if (!pushTokenHolder->isEmpty()) {
-											TokenReserve().push_back(*pushTokenHolder);
+											PushTokenToReserve(*pushTokenHolder);
 											pushTokenHolder->clear();
 										}
 										if (*attempt < kMaxPhoneMigrationAttempts) {
@@ -4797,7 +5078,7 @@ inline void PerformAccountPhoneChange(
 							pollTimer->start(3000);
 						} else {
 							if (!pushTokenHolder->isEmpty()) {
-								TokenReserve().push_back(*pushTokenHolder);
+								PushTokenToReserve(*pushTokenHolder);
 								pushTokenHolder->clear();
 							}
 							EnqueueRefund(settings, activationId, phone, orderedAt, [=](QString msg) {
@@ -4837,7 +5118,7 @@ inline void PerformAccountPhoneChange(
 									progressCb(u"Не удалось решить капчу: %1. Отмена и пробуем другой номер..."_q
 										.arg(solveErr.isEmpty() ? u"пустой токен"_q : solveErr), true);
 									if (!pushTokenHolder->isEmpty()) {
-										TokenReserve().push_back(*pushTokenHolder);
+										PushTokenToReserve(*pushTokenHolder);
 										pushTokenHolder->clear();
 									}
 									EnqueueRefund(settings, activationId, phone, orderedAt, [=](QString msg) {
@@ -4861,7 +5142,7 @@ inline void PerformAccountPhoneChange(
 						}
 
 						if (!pushTokenHolder->isEmpty()) {
-							TokenReserve().push_back(*pushTokenHolder);
+							PushTokenToReserve(*pushTokenHolder);
 							pushTokenHolder->clear();
 						}
 						EnqueueRefund(settings, activationId, phone, orderedAt, [=](QString msg) {
@@ -4885,6 +5166,7 @@ inline void PerformAccountPhoneChange(
 						const auto isInvalid = fullErr.contains(u"PHONE_NUMBER_INVALID"_q);
 
 						if ((isOccupied || isBanned || isInvalid) && (*attempt < kMaxPhoneMigrationAttempts)) {
+							AddBadNumber(phone);
 							const auto reason = isOccupied
 								? u"занят другим аккаунтом"_q
 								: isBanned
@@ -4925,12 +5207,12 @@ inline void PerformAccountPhoneChange(
 					}
 				};
 
-				// Pre-fetch Play Integrity push token from TokenReserve or TokenFast / AntiSafety if enabled
+				// Pre-fetch Push Notifications (FCM) token from TokenReserve or AntiSafety / TokenFast if enabled
 				if (settings.tokenService != 0 && !settings.tokenApiKey.trimmed().isEmpty()) {
-					if (!TokenReserve().empty()) {
-						*pushTokenHolder = TokenReserve().back();
-						TokenReserve().pop_back();
-						progressCb(u"Push-токен взят из резерва (в резерве: %1)"_q.arg(TokenReserve().size()), true);
+					const auto reserved = PopTokenFromReserve();
+					if (!reserved.isEmpty()) {
+						*pushTokenHolder = reserved;
+						progressCb(u"Push-токен взят из резерва (в резерве: %1)"_q.arg(TokenReserveSize()), true);
 						(*sendChangePhoneCodeReq)();
 					} else {
 						progressCb(u"Запрос Push-токена ("_q + TokenProviderName(settings.tokenService) + u") для +"_q + phone + u"..."_q, true);
@@ -5229,7 +5511,7 @@ inline void FillPhoneMigrationContent(
 	// =====================================================================
 	addSectionTo(layout,
 		u"3. Защита и токены (Push, Captcha)"_q,
-		u"Обход reCAPTCHA Enterprise и токен Play Integrity для безопасной смены номера"_q,
+		u"Обход reCAPTCHA Enterprise и Push-токен (FCM) для безопасной смены номера"_q,
 		&st::menuIconDevices);
 
 	const auto cardTokens = layout->add(
@@ -5246,12 +5528,12 @@ inline void FillPhoneMigrationContent(
 	const auto tokenServiceBtn = inTokens->add(
 		object_ptr<PickerRow>(
 			inTokens,
-			u"Сервис токенов (Play Integrity)"_q,
+			u"Сервис Push-токенов (FCM)"_q,
 			tokenProviderTitle(state->tokenService)));
 
 	tokenServiceBtn->setClickedCallback([=] {
 		show->show(Box([=](not_null<Ui::GenericBox*> pickBox) {
-			pickBox->setTitle(rpl::single(u"Выберите сервис токенов Play Integrity / SafetyNet"_q));
+			pickBox->setTitle(rpl::single(u"Выберите сервис Push-токенов (FCM)"_q));
 			pickBox->setWidth(st::boxWideWidth);
 
 			const auto options = std::vector<std::pair<int, QString>>{
@@ -5464,7 +5746,7 @@ inline void FillRegistrationBox(
 		not_null<Ui::GenericBox*> box,
 		not_null<Window::SessionController*> controller) {
 	const auto show = box->uiShow();
-	box->setTitle(rpl::single(u"Авторегистрация"_q));
+	box->setTitle(rpl::single(u"Регистрация аккаунтов"_q));
 	box->setWidth(st::boxWideWidth + style::ConvertScale(120));
 
 	const auto state = box->lifetime().make_state<SettingsData>(LoadSettings());
@@ -5475,6 +5757,7 @@ inline void FillRegistrationBox(
 	box->lifetime().add([regController] {
 		if (regController) {
 			regController->setLogCallback(nullptr);
+			regController->setLogCallbackHtml(nullptr);
 			regController->setStatusCallback(nullptr);
 			regController->setBalanceCallback(nullptr);
 			regController->setRunningCallback(nullptr);
@@ -5496,16 +5779,72 @@ inline void FillRegistrationBox(
 	};
 
 	// =====================================================================
-	//  ШАГ 1: SMS-сервис и номер
+	//  РЕЖИМ РЕГИСТРАЦИИ (Авто / Ручной)
 	// =====================================================================
 	addSectionTo(layout,
+		u"Режим регистрации"_q,
+		u"Выберите способ получения номера и SMS-кода"_q,
+		&st::menuIconManage);
+
+	const auto cardMode = layout->add(
+		object_ptr<Ggtg::CardBox>(layout, style::margins(16, 12, 16, 12)),
+		st::boxRowPadding);
+	const auto inMode = cardMode->inner();
+
+	const auto modeGroup = std::make_shared<Ui::RadiobuttonGroup>(state->mode);
+
+	struct ModeChoice {
+		int id;
+		QString title;
+		QString desc;
+	};
+	const auto modeChoices = std::vector<ModeChoice>{
+		{
+			0,
+			u"Авторегистрация (через SMS-сервисы с автоприёмом кода)"_q,
+			u"Автоматический заказ номеров через API, ожидание сотового SMS, многопоточная регистрация и сохранение сессий."_q,
+		},
+		{
+			1,
+			u"Ручная регистрация (по номеру телефона с ручным вводом кода)"_q,
+			u"Регистрация конкретного номера телефона с запросом кода в Telegram и ручным вводом полученного кода."_q,
+		},
+	};
+	for (const auto &m : modeChoices) {
+		inMode->add(
+			object_ptr<Ui::Radiobutton>(
+				inMode,
+				modeGroup,
+				m.id,
+				m.title,
+				st::defaultCheckbox),
+			style::margins(0, style::ConvertScale(2), 0, style::ConvertScale(2)));
+		inMode->add(
+			object_ptr<Ui::FlatLabel>(
+				inMode,
+				rpl::single(m.desc),
+				st::boxDividerLabel),
+			style::margins(style::ConvertScale(28), 0, style::ConvertScale(8), style::ConvertScale(8)));
+	}
+
+	// =====================================================================
+	//  ШАГ 1: SMS-сервис и номер (Автоматический режим)
+	// =====================================================================
+	const auto autoSmsWrap = layout->add(
+		object_ptr<Ui::SlideWrap<Ui::VerticalLayout>>(
+			layout,
+			object_ptr<Ui::VerticalLayout>(layout)),
+		style::margins());
+	const auto autoSmsLayout = autoSmsWrap->entity();
+
+	addSectionTo(autoSmsLayout,
 		u"1. SMS-сервис и номер"_q,
 		u"Выбор сервиса активаций, API-ключ, страна и оператор"_q,
 		&st::menuIconPhone);
 
-	const auto cardMain = layout->add(
+	const auto cardMain = autoSmsLayout->add(
 		object_ptr<Ggtg::CardBox>(
-			layout,
+			autoSmsLayout,
 			style::margins(16, 14, 16, 14),
 			std::optional<QColor>(st::windowActiveTextFg->c)),
 		st::boxRowPadding);
@@ -5931,6 +6270,86 @@ inline void FillRegistrationBox(
 		state->skipAppCode = checked;
 		SaveSettings(*state);
 	}, skipAppCheck->lifetime());
+
+	// =====================================================================
+	//  ШАГ 1: Номер телефона и подтверждение (Ручной режим)
+	// =====================================================================
+	const auto manualPhoneWrap = layout->add(
+		object_ptr<Ui::SlideWrap<Ui::VerticalLayout>>(
+			layout,
+			object_ptr<Ui::VerticalLayout>(layout)),
+		style::margins());
+	const auto manualPhoneLayout = manualPhoneWrap->entity();
+
+	addSectionTo(manualPhoneLayout,
+		u"1. Номер телефона и подтверждение"_q,
+		u"Введите номер телефона вручную, запросите код и подтвердите регистрацию"_q,
+		&st::menuIconPhone);
+
+	const auto cardManual = manualPhoneLayout->add(
+		object_ptr<Ggtg::CardBox>(manualPhoneLayout, style::margins(16, 14, 16, 14)),
+		st::boxRowPadding);
+	const auto inManual = cardManual->inner();
+
+	const auto manualPhoneField = inManual->add(
+		object_ptr<Ui::InputField>(
+			inManual,
+			FieldStyle(),
+			rpl::single(u"Номер телефона с кодом страны (например +79991234567)"_q),
+			state->manualPhone),
+		style::margins(0, style::ConvertScale(4), 0, style::ConvertScale(6)));
+
+	manualPhoneField->changes() | rpl::on_next([=] {
+		state->manualPhone = manualPhoneField->getLastText().trimmed();
+		SaveSettings(*state);
+	}, manualPhoneField->lifetime());
+
+	const auto manualSendCodeBtn = inManual->add(
+		object_ptr<Ui::RoundButton>(
+			inManual,
+			rpl::single(u"Запросить код в Telegram"_q),
+			st::defaultActiveButton),
+		style::margins(0, style::ConvertScale(2), 0, style::ConvertScale(8)));
+	manualSendCodeBtn->setTextTransform(Ui::RoundButtonTextTransform::NoTransform);
+
+	const auto manualStatusLabel = inManual->add(
+		object_ptr<Ui::FlatLabel>(
+			inManual,
+			rpl::single(u"Готов к отправке запроса кода."_q),
+			st::boxLabel),
+		style::margins(0, style::ConvertScale(2), 0, style::ConvertScale(8)));
+
+	const auto manualCodeField = inManual->add(
+		object_ptr<Ui::InputField>(
+			inManual,
+			FieldStyle(),
+			rpl::single(u"Код подтверждения из SMS"_q),
+			QString()),
+		style::margins(0, style::ConvertScale(4), 0, style::ConvertScale(6)));
+
+	const auto manualBtnRow = inManual->add(object_ptr<Ui::RpWidget>(inManual));
+	manualBtnRow->resize(manualBtnRow->width(), style::ConvertScale(42));
+
+	const auto manualSubmitBtn = Ui::CreateChild<Ui::RoundButton>(
+		manualBtnRow,
+		rpl::single(u"Завершить регистрацию"_q),
+		st::defaultActiveButton);
+	manualSubmitBtn->setTextTransform(Ui::RoundButtonTextTransform::NoTransform);
+
+	const auto manualCancelBtn = Ui::CreateChild<Ui::RoundButton>(
+		manualBtnRow,
+		rpl::single(u"Отмена"_q),
+		st::defaultBoxButton);
+	manualCancelBtn->setTextTransform(Ui::RoundButtonTextTransform::NoTransform);
+
+	manualBtnRow->widthValue() | rpl::on_next([=](int w) {
+		if (w <= 0) return;
+		const auto half = (w - style::ConvertScale(8)) / 2;
+		manualSubmitBtn->resizeToWidth(std::max(0, half));
+		manualSubmitBtn->moveToLeft(0, style::ConvertScale(2));
+		manualCancelBtn->resizeToWidth(std::max(0, half));
+		manualCancelBtn->moveToLeft(half + style::ConvertScale(8), style::ConvertScale(2));
+	}, manualBtnRow->lifetime());
 
 	// =====================================================================
 	//  ШАГ 2: Прокси и сохранение
@@ -6387,12 +6806,12 @@ inline void FillRegistrationBox(
 	const auto tokenServiceBtn = inDev->add(
 		object_ptr<PickerRow>(
 			inDev,
-			u"Сервис токенов (Play Integrity)"_q,
+			u"Сервис Push-токенов (FCM)"_q,
 			tokenProviderTitle(state->tokenService)));
 
 	tokenServiceBtn->setClickedCallback([=] {
 		show->show(Box([=](not_null<Ui::GenericBox*> pickBox) {
-			pickBox->setTitle(rpl::single(u"Выберите сервис токенов Play Integrity / SafetyNet"_q));
+			pickBox->setTitle(rpl::single(u"Выберите сервис Push-токенов (FCM)"_q));
 			pickBox->setWidth(st::boxWideWidth);
 
 			const auto options = std::vector<std::pair<int, QString>>{
@@ -6521,6 +6940,19 @@ inline void FillRegistrationBox(
 		}));
 	});
 
+	const auto captchaApiKeyField = inDev->add(
+		object_ptr<Ui::InputField>(
+			inDev,
+			FieldStyle(),
+			rpl::single(u"API-ключ капчи (пусто = ключ сервиса токенов)"_q),
+			state->captchaApiKey),
+		style::margins(0, style::ConvertScale(4), 0, style::ConvertScale(6)));
+
+	captchaApiKeyField->changes() | rpl::on_next([=] {
+		state->captchaApiKey = captchaApiKeyField->getLastText().trimmed();
+		SaveSettings(*state);
+	}, captchaApiKeyField->lifetime());
+
 	// --- Покупка Email ---
 	Ui::AddSkip(inDev, style::ConvertScale(8));
 	const auto autoEmailCheck = inDev->add(
@@ -6603,15 +7035,22 @@ inline void FillRegistrationBox(
 	}, autoEmailCheck->lifetime());
 
 	// =====================================================================
-	//  ШАГ 5: План и запуск
+	//  ШАГ 5: План и запуск (Автоматический режим)
 	// =====================================================================
-	addSectionTo(layout,
+	const auto autoPlanWrap = layout->add(
+		object_ptr<Ui::SlideWrap<Ui::VerticalLayout>>(
+			layout,
+			object_ptr<Ui::VerticalLayout>(layout)),
+		style::margins());
+	const auto autoPlanLayout = autoPlanWrap->entity();
+
+	addSectionTo(autoPlanLayout,
 		u"5. План и запуск"_q,
 		u"Количество аккаунтов, потоки, задержки и управление"_q,
 		&st::menuIconManage);
 
-	const auto cardPlan = layout->add(
-		object_ptr<Ggtg::CardBox>(layout, style::margins(16, 14, 16, 14)),
+	const auto cardPlan = autoPlanLayout->add(
+		object_ptr<Ggtg::CardBox>(autoPlanLayout, style::margins(16, 14, 16, 14)),
 		st::boxRowPadding);
 	const auto inPlan = cardPlan->inner();
 
@@ -6838,21 +7277,32 @@ inline void FillRegistrationBox(
 	}, actionBtnRow->lifetime());
 
 	const auto weakStatusTextLabel = QPointer<Ui::FlatLabel>(statusTextLabel);
+	const auto weakManualStatusLabel = QPointer<Ui::FlatLabel>(manualStatusLabel);
 	const auto weakStartBtn = QPointer<Ui::RoundButton>(startBtn);
 	const auto weakPauseBtn = QPointer<Ui::RoundButton>(pauseBtn);
 	const auto weakCancelBtn = QPointer<Ui::RoundButton>(cancelBtn);
+	const auto weakSendCodeBtn = QPointer<Ui::RoundButton>(manualSendCodeBtn);
 
-	regController->setStatusCallback([weakStatusTextLabel](QString msg, bool isErr, bool isOk) {
-		if (!weakStatusTextLabel) return;
-		weakStatusTextLabel->setText(msg);
-		weakStatusTextLabel->setTextColorOverride(isErr
-			? std::make_optional(st::boxTextFgError->c)
-			: isOk
-			? std::make_optional(st::boxTextFgGood->c)
-			: std::nullopt);
+	regController->setStatusCallback([weakStatusTextLabel, weakManualStatusLabel](QString msg, bool isErr, bool isOk) {
+		if (weakStatusTextLabel) {
+			weakStatusTextLabel->setText(msg);
+			weakStatusTextLabel->setTextColorOverride(isErr
+				? std::make_optional(st::boxTextFgError->c)
+				: isOk
+				? std::make_optional(st::boxTextFgGood->c)
+				: std::nullopt);
+		}
+		if (weakManualStatusLabel) {
+			weakManualStatusLabel->setText(msg);
+			weakManualStatusLabel->setTextColorOverride(isErr
+				? std::make_optional(st::boxTextFgError->c)
+				: isOk
+				? std::make_optional(st::boxTextFgGood->c)
+				: std::nullopt);
+		}
 	});
 
-	regController->setRunningCallback([weakStartBtn, weakPauseBtn, weakCancelBtn](bool running) {
+	regController->setRunningCallback([weakStartBtn, weakPauseBtn, weakCancelBtn, weakSendCodeBtn](bool running) {
 		if (weakStartBtn) weakStartBtn->setVisible(!running);
 		if (weakPauseBtn) {
 			weakPauseBtn->setVisible(running);
@@ -6861,6 +7311,7 @@ inline void FillRegistrationBox(
 			}
 		}
 		if (weakCancelBtn) weakCancelBtn->setVisible(running);
+		if (weakSendCodeBtn) weakSendCodeBtn->setEnabled(!running);
 	});
 
 	regController->setPauseCallback([weakPauseBtn](bool paused) {
@@ -6894,7 +7345,7 @@ inline void FillRegistrationBox(
 	// =====================================================================
 	addSectionTo(layout,
 		u"Журнал действий"_q,
-		u"Лог работы фоновых потоков регистрации в реальном времени"_q,
+		u"Лог работы регистрации в реальном времени"_q,
 		&st::menuIconRestore);
 
 	const auto cardLog = layout->add(
@@ -6912,29 +7363,82 @@ inline void FillRegistrationBox(
 		style::margins(0, 0, 0, 0));
 	logField->rawTextEdit()->setReadOnly(true);
 
-	if (!regController->logHistory().isEmpty()) {
-		logField->setText(regController->logHistory().join('\n'));
-		auto cursor = logField->rawTextEdit()->textCursor();
-		cursor.movePosition(QTextCursor::End);
-		logField->rawTextEdit()->setTextCursor(cursor);
+	if (const auto edit = logField->rawTextEdit()) {
+		edit->setReadOnly(true);
+		edit->setStyleSheet(u"background-color: #12161A; border-radius: 6px; padding: 6px;"_q);
+		if (!regController->logHistory().isEmpty()) {
+			edit->setHtml(regController->fullHtmlFromEntries());
+			auto cursor = edit->textCursor();
+			cursor.movePosition(QTextCursor::End);
+			edit->setTextCursor(cursor);
+		}
 	}
 
 	const auto weakLogField = QPointer<Ui::InputField>(logField);
-	regController->setLogCallback([weakLogField](QString msg) {
+	regController->setLogCallbackHtml([weakLogField](QString html, bool) {
 		if (!weakLogField) return;
-		const auto prev = weakLogField->getLastText();
-		const auto updated = prev.isEmpty() ? msg : (prev + '\n' + msg);
-		const auto lines = updated.split('\n');
-		const auto tail = lines.mid(std::max(0, int(lines.size()) - 100)).join('\n');
-		weakLogField->setText(tail);
 		if (const auto edit = weakLogField->rawTextEdit()) {
+			edit->setHtml(html);
 			auto cursor = edit->textCursor();
 			cursor.movePosition(QTextCursor::End);
 			edit->setTextCursor(cursor);
 		}
 	});
 
-	// Обработчик кнопки запуска
+	// Переключение режима (Авторегистрация / Ручная регистрация)
+	autoSmsWrap->toggle(state->mode == 0, anim::type::instant);
+	manualPhoneWrap->toggle(state->mode == 1, anim::type::instant);
+	autoPlanWrap->toggle(state->mode == 0, anim::type::instant);
+
+	modeGroup->setChangedCallback([=](int m) {
+		state->mode = m;
+		SaveSettings(*state);
+		autoSmsWrap->toggle(m == 0, anim::type::normal);
+		manualPhoneWrap->toggle(m == 1, anim::type::normal);
+		autoPlanWrap->toggle(m == 0, anim::type::normal);
+	});
+
+	// Обработчики кнопок ручной регистрации
+	manualSendCodeBtn->setClickedCallback([=] {
+		const auto rawPhone = DigitsOnly(manualPhoneField->getLastText().trimmed());
+		if (rawPhone.length() < 7) {
+			Ggtg::Notice(show, u"Введите корректный номер телефона"_q);
+			return;
+		}
+		state->manualPhone = manualPhoneField->getLastText().trimmed();
+		state->folderTag = folderField->getLastText().trimmed();
+		if (state->folderTag.isEmpty()) state->folderTag = u"Регистрация"_q;
+		state->single2faForAll = single2faCheck->checked();
+		state->twoFactorPassword = twoFactorField->getLastText().trimmed();
+		state->singleNameForAll = singleNameCheck->checked();
+		state->autoRandomNames = !singleNameCheck->checked();
+		state->customFirstName = firstNameField->getLastText().trimmed();
+		state->customLastName = lastNameField->getLastText().trimmed();
+		state->emailApiKey = emailApiKeyField->getLastText().trimmed();
+		state->tokenApiKey = tokenApiKeyField->getLastText().trimmed();
+		state->captchaApiKey = captchaApiKeyField->getLastText().trimmed();
+		SaveSettings(*state);
+
+		CurrentRegistrationController() = regController;
+		regController->startManualSendCode(*state, rawPhone);
+	});
+
+	manualSubmitBtn->setClickedCallback([=] {
+		const auto code = manualCodeField->getLastText().trimmed();
+		if (code.isEmpty()) {
+			Ggtg::Notice(show, u"Введите код подтверждения, полученный от Telegram"_q);
+			return;
+		}
+		const auto fName = firstNameField->getLastText().trimmed();
+		const auto lName = lastNameField->getLastText().trimmed();
+		regController->submitManualCode(code, fName, lName);
+	});
+
+	manualCancelBtn->setClickedCallback([=] {
+		regController->cancelRegistration(true);
+	});
+
+	// Обработчик кнопки запуска авторегистрации
 	startBtn->setClickedCallback([=] {
 		state->apiKey = apiKeyField->getLastText().trimmed();
 		state->apiKeys.insert(state->serviceId, state->apiKey);
@@ -6949,6 +7453,7 @@ inline void FillRegistrationBox(
 		state->customLastName = lastNameField->getLastText().trimmed();
 		state->emailApiKey = emailApiKeyField->getLastText().trimmed();
 		state->tokenApiKey = tokenApiKeyField->getLastText().trimmed();
+		state->captchaApiKey = captchaApiKeyField->getLastText().trimmed();
 		state->smsOperator = state->smsOperator.trimmed();
 		state->maxPrice = maxPriceField->getLastText().trimmed();
 		state->firstNameFile = state->firstNameFile.trimmed();
@@ -6994,6 +7499,27 @@ inline object_ptr<Ui::GenericBox> MakeRegistrationBox(
 	});
 }
 
+inline void FillManualRegistrationBox(
+		not_null<Ui::GenericBox*> box,
+		not_null<Window::SessionController*> controller) {
+	auto state = LoadSettings();
+	state.mode = 1;
+	SaveSettings(state);
+	FillRegistrationBox(box, controller);
+}
+
+inline object_ptr<Ui::GenericBox> MakeManualRegistrationBox(
+		not_null<Window::SessionController*> controller) {
+	return Box([=](not_null<Ui::GenericBox*> box) {
+		FillManualRegistrationBox(box, controller);
+	});
+}
+
+inline void ShowManualRegistrationBox(
+		not_null<Window::SessionController*> controller) {
+	controller->uiShow()->showBox(MakeManualRegistrationBox(controller));
+}
+
 inline void FillPhoneMigrationBox(
 		not_null<Ui::GenericBox*> box,
 		not_null<Window::SessionController*> controller,
@@ -7030,6 +7556,16 @@ inline void ShowPhoneMigrationBox(
 inline object_ptr<Ui::GenericBox> MakeRegistrationBox(
 		not_null<Window::SessionController*> controller) {
 	return Registration::MakeRegistrationBox(controller);
+}
+
+inline object_ptr<Ui::GenericBox> MakeManualRegistrationBox(
+		not_null<Window::SessionController*> controller) {
+	return Registration::MakeManualRegistrationBox(controller);
+}
+
+inline void ShowManualRegistrationBox(
+		not_null<Window::SessionController*> controller) {
+	Registration::ShowManualRegistrationBox(controller);
 }
 
 inline object_ptr<Ui::GenericBox> MakePhoneMigrationBox(

@@ -43,7 +43,7 @@ class GgtgTdataExportActivity(private val preselectedSlots: List<Int> = emptyLis
             root,
             GgtgUi.infoCard(
                 context,
-                "",
+                org.telegram.messenger.R.drawable.msg_shareout,
                 "Экспорт сессий и аккаунтов",
                 "Экспорт выбранных аккаунтов в Telegram Desktop (tdata), сессии с JSON или единый пакет .ggtg. Доступен экспорт основной сессии с переходом на резервную, экспорт готовой резервной сессии или создание нового независимого дубликата."
             ),

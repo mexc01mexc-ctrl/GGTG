@@ -2,6 +2,7 @@ package app.ggtg
 
 import org.json.JSONArray
 import org.json.JSONObject
+import org.telegram.messenger.UserConfig
 import java.io.ByteArrayOutputStream
 import java.io.File
 import java.security.MessageDigest
@@ -224,6 +225,60 @@ object GgtgSync {
                 body.put("proxy_pools", JSONArray(poolsStr))
             }
         }
+        val sessionNotes = JSONArray()
+        for (s in GgtgSessions.listAll()) {
+            if (s.userId == 0L && s.phone.isEmpty()) continue
+            if (s.note.isEmpty() && s.role.isEmpty()) continue
+            val obj = JSONObject().apply {
+                put("id", s.id)
+                put("userId", s.userId.toString())
+                if (s.phone.isNotEmpty()) put("phone", s.phone)
+                if (s.role.isNotEmpty()) put("role", s.role)
+                if (s.note.isNotEmpty()) put("note", s.note)
+                if (s.createdAt > 0L) put("createdAt", s.createdAt)
+                if (s.hash != 0L) put("hash", s.hash.toString())
+                if (s.device != null) put("device", s.device)
+            }
+            sessionNotes.put(obj)
+        }
+        if (sessionNotes.length() > 0) {
+            body.put("session_notes", sessionNotes)
+        }
+
+        val accountStatuses = JSONObject()
+        for ((uId, status) in GgtgSpamStatus.all()) {
+            val key = uId.toString()
+            val obj = JSONObject().apply {
+                put("userId", key)
+                put("state", when (status.state) {
+                    GgtgSpamStatus.State.Temporary -> "temporary"
+                    GgtgSpamStatus.State.Permanent -> "permanent"
+                    else -> "clear"
+                })
+                put("until", status.until.toString())
+                put("checkedAt", status.checkedAt.toString())
+            }
+            accountStatuses.put(key, obj)
+        }
+        for (slot in 0 until UserConfig.MAX_ACCOUNT_COUNT) {
+            val uc = UserConfig.getInstance(slot)
+            if (!uc.isClientActivated) continue
+            val uId = uc.clientUserId
+            val key = uId.toString()
+            val obj = accountStatuses.optJSONObject(key) ?: JSONObject().apply {
+                put("userId", key)
+                accountStatuses.put(key, this)
+            }
+            uc.currentUser?.phone?.takeIf { it.isNotEmpty() }?.let { obj.put("phone", it) }
+            if (uc.ncgFolder.isNotEmpty()) obj.put("folder", uc.ncgFolder)
+            if (GgtgAccounts.isTrashed(slot)) obj.put("trashed", true)
+            if (uc.ncgOffline) obj.put("offline", true)
+            val sent = runCatching { GgtgSms.sentToday(slot) }.getOrDefault(0)
+            if (sent > 0) obj.put("sentToday", sent)
+        }
+        if (accountStatuses.length() > 0) {
+            body.put("account_statuses", accountStatuses)
+        }
         // the hash covers the contents only, not who made it and when
         val hash = MessageDigest.getInstance("SHA-256").digest(body.toString().toByteArray(Charsets.UTF_8))
             .joinToString("") { "%02x".format(it) }
@@ -340,6 +395,84 @@ object GgtgSync {
         // merge proxy pools if present
         root.optJSONArray("proxy_pools")?.let { poolsArr ->
             org.telegram.ui.Components.GgtgProxyPoolStore.mergeJson(poolsArr.toString())
+        }
+
+        // merge session notes & roles across devices
+        root.optJSONArray("session_notes")?.let { notesArr ->
+            val all = GgtgSessions.listAll()
+            for (i in 0 until notesArr.length()) {
+                val obj = notesArr.optJSONObject(i) ?: continue
+                val remoteId = obj.optString("id")
+                val uId = obj.optString("userId").toLongOrNull() ?: 0L
+                val phone = obj.optString("phone")
+                val note = obj.optString("note")
+                val role = obj.optString("role")
+                val remoteHash = obj.optString("hash").toLongOrNull() ?: 0L
+                if (note.isEmpty() && role.isEmpty()) continue
+                var matched = false
+                for (item in all) {
+                    if ((remoteId.isNotEmpty() && item.id == remoteId) ||
+                        (remoteHash != 0L && item.hash == remoteHash) ||
+                        ((uId != 0L && item.userId == uId) || (phone.isNotEmpty() && item.phone == phone))) {
+                        matched = true
+                        if (note.isNotEmpty() && (item.note.isEmpty() || item.note != note)) {
+                            GgtgSessions.updateNote(item.id, note)
+                        }
+                        if (role.isNotEmpty() && item.role.isEmpty()) {
+                            GgtgSessions.updateRole(item.id, role)
+                        }
+                        if (remoteHash != 0L && item.hash == 0L) {
+                            GgtgSessions.updateHash(item.id, remoteHash)
+                        }
+                    }
+                }
+                if (!matched && uId != 0L) {
+                    val entry = GgtgSessions.StoredSession(
+                        id = if (remoteId.isNotEmpty()) remoteId else "${System.currentTimeMillis()}_${(1000..9999).random()}",
+                        userId = uId,
+                        role = role.ifEmpty { "stored" },
+                        source = "sync",
+                        note = note,
+                        state = "ok",
+                        createdAt = obj.optLong("createdAt", System.currentTimeMillis() / 1000),
+                        hash = remoteHash,
+                        phone = phone,
+                        device = obj.optJSONObject("device")
+                    )
+                    GgtgSessions.addStored(entry)
+                }
+            }
+        }
+
+        // merge account statuses across devices
+        root.optJSONObject("account_statuses")?.let { statusesObj ->
+            for (key in statusesObj.keys()) {
+                val entry = statusesObj.optJSONObject(key) ?: continue
+                val uId = key.toLongOrNull() ?: continue
+                val remoteStateStr = entry.optString("state")
+                val remoteUntil = entry.optLong("until", 0L)
+                val remoteCheckedAt = entry.optLong("checkedAt", 0L)
+                if (remoteCheckedAt > 0) {
+                    val state = when (remoteStateStr) {
+                        "temporary" -> GgtgSpamStatus.State.Temporary
+                        "permanent" -> GgtgSpamStatus.State.Permanent
+                        else -> GgtgSpamStatus.State.Clear
+                    }
+                    GgtgSpamStatus.merge(uId, GgtgSpamStatus.Status(state, remoteUntil, remoteCheckedAt))
+                }
+                for (slot in 0 until UserConfig.MAX_ACCOUNT_COUNT) {
+                    val uc = UserConfig.getInstance(slot)
+                    if (!uc.isClientActivated || uc.clientUserId != uId) continue
+                    val folder = entry.optString("folder")
+                    if (folder.isNotEmpty() && uc.ncgFolder.isEmpty()) {
+                        uc.ncgFolder = folder
+                        uc.saveConfig(false)
+                    }
+                    if (entry.optBoolean("trashed", false) && !GgtgAccounts.isTrashed(slot)) {
+                        GgtgAccounts.setTrashed(listOf(slot), true)
+                    }
+                }
+            }
         }
 
         // the AI side: whichever copy was changed later

@@ -51,6 +51,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "settings/ggtg_export.h"
 #include "settings/ggtg_session_json.h"
 #include "core/ggtg_sessions.h"
+#include "core/ggtg_sync_transport.h"
 #include "settings/ggtg_registration.h"
 #include "main/main_domain.h"
 #include "main/session_duplicate.h"
@@ -846,10 +847,15 @@ void RunBulkAction(
 			if (progress.isEmpty()) {
 				progress = u"выполняется..."_q;
 			}
+			const auto lower = progress.toLower();
+			const auto waiting = lower.contains(u"ожида"_q)
+				|| lower.contains(u"пауз"_q)
+				|| lower.contains(u"сек)"_q)
+				|| lower.contains(u"с)..."_q);
 			setRowText(
 				i,
 				label + u" — "_q + progress,
-				std::nullopt);
+				waiting ? std::make_optional(QColor(255, 167, 38)) : std::nullopt);
 			setStatus(label + u": "_q + progress);
 		};
 
@@ -6374,6 +6380,33 @@ private:
 
 };
 
+enum class AccountSortMode {
+	NumberAsc,
+	NumberDesc,
+	NameAsc,
+	NameDesc,
+	UsernameAsc,
+	UsernameDesc,
+	PhoneAsc,
+	PhoneDesc,
+	FolderAsc,
+	FolderDesc,
+	ProxyAsc,
+	StatusBest,
+	StatusWorst,
+	SmsDesc,
+	SmsAsc,
+};
+
+[[nodiscard]] inline int AccountPersistentIndex(not_null<Main::Account*> account) {
+	for (const auto &entry : Core::App().domain().accounts()) {
+		if (entry.account.get() == account.get()) {
+			return entry.index + 1;
+		}
+	}
+	return 0;
+}
+
 class AccountTableHeader final
 	: public Ui::RpWidget
 	, public Ui::AbstractTooltipShower {
@@ -6381,11 +6414,11 @@ public:
 	AccountTableHeader(
 		not_null<QWidget*> parent,
 		Fn<void(bool)> onSelectAll,
-		Fn<void()> onSortStatus,
-		Fn<void()> onSortSms)
+		Fn<void(AccountSortMode)> onSort,
+		Fn<void(QPoint)> onContextMenu)
 	: RpWidget(parent.get())
-	, _onSortStatus(std::move(onSortStatus))
-	, _onSortSms(std::move(onSortSms)) {
+	, _onSort(std::move(onSort))
+	, _onContextMenu(std::move(onContextMenu)) {
 		setMouseTracking(true);
 		const auto columns = ComputeManagerColumns();
 		resize(columns.totalWidth, style::ConvertScale(34));
@@ -6398,20 +6431,15 @@ public:
 		) | rpl::on_next(std::move(onSelectAll), lifetime());
 	}
 
-	// 0 = the app's own order, 1 = best first (free ... banned), 2 = worst
-	// first.
-	void setSort(int mode) {
-		_sort = mode;
+	void setSortMode(AccountSortMode mode) {
+		_sortMode = mode;
 		update();
 	}
 
-	// The hint shown over "Статус": how many accounts are in which state
-	// and how the sorting works.
 	void setTooltipProvider(Fn<QString()> provider) {
 		_tooltip = std::move(provider);
 	}
 
-	// Counted at the moment the hint is shown, not on a timer.
 	QString tooltipText() const override {
 		return _tooltip ? _tooltip() : QString();
 	}
@@ -6420,12 +6448,6 @@ public:
 	}
 	bool tooltipWindowActive() const override {
 		return Ui::AppInFocus() && Ui::InFocusChain(window());
-	}
-
-	// The same for the sent-SMS counter: 0 = off, 1 = most first, 2 = least.
-	void setSmsSort(int mode) {
-		_smsSort = mode;
-		update();
 	}
 
 	void setAllChecked(bool checked) {
@@ -6439,7 +6461,6 @@ public:
 		update();
 	}
 
-	// How many accounts are ticked: shown next to "select all".
 	void setSelectedCount(int count) {
 		_selectedCount = count;
 		update();
@@ -6447,44 +6468,107 @@ public:
 
 protected:
 	void mousePressEvent(QMouseEvent *e) override {
-		if (e->button() == Qt::LeftButton
-			&& _statusRect.contains(e->pos())
-			&& _onSortStatus) {
-			_onSortStatus();
-		} else if (e->button() == Qt::LeftButton
-			&& _smsRect.contains(e->pos())
-			&& _onSortSms) {
-			_onSortSms();
+		if (e->button() == Qt::RightButton) {
+			if (_onContextMenu) {
+				_onContextMenu(e->globalPos());
+			}
+			return;
+		}
+		if (e->button() != Qt::LeftButton || !_onSort) {
+			return;
+		}
+		if (_numberRect.contains(e->pos())) {
+			_onSort((_sortMode == AccountSortMode::NumberAsc)
+				? AccountSortMode::NumberDesc
+				: AccountSortMode::NumberAsc);
+		} else if (_accountRect.contains(e->pos())) {
+			if (_sortMode == AccountSortMode::NameAsc) {
+				_onSort(AccountSortMode::NameDesc);
+			} else if (_sortMode == AccountSortMode::NameDesc) {
+				_onSort(AccountSortMode::UsernameAsc);
+			} else if (_sortMode == AccountSortMode::UsernameAsc) {
+				_onSort(AccountSortMode::UsernameDesc);
+			} else if (_sortMode == AccountSortMode::UsernameDesc) {
+				_onSort(AccountSortMode::PhoneAsc);
+			} else if (_sortMode == AccountSortMode::PhoneAsc) {
+				_onSort(AccountSortMode::PhoneDesc);
+			} else if (_sortMode == AccountSortMode::PhoneDesc) {
+				_onSort(AccountSortMode::NumberAsc);
+			} else {
+				_onSort(AccountSortMode::NameAsc);
+			}
+		} else if (_folderRect.contains(e->pos())) {
+			if (_sortMode == AccountSortMode::FolderAsc) {
+				_onSort(AccountSortMode::FolderDesc);
+			} else if (_sortMode == AccountSortMode::FolderDesc) {
+				_onSort(AccountSortMode::NumberAsc);
+			} else {
+				_onSort(AccountSortMode::FolderAsc);
+			}
+		} else if (_proxyRect.contains(e->pos())) {
+			_onSort((_sortMode == AccountSortMode::ProxyAsc)
+				? AccountSortMode::NumberAsc
+				: AccountSortMode::ProxyAsc);
+		} else if (_statusRect.contains(e->pos())) {
+			if (_sortMode == AccountSortMode::StatusBest) {
+				_onSort(AccountSortMode::StatusWorst);
+			} else if (_sortMode == AccountSortMode::StatusWorst) {
+				_onSort(AccountSortMode::NumberAsc);
+			} else {
+				_onSort(AccountSortMode::StatusBest);
+			}
+		} else if (_smsRect.contains(e->pos())) {
+			if (_sortMode == AccountSortMode::SmsDesc) {
+				_onSort(AccountSortMode::SmsAsc);
+			} else if (_sortMode == AccountSortMode::SmsAsc) {
+				_onSort(AccountSortMode::NumberAsc);
+			} else {
+				_onSort(AccountSortMode::SmsDesc);
+			}
 		}
 	}
 
 	void mouseMoveEvent(QMouseEvent *e) override {
-		const auto over = _statusRect.contains(e->pos());
-		setCursor((over || _smsRect.contains(e->pos()))
-			? style::cur_pointer
-			: style::cur_default);
-		if (over && _tooltip) {
+		const auto columns = ComputeManagerColumns();
+		_numberRect = QRect(columns.number, 0, columns.numberWidth, height());
+		_accountRect = QRect(columns.account, 0, columns.accountWidth, height());
+		_folderRect = QRect(columns.folder, 0, columns.folderWidth, height());
+		_proxyRect = QRect(columns.proxy, 0, columns.proxyWidth, height());
+		_statusRect = QRect(columns.status, 0, columns.statusWidth, height());
+		_smsRect = QRect(columns.sms, 0, columns.smsWidth, height());
+
+		const auto overStatus = _statusRect.contains(e->pos());
+		const auto isSortable = _numberRect.contains(e->pos())
+			|| _accountRect.contains(e->pos())
+			|| _folderRect.contains(e->pos())
+			|| _proxyRect.contains(e->pos())
+			|| overStatus
+			|| _smsRect.contains(e->pos());
+		setCursor(isSortable ? style::cur_pointer : style::cur_default);
+
+		if (overStatus && _tooltip) {
 			Ui::Tooltip::Show(400, this);
 		} else {
 			Ui::Tooltip::Hide();
 		}
-		const auto columns = ComputeManagerColumns();
-		if (e->pos().x() < columns.check + style::ConvertScale(28)) {
+
+		const auto checkMaxX = columns.check + style::ConvertScale(28);
+		if (e->pos().x() < checkMaxX) {
 			setToolTip(u"Выбрать все / снять выделение"_q);
-		} else if (columns.numberWidth > 0 && e->pos().x() < columns.number + columns.numberWidth) {
-			setToolTip(u"Порядковый номер аккаунта"_q);
+		} else if (_numberRect.contains(e->pos())) {
+			setToolTip(u"Порядковый номер аккаунта (клик: 1→9 / 9→1, ПКМ: меню)"_q);
 		} else if (columns.photoWidth > 0 && e->pos().x() < columns.photo + columns.photoWidth) {
 			setToolTip(u"Аватар профиля"_q);
-		} else if (e->pos().x() < columns.account + columns.accountWidth) {
-			setToolTip(u"Аккаунт: имя, @username, телефон, ID"_q);
-		} else if (columns.folderWidth > 0 && e->pos().x() < columns.folder + columns.folderWidth) {
-			setToolTip(u"Папка аккаунта (кликните в строке для смены папки)"_q);
-		} else if (columns.proxyWidth > 0 && e->pos().x() < columns.proxy + columns.proxyWidth) {
-			setToolTip(u"Прокси-сервер и статус подключения (кликните для настройки)"_q);
-		} else if (over) {
-			setToolTip(u"Статус SpamBot (клик для сортировки по статусу)"_q);
+		} else if (_accountRect.contains(e->pos())) {
+			setToolTip(u"Аккаунт: имя, @username, телефон (клик: сортировка, ПКМ: меню)"_q);
+		} else if (_folderRect.contains(e->pos())) {
+			setToolTip(u"Папка аккаунта (клик: сортировка по папке, ПКМ: меню)"_q);
+		} else if (_proxyRect.contains(e->pos())) {
+			setToolTip(u"Прокси-сервер (клик: сортировка, ПКМ: меню)"_q);
+		} else if (overStatus) {
+			setToolTip(u"Статус SpamBot (клик: сортировка, ПКМ: меню)"_q);
 		} else if (_smsRect.contains(e->pos())) {
-			setToolTip(u"Отправлено сообщений за 24 ч (клик для сортировки)"_q);
+			setToolTip(u"Отправлено сообщений за 24 ч (клик: сортировка, ПКМ: меню)"_q);
 		} else if (columns.openWidth > 0 && e->pos().x() < columns.open + columns.openWidth) {
 			setToolTip(u"Открыть аккаунт (переключиться)"_q);
 		} else {
@@ -6499,24 +6583,13 @@ protected:
 	void paintEvent(QPaintEvent *e) override {
 		auto p = QPainter(this);
 		const auto columns = ComputeManagerColumns();
-		_statusRect = QRect(
-			columns.status,
-			0,
-			columns.statusWidth,
-			height());
+		_numberRect = QRect(columns.number, 0, columns.numberWidth, height());
+		_accountRect = QRect(columns.account, 0, columns.accountWidth, height());
+		_folderRect = QRect(columns.folder, 0, columns.folderWidth, height());
+		_proxyRect = QRect(columns.proxy, 0, columns.proxyWidth, height());
+		_statusRect = QRect(columns.status, 0, columns.statusWidth, height());
 		_smsRect = QRect(columns.sms, 0, columns.smsWidth, height());
-		const auto smsTitle = u"За 24 ч"_q
-			+ ((_smsSort == 1)
-				? u" ▼"_q
-				: (_smsSort == 2)
-				? u" ▲"_q
-				: QString());
-		const auto statusTitle = u"Статус"_q
-			+ ((_sort == 1)
-				? u" ▲"_q
-				: (_sort == 2)
-				? u" ▼"_q
-				: QString());
+
 		p.fillRect(
 			0,
 			height() - st::lineWidth,
@@ -6533,8 +6606,56 @@ protected:
 					text);
 			}
 		};
+
+		QString numberTitle = u"№"_q;
+		if (_sortMode == AccountSortMode::NumberAsc) {
+			numberTitle += u" ▲"_q;
+		} else if (_sortMode == AccountSortMode::NumberDesc) {
+			numberTitle += u" ▼"_q;
+		}
+
+		QString accountTitle = u"Аккаунт"_q;
+		if (_sortMode == AccountSortMode::NameAsc) {
+			accountTitle = u"Имя ▲"_q;
+		} else if (_sortMode == AccountSortMode::NameDesc) {
+			accountTitle = u"Имя ▼"_q;
+		} else if (_sortMode == AccountSortMode::UsernameAsc) {
+			accountTitle = u"Юзернейм ▲"_q;
+		} else if (_sortMode == AccountSortMode::UsernameDesc) {
+			accountTitle = u"Юзернейм ▼"_q;
+		} else if (_sortMode == AccountSortMode::PhoneAsc) {
+			accountTitle = u"Телефон ▲"_q;
+		} else if (_sortMode == AccountSortMode::PhoneDesc) {
+			accountTitle = u"Телефон ▼"_q;
+		}
+
+		QString folderTitle = u"Папка"_q;
+		if (_sortMode == AccountSortMode::FolderAsc) {
+			folderTitle += u" ▲"_q;
+		} else if (_sortMode == AccountSortMode::FolderDesc) {
+			folderTitle += u" ▼"_q;
+		}
+
+		QString proxyTitle = u"Прокси"_q;
+		if (_sortMode == AccountSortMode::ProxyAsc) {
+			proxyTitle += u" ▲"_q;
+		}
+
+		QString statusTitle = u"Статус"_q;
+		if (_sortMode == AccountSortMode::StatusBest) {
+			statusTitle += u" ▲"_q;
+		} else if (_sortMode == AccountSortMode::StatusWorst) {
+			statusTitle += u" ▼"_q;
+		}
+
+		QString smsTitle = u"За 24 ч"_q;
+		if (_sortMode == AccountSortMode::SmsDesc) {
+			smsTitle += u" ▼"_q;
+		} else if (_sortMode == AccountSortMode::SmsAsc) {
+			smsTitle += u" ▲"_q;
+		}
+
 		if (_selectedCount > 0) {
-			// The count right next to the tick box, in the accent color.
 			const auto text = QString::number(_selectedCount);
 			const auto x = columns.check + style::ConvertScale(30);
 			p.setPen(st::windowActiveTextFg);
@@ -6550,11 +6671,11 @@ protected:
 				text);
 			p.setPen(st::windowSubTextFg);
 		} else {
-			label(columns.number, columns.numberWidth, u"№"_q, Qt::AlignHCenter);
+			label(columns.number, columns.numberWidth, numberTitle, Qt::AlignHCenter);
 		}
-		label(columns.account, columns.accountWidth, u"Аккаунт"_q, Qt::AlignLeft);
-		label(columns.folder, columns.folderWidth, u"Папка"_q, Qt::AlignLeft);
-		label(columns.proxy, columns.proxyWidth, u"Прокси"_q, Qt::AlignLeft);
+		label(columns.account, columns.accountWidth, accountTitle, Qt::AlignLeft);
+		label(columns.folder, columns.folderWidth, folderTitle, Qt::AlignLeft);
+		label(columns.proxy, columns.proxyWidth, proxyTitle, Qt::AlignLeft);
 		label(columns.status, columns.statusWidth, statusTitle, Qt::AlignHCenter);
 		label(columns.sms, columns.smsWidth, smsTitle, Qt::AlignHCenter);
 		label(columns.open, columns.openWidth, u"Открыть"_q, Qt::AlignHCenter);
@@ -6566,16 +6687,19 @@ protected:
 	}
 
 private:
+	Fn<void(AccountSortMode)> _onSort;
+	Fn<void(QPoint)> _onContextMenu;
 	ManagerCheck *_checkbox = nullptr;
-	Fn<void()> _onSortStatus;
-	Fn<void()> _onSortSms;
 	Fn<QString()> _tooltip;
+	AccountSortMode _sortMode = AccountSortMode::NumberAsc;
+	bool _trashMode = false;
+	int _selectedCount = 0;
+	QRect _numberRect;
+	QRect _accountRect;
+	QRect _folderRect;
+	QRect _proxyRect;
 	QRect _statusRect;
 	QRect _smsRect;
-	int _sort = 0;
-	int _smsSort = 0;
-	int _selectedCount = 0;
-	bool _trashMode = false;
 
 };
 
@@ -7582,6 +7706,20 @@ void ExportSpecificSession(
 				st::boxDividerLabel),
 			st::boxRowPadding);
 
+		box->addRow(
+			object_ptr<Ui::Radiobutton>(
+				box,
+				group,
+				3,
+				u"Отправить на Android (через синхронизацию)"_q),
+			st::ggtgChoiceRowPadding);
+		box->addRow(
+			object_ptr<Ui::FlatLabel>(
+				box,
+				rpl::single(u"Прямая передача сессии на телефон через синхронизацию GGTG"_q),
+				st::boxDividerLabel),
+			st::boxRowPadding);
+
 		box->addButton(rpl::single(u"Экспортировать"_q), [=] {
 			const auto auths = Storage::ReadForeignTdataAuthorizations(vaultTdata);
 			if (auths.empty()) {
@@ -7713,6 +7851,61 @@ void ExportSpecificSession(
 						Ggtg::Notice(show, u"Папка tdata успешно сохранена"_q);
 						box->closeBox();
 					});
+			} else if (choice == 3) {
+				// Send to Android via sync
+				const auto tempPath = QDir::tempPath() + u"/ggtg_export_session_"_q + QString::number(base::RandomValue<uint64>(), 16) + u".ggtg"_q;
+				auto error = QString();
+				const auto proxy = stored.proxy.isEmpty()
+					? MTP::ProxyData()
+					: ProxyFromObject(stored.proxy);
+				const auto phone = !stored.phone.isEmpty()
+					? stored.phone
+					: (Main::AccountIsLive(account) ? account->session().user()->phone() : QString());
+				const auto name = !stored.name.isEmpty()
+					? stored.name
+					: (Main::AccountIsLive(account) ? account->session().user()->name() : QString());
+				const auto username = !stored.username.isEmpty()
+					? stored.username
+					: (Main::AccountIsLive(account) ? account->session().user()->username() : QString());
+				const auto twoFactor = !stored.twoFactor.isEmpty()
+					? stored.twoFactor
+					: (Main::AccountIsLive(account) ? account->twoFactorPassword() : QString());
+
+				if (!ExportAccountToGgtg(
+						tempPath,
+						serializedAuth,
+						phone,
+						name,
+						QString(),
+						username,
+						twoFactor,
+						proxy,
+						stored.device,
+						stored.folder,
+						false,
+						&error)) {
+					Ggtg::Notice(show, error.isEmpty() ? u"Не удалось подготовить сессию"_q : error);
+					return;
+				}
+				auto file = QFile(tempPath);
+				auto bytes = QByteArray();
+				if (file.open(QIODevice::ReadOnly)) {
+					bytes = file.readAll();
+					file.close();
+				}
+				QFile::remove(tempPath);
+				if (bytes.isEmpty()) {
+					Ggtg::Notice(show, u"Не удалось прочитать файл сессии"_q);
+					return;
+				}
+				Core::GgtgSync::SendAccounts(u"pack"_q, bytes, [=](bool ok, QString text) {
+					if (ok) {
+						Ggtg::Notice(show, u"Сессия отправлена на Android! На телефоне откройте аккаунт и нажмите «Принять сессию с Desktop»."_q);
+						box->closeBox();
+					} else {
+						Ggtg::Notice(show, u"Не удалось отправить сессию: "_q + text);
+					}
+				});
 			}
 		});
 
@@ -7869,6 +8062,34 @@ void AddSessionsSection(
 			.confirmText = u"Переключить"_q,
 		}));
 	};
+	const auto editNote = [=](const Core::GgtgSessions::StoredSession &stored) {
+		box->uiShow()->showBox(Box([=](not_null<Ui::GenericBox*> editBox) {
+			editBox->setTitle(rpl::single(u"Подпись сессии"_q));
+			editBox->addRow(
+				object_ptr<Ui::FlatLabel>(
+					editBox,
+					u"Укажите, где используется эта сессия (например: Телефон мастера, Android Xiaomi, Рассылка #1):"_q,
+					st::boxLabel),
+				st::boxRowPadding);
+			Ui::AddSkip(editBox->verticalLayout());
+			const auto field = editBox->addRow(
+				object_ptr<Ui::InputField>(
+					editBox,
+					st::defaultInputField,
+					rpl::single(u"Подпись"_q),
+					stored.note),
+				st::boxRowPadding);
+			editBox->addButton(tr::lng_settings_save(), [=] {
+				const auto text = field->getLastText().trimmed();
+				Core::GgtgSessions::UpdateStoredNote(stored.id, text);
+				editBox->closeBox();
+				if (Main::AccountIsLive(account)) {
+					(*fillAgain)();
+				}
+			});
+			editBox->addButton(tr::lng_cancel(), [=] { editBox->closeBox(); });
+		}));
+	};
 	const auto fill = [=](const Api::Authorizations::List &list) {
 		const Ggtg::ScrollKeeper keepScroll(wrap);
 		wrap->clear();
@@ -8011,7 +8232,11 @@ void AddSessionsSection(
 			if (entry.hash == 0) {
 				suffix = u" (основная · эта сессия)"_q;
 			} else if (spare) {
+				const auto notePart = (!spare->note.isEmpty())
+					? (u" · "_q + spare->note)
+					: QString();
 				suffix = u" ("_q + titleOf(*spare)
+					+ notePart
 					+ u" · "_q + QDateTime::fromSecsSinceEpoch(
 						spare->createdAt).toString(u"dd.MM.yyyy"_q)
 					+ u")"_q;
@@ -8045,6 +8270,9 @@ void AddSessionsSection(
 						}) : Fn<void()>(),
 						canSwitch ? Fn<void()>([=] {
 							(*confirmSwitch)(storedSpare);
+						}) : Fn<void()>(),
+						spare ? Fn<void()>([=] {
+							editNote(storedSpare);
 						}) : Fn<void()>());
 				},
 				hash
@@ -8100,7 +8328,9 @@ void AddSessionsSection(
 			wrap->add(MakeSessionRow(
 				wrap,
 				synth,
-				u" (резервная · "_q + createdDt.toString(u"dd.MM.yyyy"_q) + u")"_q,
+				u" (резервная"
+					+ (item.note.isEmpty() ? QString() : (u" · "_q + item.note))
+					+ u" · "_q + createdDt.toString(u"dd.MM.yyyy"_q) + u")"_q,
 				[=] {
 					ShowSessionInfo(
 						box->uiShow(),
@@ -8116,6 +8346,9 @@ void AddSessionsSection(
 						},
 						[=] {
 							(*confirmSwitch)(stored);
+						},
+						[=] {
+							editNote(stored);
 						});
 				},
 				[=] {
@@ -9048,9 +9281,21 @@ void ShowAccountProfileBox(
 		lines.emplace_back(
 			u"Сессия"_q,
 			current ? u"активна (текущий аккаунт)"_q : u"активна"_q);
+		const auto spam = Data::FindAccountSpamStatus(user->id.value);
+		const auto isSpamBlocked = spam && (spam->state == Data::AccountSpamState::Permanent
+			|| (spam->state == Data::AccountSpamState::Temporary && spam->until > QDateTime::currentSecsSinceEpoch()));
 		lines.emplace_back(
 			u"SpamBot"_q,
-			Settings::AccountSpamStatusText(user->id.value));
+			Settings::AccountSpamStatusText(user->id.value) + (isSpamBlocked ? u" (нажмите для авто-апелляции)"_q : QString()),
+			false,
+			[=] {
+				Settings::AutoAppealSpamBot(account, [=](bool success, QString message) {
+					Ggtg::Notice(box->uiShow(), message.isEmpty()
+						? (success ? u"Апелляция успешно отправлена в @SpamBot"_q : u"Ошибка отправки апелляции"_q)
+						: message);
+					ShowAccountProfileBox(box->uiShow(), account, current, onSaved);
+				});
+			});
 		const auto ggr = Settings::CalculateAccountGgr(account);
 		lines.emplace_back(
 			u"Рейтинг GGR"_q,
@@ -9307,11 +9552,7 @@ struct AccountManagerState {
 	AccountTableHeader *header = nullptr;
 	// The account last ticked by hand: the start of a Shift+click range.
 	Main::Account *anchor = nullptr;
-	// 0 = the app's own order, 1 = free first ... banned last, 2 = reverse.
-	int statusSort = 0;
-	// 0 = off, 1 = most SMS sent first, 2 = fewest first (one of the two
-	// sorts is on at a time).
-	int smsSort = 0;
+	AccountSortMode sortMode = AccountSortMode::NumberAsc;
 	// Showing «Корзина» instead of the folder filter.
 	bool trash = false;
 	// The search re-filters a moment after the typing stops, never from
@@ -9381,8 +9622,7 @@ struct SavedManagerFilter {
 	std::optional<QString> folder;
 	QString query;
 	bool trash = false;
-	int statusSort = 0;
-	int smsSort = 0;
+	AccountSortMode sortMode = AccountSortMode::NumberAsc;
 };
 inline SavedManagerFilter &GlobalSavedManagerFilter() {
 	static auto instance = SavedManagerFilter();
@@ -9399,8 +9639,7 @@ object_ptr<Ui::BoxContent> MakeAccountManagerBox(
 		state->folder = GlobalSavedManagerFilter().folder;
 		state->query = GlobalSavedManagerFilter().query;
 		state->trash = GlobalSavedManagerFilter().trash;
-		state->statusSort = GlobalSavedManagerFilter().statusSort;
-		state->smsSort = GlobalSavedManagerFilter().smsSort;
+		state->sortMode = GlobalSavedManagerFilter().sortMode;
 		const auto show = [=] { return box->uiShow(); };
 
 		// Everything above the rows (folder cards, search, selection bar and
@@ -9878,6 +10117,24 @@ object_ptr<Ui::BoxContent> MakeAccountManagerBox(
 						.failPrefix = QString(),
 					});
 				});
+				const auto curSpam = Data::FindAccountSpamStatus(account->session().user()->id.value);
+				if (curSpam && (curSpam->state == Data::AccountSpamState::Permanent
+						|| (curSpam->state == Data::AccountSpamState::Temporary && curSpam->until > QDateTime::currentSecsSinceEpoch()))) {
+					menu->addAction(u"Подать авто-апелляцию @SpamBot"_q, [=] {
+						if (CurrentBulkRun()) {
+							OpenBulkActions(controller);
+							return;
+						}
+						RunBulkAction(controller, { account }, [=](
+								not_null<Main::Account*> account,
+								StepDone done) {
+							StepAutoAppealSpam(account, done);
+						}, BulkOptions{
+							.title = u"Авто-апелляция @SpamBot"_q,
+							.failPrefix = QString(),
+						});
+					});
+				}
 			}
 
 			if (!inTrash) {
@@ -9934,6 +10191,45 @@ object_ptr<Ui::BoxContent> MakeAccountManagerBox(
 		// The table always fits the window (see ComputeManagerColumns), so
 		// there is nothing to scroll sideways.
 		headerScroll->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
+		const auto headerMenu = box->lifetime().make_state<base::unique_qptr<Ui::PopupMenu>>();
+		const auto showSortMenu = [=](QPoint globalPos) {
+			*headerMenu = base::make_unique_q<Ui::PopupMenu>(box, st::folderContextMenu);
+
+			const auto addSortAction = [&](const QString &title, AccountSortMode mode) {
+				const auto isCurrent = (state->sortMode == mode);
+				const auto text = (isCurrent ? u"● "_q : u"   "_q) + title;
+				(*headerMenu)->addAction(text, [=] {
+					state->sortMode = mode;
+					GlobalSavedManagerFilter().sortMode = mode;
+					state->header->setSortMode(mode);
+					state->rebuildTable();
+				});
+			};
+
+			addSortAction(u"По номеру (1 → 9)"_q, AccountSortMode::NumberAsc);
+			addSortAction(u"По номеру (9 → 1)"_q, AccountSortMode::NumberDesc);
+			(*headerMenu)->addSeparator();
+			addSortAction(u"По имени (А → Я)"_q, AccountSortMode::NameAsc);
+			addSortAction(u"По имени (Я → А)"_q, AccountSortMode::NameDesc);
+			addSortAction(u"По юзернейму (@a → @z)"_q, AccountSortMode::UsernameAsc);
+			addSortAction(u"По юзернейму (@z → @a)"_q, AccountSortMode::UsernameDesc);
+			addSortAction(u"По номеру телефона (+1 → +9)"_q, AccountSortMode::PhoneAsc);
+			addSortAction(u"По номеру телефона (+9 → +1)"_q, AccountSortMode::PhoneDesc);
+			(*headerMenu)->addSeparator();
+			addSortAction(u"По папке (А → Я)"_q, AccountSortMode::FolderAsc);
+			addSortAction(u"По папке (Я → А)"_q, AccountSortMode::FolderDesc);
+			addSortAction(u"По прокси"_q, AccountSortMode::ProxyAsc);
+			(*headerMenu)->addSeparator();
+			addSortAction(u"По статусу (сначала свободные)"_q, AccountSortMode::StatusBest);
+			addSortAction(u"По статусу (сначала спамблок)"_q, AccountSortMode::StatusWorst);
+			addSortAction(u"По SMS за 24 ч (больше → меньше)"_q, AccountSortMode::SmsDesc);
+			addSortAction(u"По SMS за 24 ч (меньше → больше)"_q, AccountSortMode::SmsAsc);
+			(*headerMenu)->addSeparator();
+			addSortAction(u"Сбросить сортировку"_q, AccountSortMode::NumberAsc);
+
+			(*headerMenu)->popup(globalPos);
+		};
+
 		state->header = headerScroll->setOwnedWidget(
 			object_ptr<AccountTableHeader>(
 				headerScroll,
@@ -9950,28 +10246,16 @@ object_ptr<Ui::BoxContent> MakeAccountManagerBox(
 					}
 					state->selectedCount = int(state->selected.size());
 				},
-				[=] {
-					// none -> free first -> problems first -> none
-					state->statusSort = (state->statusSort + 1) % 3;
-					state->smsSort = 0;
-					GlobalSavedManagerFilter().statusSort = state->statusSort;
-					GlobalSavedManagerFilter().smsSort = 0;
-					state->header->setSort(state->statusSort);
-					state->header->setSmsSort(0);
+				[=](AccountSortMode mode) {
+					state->sortMode = mode;
+					GlobalSavedManagerFilter().sortMode = mode;
+					state->header->setSortMode(mode);
 					state->rebuildTable();
 				},
-				[=] {
-					// none -> most first -> fewest first -> none
-					state->smsSort = (state->smsSort + 1) % 3;
-					state->statusSort = 0;
-					GlobalSavedManagerFilter().smsSort = state->smsSort;
-					GlobalSavedManagerFilter().statusSort = 0;
-					state->header->setSmsSort(state->smsSort);
-					state->header->setSort(0);
-					state->rebuildTable();
+				[=](QPoint globalPos) {
+					showSortMenu(globalPos);
 				})).data();
-		state->header->setSort(state->statusSort);
-		state->header->setSmsSort(state->smsSort);
+		state->header->setSortMode(state->sortMode);
 		state->header->setTrashMode(state->trash);
 		state->selectedCount.value(
 		) | rpl::on_next([=](int count) {
@@ -10222,14 +10506,11 @@ object_ptr<Ui::BoxContent> MakeAccountManagerBox(
 				}
 				state->shown.push_back(account);
 			}
-			// The ticks follow what is on the screen: an account hidden by
-			// another folder or the search is not ticked any more, so the
-			// count and the bulk action always mean the rows you see.
-			const auto visible = base::flat_set<not_null<Main::Account*>>(
-				state->shown.begin(),
-				state->shown.end());
+			// Keep selected accounts across folder and search switches.
+			// Only drop accounts that no longer exist or are in trash/live mismatch.
 			for (auto i = state->selected.begin(); i != state->selected.end();) {
-				if (!visible.contains(*i)) {
+				if (!Core::App().domain().isLive(*i)
+					|| ((*i)->trashed() != state->trash)) {
 					i = state->selected.erase(i);
 				} else {
 					++i;
@@ -10273,12 +10554,11 @@ object_ptr<Ui::BoxContent> MakeAccountManagerBox(
 			}
 			const auto currentAccount = &controller->session().account();
 			MeasureManagerContent(state->shown, lost, currentAccount);
-			auto index = 0;
 			const auto addLiveRow = [&](not_null<Main::Account*> account) {
 				const auto row = table->add(object_ptr<AccountTableRow>(
 					table,
 					account,
-					++index,
+					AccountPersistentIndex(account),
 					(account.get() == currentAccount),
 					state->selected.contains(account),
 					[=](bool checked) {
@@ -10431,86 +10711,156 @@ object_ptr<Ui::BoxContent> MakeAccountManagerBox(
 					}));
 			};
 
-			if (state->statusSort == 0 && state->smsSort == 0) {
-				// The app's own order: accounts in the app, then the ones
-				// whose session is gone in a block of their own.
-				for (const auto &account : state->shown) {
-					addLiveRow(account);
+			const auto getAccountName = [](not_null<Main::Account*> a) -> QString {
+				return a->sessionExists()
+					? a->session().user()->name().trimmed()
+					: QString();
+			};
+			const auto getAccountUsername = [](not_null<Main::Account*> a) -> QString {
+				return a->sessionExists()
+					? a->session().user()->username().trimmed()
+					: QString();
+			};
+			const auto getAccountPhone = [](not_null<Main::Account*> a) -> QString {
+				return a->sessionExists()
+					? a->session().user()->phone().trimmed()
+					: QString();
+			};
+			const auto getAccountFolder = [](not_null<Main::Account*> a) -> QString {
+				return a->folderTag().trimmed();
+			};
+			const auto getAccountProxy = [](not_null<Main::Account*> a) -> QString {
+				if (MTP::HasRealProxy(a->proxyOverride())) {
+					return a->proxyOverride().host + ':' + QString::number(a->proxyOverride().port);
 				}
-				if (!lost.empty()) {
-					table->add(
-						object_ptr<Ui::FlatLabel>(
-							table,
-							u"Нет в программе (сессия разорвана, аккаунт "
-								"удалён или забанен): %1"_q.arg(lost.size()),
-							st::boxLabel),
-						st::boxRowPadding);
-					for (const auto &entry : lost) {
-						addLostRow(entry);
-					}
+				return QString();
+			};
+			const auto getAccountSms = [](not_null<Main::Account*> a) -> int {
+				return a->sessionExists()
+					? Data::CountSmsSentToday(a->session().user()->id.value)
+					: 0;
+			};
+			const auto getAccountStatusRank = [](not_null<Main::Account*> a) -> int {
+				return LiveAccountStatus(a).rank;
+			};
+
+			const auto compareAccounts = [&](
+					not_null<Main::Account*> a,
+					not_null<Main::Account*> b) -> bool {
+				const auto idxA = AccountPersistentIndex(a);
+				const auto idxB = AccountPersistentIndex(b);
+				switch (state->sortMode) {
+				case AccountSortMode::NumberAsc:
+					return idxA < idxB;
+				case AccountSortMode::NumberDesc:
+					return idxA > idxB;
+				case AccountSortMode::NameAsc: {
+					const auto c = QString::localeAwareCompare(getAccountName(a), getAccountName(b));
+					if (c != 0) return c < 0;
+					return idxA < idxB;
 				}
-			} else {
-				// By status, accounts in the app and lost ones together:
-				// best first (mode 1) or the ones needing attention first
-				// (mode 2); by name inside one status.
-				struct Item {
-					int rank = 0;
-					QString name;
-					Main::Account *account = nullptr;
-					Core::GgtgSessions::LostSession lost;
-				};
-				auto items = std::vector<Item>();
-				for (const auto &account : state->shown) {
-					const auto user = account->sessionExists()
-						? account->session().user().get()
-						: nullptr;
-					items.push_back({
-						state->smsSort
-							? (user
-								? Data::CountSmsSentToday(user->id.value)
-								: 0)
-							: LiveAccountStatus(account).rank,
-						account->sessionExists()
-							? account->session().user()->name().toLower()
-							: QString(),
-						account.get(),
-						{},
-					});
+				case AccountSortMode::NameDesc: {
+					const auto c = QString::localeAwareCompare(getAccountName(a), getAccountName(b));
+					if (c != 0) return c > 0;
+					return idxA < idxB;
 				}
+				case AccountSortMode::UsernameAsc: {
+					const auto uA = getAccountUsername(a);
+					const auto uB = getAccountUsername(b);
+					if (uA.isEmpty() != uB.isEmpty()) return !uA.isEmpty();
+					const auto c = uA.compare(uB, Qt::CaseInsensitive);
+					if (c != 0) return c < 0;
+					return idxA < idxB;
+				}
+				case AccountSortMode::UsernameDesc: {
+					const auto uA = getAccountUsername(a);
+					const auto uB = getAccountUsername(b);
+					if (uA.isEmpty() != uB.isEmpty()) return !uA.isEmpty();
+					const auto c = uA.compare(uB, Qt::CaseInsensitive);
+					if (c != 0) return c > 0;
+					return idxA < idxB;
+				}
+				case AccountSortMode::PhoneAsc: {
+					const auto pA = getAccountPhone(a);
+					const auto pB = getAccountPhone(b);
+					if (pA.isEmpty() != pB.isEmpty()) return !pA.isEmpty();
+					const auto c = pA.compare(pB);
+					if (c != 0) return c < 0;
+					return idxA < idxB;
+				}
+				case AccountSortMode::PhoneDesc: {
+					const auto pA = getAccountPhone(a);
+					const auto pB = getAccountPhone(b);
+					if (pA.isEmpty() != pB.isEmpty()) return !pA.isEmpty();
+					const auto c = pA.compare(pB);
+					if (c != 0) return c > 0;
+					return idxA < idxB;
+				}
+				case AccountSortMode::FolderAsc: {
+					const auto fA = getAccountFolder(a);
+					const auto fB = getAccountFolder(b);
+					const auto c = QString::localeAwareCompare(fA, fB);
+					if (c != 0) return c < 0;
+					return idxA < idxB;
+				}
+				case AccountSortMode::FolderDesc: {
+					const auto fA = getAccountFolder(a);
+					const auto fB = getAccountFolder(b);
+					const auto c = QString::localeAwareCompare(fA, fB);
+					if (c != 0) return c > 0;
+					return idxA < idxB;
+				}
+				case AccountSortMode::ProxyAsc: {
+					const auto prA = getAccountProxy(a);
+					const auto prB = getAccountProxy(b);
+					if (prA.isEmpty() != prB.isEmpty()) return !prA.isEmpty();
+					const auto c = prA.compare(prB, Qt::CaseInsensitive);
+					if (c != 0) return c < 0;
+					return idxA < idxB;
+				}
+				case AccountSortMode::StatusBest: {
+					const auto rA = getAccountStatusRank(a);
+					const auto rB = getAccountStatusRank(b);
+					if (rA != rB) return rA < rB;
+					return idxA < idxB;
+				}
+				case AccountSortMode::StatusWorst: {
+					const auto rA = getAccountStatusRank(a);
+					const auto rB = getAccountStatusRank(b);
+					if (rA != rB) return rA > rB;
+					return idxA < idxB;
+				}
+				case AccountSortMode::SmsDesc: {
+					const auto sA = getAccountSms(a);
+					const auto sB = getAccountSms(b);
+					if (sA != sB) return sA > sB;
+					return idxA < idxB;
+				}
+				case AccountSortMode::SmsAsc: {
+					const auto sA = getAccountSms(a);
+					const auto sB = getAccountSms(b);
+					if (sA != sB) return sA < sB;
+					return idxA < idxB;
+				}
+				}
+				return idxA < idxB;
+			};
+
+			ranges::stable_sort(state->shown, compareAccounts);
+
+			for (const auto &account : state->shown) {
+				addLiveRow(account);
+			}
+			if (!lost.empty()) {
+				table->add(
+					object_ptr<Ui::FlatLabel>(
+						table,
+						u"Нет в программе (сессия разорвана, аккаунт "
+							"удалён или забанен): %1"_q.arg(lost.size()),
+						st::boxLabel),
+					st::boxRowPadding);
 				for (const auto &entry : lost) {
-					items.push_back({
-						state->smsSort ? 0 : LostAccountStatus(entry).rank,
-						entry.name.toLower(),
-						nullptr,
-						entry,
-					});
-				}
-				// Status: free first in mode 1. SMS: most sent first in mode 1,
-				// so the key counts upwards only in mode 2.
-				const auto bestFirst = state->smsSort
-					? (state->smsSort == 2)
-					: (state->statusSort == 1);
-				ranges::stable_sort(items, [&](
-						const Item &a,
-						const Item &b) {
-					if (a.rank != b.rank) {
-						return bestFirst ? (a.rank < b.rank) : (a.rank > b.rank);
-					}
-					return a.name < b.name;
-				});
-				// "Select all" and the numbering follow what is shown.
-				state->shown.clear();
-				for (const auto &item : items) {
-					if (item.account) {
-						state->shown.push_back(item.account);
-					}
-				}
-				for (const auto &item : items) {
-					if (item.account) {
-						addLiveRow(item.account);
-					} else {
-						addLostRow(item.lost);
-					}
+					addLostRow(entry);
 				}
 			}
 			if (state->relayout) {

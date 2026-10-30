@@ -123,6 +123,19 @@ void DrainMainQueue() {
 void IgnoreAllActivation(not_null<QWidget*> widget) {
 }
 
+void ClearTransientParent(not_null<QWidget*> widget) {
+	const auto winId = widget->winId();
+	if (const auto view = reinterpret_cast<NSView*>(winId)) {
+		if (const auto window = [view window]) {
+			if (const auto parent = [window parentWindow]) {
+				[parent removeChildWindow:window];
+			}
+			[window setLevel:NSNormalWindowLevel];
+			[window setHidesOnDeactivate:NO];
+		}
+	}
+}
+
 void DisableSystemWindowResize(not_null<QWidget*> widget, QSize ratio) {
 	const auto winId = widget->winId();
 	if (const auto view = reinterpret_cast<NSView*>(winId)) {

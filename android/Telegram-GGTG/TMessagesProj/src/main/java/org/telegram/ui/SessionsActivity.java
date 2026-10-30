@@ -135,6 +135,12 @@ public class SessionsActivity extends BaseFragment implements NotificationCenter
     @Keep
     private int ttlRow;
     private int ttlDivideRow;
+    private ArrayList<app.ggtg.GgtgSessions.StoredSession> unmatchedStoredSessions = new ArrayList<>();
+    private int syncFromDesktopRow = -1;
+    private int storedSessionsSectionRow = -1;
+    private int storedSessionsStartRow = -1;
+    private int storedSessionsEndRow = -1;
+    private int storedSessionsDetailRow = -1;
 
     private int repeatLoad = 0;
 
@@ -253,7 +259,16 @@ public class SessionsActivity extends BaseFragment implements NotificationCenter
         itemAnimator.setTranslationInterpolator(CubicBezierInterpolator.DEFAULT);
         listView.setItemAnimator(itemAnimator);
         listView.setOnItemClickListener((view, position) -> {
-            if (position == ttlRow) {
+            if (position == syncFromDesktopRow) {
+                receiveFromDesktop();
+                return;
+            } else if (position >= storedSessionsStartRow && position < storedSessionsEndRow) {
+                final int index = position - storedSessionsStartRow;
+                if (index >= 0 && index < unmatchedStoredSessions.size()) {
+                    showStoredSessionDialog(unmatchedStoredSessions.get(index));
+                }
+                return;
+            } else if (position == ttlRow) {
                 if (getParentActivity() == null) {
                     return;
                 }
@@ -627,6 +642,166 @@ public class SessionsActivity extends BaseFragment implements NotificationCenter
         bottomSheet.show();
     }
 
+    private void showStoredSessionDialog(final app.ggtg.GgtgSessions.StoredSession stored) {
+        if (getParentActivity() == null) return;
+        String devModel = stored.getDevice() != null ? stored.getDevice().optString("deviceModel") : "";
+        if (devModel.isEmpty()) devModel = app.ggtg.GgtgSessions.roleTitle(stored.getRole());
+        String title = devModel + app.ggtg.GgtgSessions.formatSessionSuffix(stored, false);
+
+        String[] actions = new String[] {
+            "Переключиться на эту сессию",
+            "Подписать сессию (где используется)…",
+            "Удалить из хранилища"
+        };
+        AlertDialog.Builder builder = new AlertDialog.Builder(getParentActivity());
+        builder.setTitle(title);
+        builder.setItems(actions, (dialog, which) -> {
+            if (which == 0) {
+                String warning = app.ggtg.GgtgSessions.switchWarning(stored);
+                String msg = (warning != null && !warning.isEmpty() ? "Внимание: " + warning + "\n\n" : "") +
+                    "Текущая сессия приложения сохранится в хранилище как бывшая рабочая, а аккаунт переключится на эту сессию (" + title + ").";
+                AlertDialog.Builder switchBld = new AlertDialog.Builder(getParentActivity());
+                switchBld.setTitle("Переключиться на сессию?");
+                switchBld.setMessage(msg);
+                switchBld.setPositiveButton("Переключить", (d, w) -> {
+                    final AlertDialog progressDialog = new AlertDialog(getParentActivity(), AlertDialog.ALERT_TYPE_SPINNER);
+                    progressDialog.setCanCancel(false);
+                    progressDialog.show();
+                    app.ggtg.GgtgSessions.swapToBackupAsync(currentAccount, stored.getId(), (success, errorMsg) -> {
+                        try { progressDialog.dismiss(); } catch (Exception ignored) {}
+                        if (!success) {
+                            android.widget.Toast.makeText(getContext(), "Ошибка: " + (errorMsg != null ? errorMsg : "неизвестная"), android.widget.Toast.LENGTH_LONG).show();
+                        } else {
+                            android.widget.Toast.makeText(getContext(), "Аккаунт успешно переключён!", android.widget.Toast.LENGTH_SHORT).show();
+                            loadSessions(false);
+                        }
+                        return kotlin.Unit.INSTANCE;
+                    });
+                });
+                switchBld.setNegativeButton(LocaleController.getString(R.string.Cancel), null);
+                showDialog(switchBld.create());
+            } else if (which == 1) {
+                final android.widget.EditText input = new android.widget.EditText(getContext());
+                input.setHint("Например: Телефон мастера, Android Xiaomi, Рассылка #1");
+                String oldNote = stored.getNote();
+                input.setText(oldNote);
+                if (oldNote != null && oldNote.length() > 0) {
+                    input.setSelection(oldNote.length());
+                }
+                int pad = AndroidUtilities.dp(20);
+                FrameLayout container = new FrameLayout(getContext());
+                container.setPadding(pad, AndroidUtilities.dp(10), pad, AndroidUtilities.dp(10));
+                container.addView(input);
+
+                AlertDialog.Builder noteBld = new AlertDialog.Builder(getParentActivity());
+                noteBld.setTitle("Подпись сессии");
+                noteBld.setMessage("Укажите, где используется эта сессия:");
+                noteBld.setView(container);
+                noteBld.setPositiveButton("Сохранить", (d, w) -> {
+                    String newNote = input.getText().toString().trim();
+                    app.ggtg.GgtgSessions.updateNote(stored.getId(), newNote);
+                    android.widget.Toast.makeText(getContext(), "Подпись сохранена", android.widget.Toast.LENGTH_SHORT).show();
+                    loadSessions(false);
+                });
+                noteBld.setNegativeButton(LocaleController.getString(R.string.Cancel), null);
+                showDialog(noteBld.create());
+            } else if (which == 2) {
+                AlertDialog.Builder delBld = new AlertDialog.Builder(getParentActivity());
+                delBld.setTitle("Удалить из хранилища?");
+                delBld.setMessage("Сессия будет удалена из локального хранилища на этом устройстве.");
+                delBld.setPositiveButton("Удалить", (d, w) -> {
+                    app.ggtg.GgtgSessions.removeStored(stored.getId());
+                    android.widget.Toast.makeText(getContext(), "Сессия удалена из хранилища", android.widget.Toast.LENGTH_SHORT).show();
+                    loadSessions(false);
+                });
+                delBld.setNegativeButton(LocaleController.getString(R.string.Cancel), null);
+                AlertDialog dlg = delBld.create();
+                showDialog(dlg);
+                TextView btn = (TextView) dlg.getButton(DialogInterface.BUTTON_POSITIVE);
+                if (btn != null) btn.setTextColor(Theme.getColor(Theme.key_text_RedBold));
+            }
+        });
+        builder.setNegativeButton(LocaleController.getString(R.string.Cancel), null);
+        showDialog(builder.create());
+    }
+
+    private void receiveFromDesktop() {
+        if (getParentActivity() == null) return;
+        if (app.ggtg.GgtgSyncTransport.INSTANCE.mainSlot() == null || app.ggtg.GgtgSync.INSTANCE.loadSettings().getPassphrase().isEmpty()) {
+            AlertDialog.Builder bld = new AlertDialog.Builder(getParentActivity());
+            bld.setTitle("Синхронизация");
+            bld.setMessage("Сначала настройте синхронизацию: главный аккаунт и пароль в разделе «Главная» → «Синхронизация».");
+            bld.setPositiveButton("Понятно", null);
+            showDialog(bld.create());
+            return;
+        }
+        final AlertDialog progress = new AlertDialog(getParentActivity(), AlertDialog.ALERT_TYPE_SPINNER);
+        progress.setMessage("Поиск сессий с Desktop…");
+        progress.setCanCancel(false);
+        progress.show();
+        app.ggtg.GgtgSyncTransport.INSTANCE.findIncoming((list, error) -> {
+            AndroidUtilities.runOnUIThread(() -> {
+                if (error != null && !error.isEmpty()) {
+                    try { progress.dismiss(); } catch (Exception ignored) {}
+                    android.widget.Toast.makeText(getContext(), error, android.widget.Toast.LENGTH_LONG).show();
+                    return;
+                }
+                app.ggtg.GgtgSyncTransport.Remote remote = (list != null && !list.isEmpty()) ? list.get(0) : null;
+                if (remote == null) {
+                    try { progress.dismiss(); } catch (Exception ignored) {}
+                    AlertDialog.Builder bld = new AlertDialog.Builder(getParentActivity());
+                    bld.setTitle("Сессии с Desktop");
+                    bld.setMessage("С Desktop пока не отправлено сессий.\n\n" +
+                        "Как отправить сессию с компьютера на телефон:\n" +
+                        "1. На Desktop откройте «Настройки» → «Синхронизация» → «Отправить аккаунты на Android…» (или в окне сессий аккаунта нажмите «Отправить на Android»).\n" +
+                        "2. После отправки нажмите здесь «Проверить снова».");
+                    bld.setPositiveButton("Понятно", null);
+                    bld.setNegativeButton("Проверить снова", (d, w) -> receiveFromDesktop());
+                    showDialog(bld.create());
+                    return;
+                }
+                progress.setMessage("Загрузка сессии с Desktop…");
+                app.ggtg.GgtgSyncTransport.INSTANCE.fetchIncoming(remote, (bytes, problem) -> {
+                    AndroidUtilities.runOnUIThread(() -> {
+                        try { progress.dismiss(); } catch (Exception ignored) {}
+                        if (bytes == null) {
+                            android.widget.Toast.makeText(getContext(), problem != null ? problem : "Ошибка загрузки", android.widget.Toast.LENGTH_LONG).show();
+                            return;
+                        }
+                        java.io.File copy = new java.io.File(ApplicationLoader.applicationContext.getCacheDir(), "ggtg_sync_accounts.ggtg");
+                        try {
+                            java.io.FileOutputStream fos = new java.io.FileOutputStream(copy);
+                            fos.write(bytes);
+                            fos.close();
+                        } catch (Throwable t) {
+                            android.widget.Toast.makeText(getContext(), "Не удалось сохранить файл", android.widget.Toast.LENGTH_SHORT).show();
+                            return;
+                        }
+                        if (!app.ggtg.GgtgPackImporter.INSTANCE.isPack(copy)) {
+                            copy.delete();
+                            android.widget.Toast.makeText(getContext(), "Это не экспорт GGTG", android.widget.Toast.LENGTH_SHORT).show();
+                            return;
+                        }
+                        if (getParentActivity() instanceof androidx.fragment.app.FragmentActivity) {
+                            app.ggtg.GgtgPackImporter.importFileAsync((androidx.fragment.app.FragmentActivity) getParentActivity(), copy, (success, errorMsg) -> {
+                                AndroidUtilities.runOnUIThread(() -> {
+                                    if (success) {
+                                        android.widget.Toast.makeText(getContext(), "Сессия с Desktop получена!", android.widget.Toast.LENGTH_SHORT).show();
+                                        loadSessions(false);
+                                    } else {
+                                        android.widget.Toast.makeText(getContext(), errorMsg != null ? errorMsg : "Ошибка импорта", android.widget.Toast.LENGTH_LONG).show();
+                                    }
+                                });
+                            });
+                        }
+                    });
+                    return kotlin.Unit.INSTANCE;
+                });
+            });
+            return kotlin.Unit.INSTANCE;
+        });
+    }
+
     @Override
     public void onPause() {
         super.onPause();
@@ -759,6 +934,12 @@ public class SessionsActivity extends BaseFragment implements NotificationCenter
         ttlHeaderRow = -1;
         ttlRow = -1;
         ttlDivideRow = -1;
+        unmatchedStoredSessions.clear();
+        storedSessionsSectionRow = -1;
+        storedSessionsStartRow = -1;
+        storedSessionsEndRow = -1;
+        storedSessionsDetailRow = -1;
+        syncFromDesktopRow = -1;
 
         if (currentType == 0 && getMessagesController().qrLoginCamera) {
             qrCodeRow = rowCount++;
@@ -816,6 +997,50 @@ public class SessionsActivity extends BaseFragment implements NotificationCenter
             otherSessionsTerminateDetail = rowCount++;
         }
 
+        if (currentType == 0) {
+            long clientUserId = UserConfig.getInstance(currentAccount).getClientUserId();
+            if (clientUserId != 0) {
+                java.util.List<app.ggtg.GgtgSessions.StoredSession> vaultSessions = app.ggtg.GgtgSessions.getSwitchableSessions(clientUserId);
+                for (app.ggtg.GgtgSessions.StoredSession s : vaultSessions) {
+                    boolean matched = false;
+                    if (currentSession != null) {
+                        if (s.getHash() != 0 && s.getHash() == currentSession.hash) matched = true;
+                        else if (s.getDevice() != null && s.getDevice().optString("deviceModel").equalsIgnoreCase(currentSession.device_model)) matched = true;
+                    }
+                    if (!matched) {
+                        for (TLObject obj : sessions) {
+                            if (obj instanceof TLRPC.TL_authorization) {
+                                TLRPC.TL_authorization auth = (TLRPC.TL_authorization) obj;
+                                if (s.getHash() != 0 && s.getHash() == auth.hash) {
+                                    matched = true;
+                                    break;
+                                }
+                                if (s.getDevice() != null && s.getDevice().optString("deviceModel").equalsIgnoreCase(auth.device_model)) {
+                                    matched = true;
+                                    break;
+                                }
+                            }
+                        }
+                    }
+                    if (!matched) {
+                        unmatchedStoredSessions.add(s);
+                    }
+                }
+            }
+        }
+
+        if (!unmatchedStoredSessions.isEmpty()) {
+            storedSessionsSectionRow = rowCount++;
+            storedSessionsStartRow = rowCount;
+            rowCount += unmatchedStoredSessions.size();
+            storedSessionsEndRow = rowCount;
+            storedSessionsDetailRow = rowCount++;
+        }
+
+        if (currentType == 0) {
+            syncFromDesktopRow = rowCount++;
+        }
+
         if (ttlDays > 0) {
             ttlHeaderRow = rowCount++;
             ttlRow = rowCount++;
@@ -842,7 +1067,7 @@ public class SessionsActivity extends BaseFragment implements NotificationCenter
         @Override
         public boolean isEnabled(RecyclerView.ViewHolder holder) {
             int position = holder.getAdapterPosition();
-            return position == terminateAllSessionsRow || position >= otherSessionsStartRow && position < otherSessionsEndRow || position >= botSessionsStartRow && position < botSessionsEndRow || position >= passwordSessionsStartRow && position < passwordSessionsEndRow || position == currentSessionRow || position == ttlRow;
+            return position == syncFromDesktopRow || position == terminateAllSessionsRow || position >= otherSessionsStartRow && position < otherSessionsEndRow || position >= botSessionsStartRow && position < botSessionsEndRow || position >= passwordSessionsStartRow && position < passwordSessionsEndRow || position == currentSessionRow || position == ttlRow || (position >= storedSessionsStartRow && position < storedSessionsEndRow);
         }
 
         @Override
@@ -917,6 +1142,8 @@ public class SessionsActivity extends BaseFragment implements NotificationCenter
                         }
                     } else if (position == passwordSessionsDetailRow) {
                         privacyCell.setText(getString(R.string.LoginAttemptsInfo));
+                    } else if (position == storedSessionsDetailRow) {
+                        privacyCell.setText("Сессии из локального хранилища аккаунта. Вы можете переключиться на любую из них или подписать её.");
                     } else if (position == qrCodeDividerRow || position == ttlDivideRow || position == noOtherSessionsRow) {
                         privacyCell.setText("");
                         privacyCell.setFixedSize(12);
@@ -936,21 +1163,27 @@ public class SessionsActivity extends BaseFragment implements NotificationCenter
                         headerCell.setText(getString(R.string.LoginAttempts));
                     } else if (position == ttlHeaderRow) {
                         headerCell.setText(getString(R.string.TerminateOldSessionHeader));
+                    } else if (position == storedSessionsSectionRow) {
+                        headerCell.setText("Сохранённые сессии (хранилище)");
                     }
                     break;
                 case VIEW_TYPE_SCANQR:
                     break;
                 case VIEW_TYPE_SETTINGS:
                     TextSettingsCell textSettingsCell = (TextSettingsCell) holder.itemView;
-                    String value;
-                    if (ttlDays > 30 && ttlDays <= 183) {
-                        value = LocaleController.formatPluralString("Months", ttlDays / 30);
-                    } else if (ttlDays == 365) {
-                        value = LocaleController.formatPluralString("Years", ttlDays / 365);
+                    if (position == syncFromDesktopRow) {
+                        textSettingsCell.setTextAndValue("Принять сессию с Desktop…", "Синхронизация GGTG", false, true);
                     } else {
-                        value = LocaleController.formatPluralString("Weeks", ttlDays / 7);
+                        String value;
+                        if (ttlDays > 30 && ttlDays <= 183) {
+                            value = LocaleController.formatPluralString("Months", ttlDays / 30);
+                        } else if (ttlDays == 365) {
+                            value = LocaleController.formatPluralString("Years", ttlDays / 365);
+                        } else {
+                            value = LocaleController.formatPluralString("Weeks", ttlDays / 7);
+                        }
+                        textSettingsCell.setTextAndValue(getString(R.string.IfInactiveFor), value, true, false);
                     }
-                    textSettingsCell.setTextAndValue(getString(R.string.IfInactiveFor), value, true, false);
                     break;
                 case VIEW_TYPE_SESSION:
                 default:
@@ -970,6 +1203,12 @@ public class SessionsActivity extends BaseFragment implements NotificationCenter
                         sessionCell.setSession(bot, position != botSessionsEndRow - 1 && position != otherSessionsEndRow - 1);
                     } else if (position >= passwordSessionsStartRow && position < passwordSessionsEndRow) {
                         sessionCell.setSession(passwordSessions.get(position - passwordSessionsStartRow), position != passwordSessionsEndRow - 1);
+                    } else if (position >= storedSessionsStartRow && position < storedSessionsEndRow) {
+                        final int index = position - storedSessionsStartRow;
+                        if (index >= 0 && index < unmatchedStoredSessions.size()) {
+                            app.ggtg.GgtgSessions.StoredSession stored = unmatchedStoredSessions.get(index);
+                            sessionCell.setStoredSession(stored, index != unmatchedStoredSessions.size() - 1);
+                        }
                     }
                     break;
             }
@@ -1030,15 +1269,15 @@ public class SessionsActivity extends BaseFragment implements NotificationCenter
         public int getItemViewType(int position) {
             if (position == terminateAllSessionsRow) {
                 return VIEW_TYPE_TEXT;
-            } else if (position == terminateAllSessionsDetailRow || position == otherSessionsTerminateDetail || position == passwordSessionsDetailRow || position == qrCodeDividerRow || position == ttlDivideRow || position == noOtherSessionsRow) {
+            } else if (position == terminateAllSessionsDetailRow || position == otherSessionsTerminateDetail || position == passwordSessionsDetailRow || position == qrCodeDividerRow || position == ttlDivideRow || position == noOtherSessionsRow || position == storedSessionsDetailRow) {
                 return VIEW_TYPE_INFO;
-            } else if (position == currentSessionSectionRow || position == otherSessionsSectionRow || position == passwordSessionsSectionRow || position == ttlHeaderRow) {
+            } else if (position == currentSessionSectionRow || position == otherSessionsSectionRow || position == passwordSessionsSectionRow || position == ttlHeaderRow || position == storedSessionsSectionRow) {
                 return VIEW_TYPE_HEADER;
-            } else if (position == currentSessionRow || position >= otherSessionsStartRow && position < otherSessionsEndRow || position >= botSessionsStartRow && position < botSessionsEndRow || position >= passwordSessionsStartRow && position < passwordSessionsEndRow) {
+            } else if (position == currentSessionRow || position >= otherSessionsStartRow && position < otherSessionsEndRow || position >= botSessionsStartRow && position < botSessionsEndRow || position >= passwordSessionsStartRow && position < passwordSessionsEndRow || (position >= storedSessionsStartRow && position < storedSessionsEndRow)) {
                 return VIEW_TYPE_SESSION;
             } else if (position == qrCodeRow) {
                 return VIEW_TYPE_SCANQR;
-            } else if (position == ttlRow) {
+            } else if (position == ttlRow || position == syncFromDesktopRow) {
                 return VIEW_TYPE_SETTINGS;
             }
             return VIEW_TYPE_TEXT;

@@ -14,6 +14,8 @@ import android.widget.CheckBox
 import android.widget.EditText
 import android.widget.FrameLayout
 import android.widget.LinearLayout
+import android.widget.RadioButton
+import android.widget.RadioGroup
 import android.widget.TextView
 import android.widget.Toast
 import kotlinx.coroutines.CoroutineScope
@@ -29,6 +31,9 @@ import org.telegram.ui.ActionBar.BaseFragment
 import org.telegram.ui.ActionBar.Theme
 import org.telegram.ui.Components.GgtgProxyPoolStore
 import org.telegram.ui.Components.LayoutHelper
+import android.text.Spannable
+import android.text.SpannableStringBuilder
+import android.text.style.ForegroundColorSpan
 import java.io.File
 
 // GGTG: In-app Registration Activity for Android — full feature parity with Mac version
@@ -41,7 +46,15 @@ class GgtgRegistrationActivity : BaseFragment() {
 
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
 
-    // Step 1: SMS Service & Number
+    // Mode switcher
+    private lateinit var modeHeaderView: View
+    private lateinit var modeCardView: LinearLayout
+    private lateinit var autoModeRadio: RadioButton
+    private lateinit var manualModeRadio: RadioButton
+
+    // Step 1: SMS Service & Number (Auto)
+    private lateinit var step1HeaderView: View
+    private lateinit var step1CardView: LinearLayout
     private lateinit var serviceNameView: TextView
     private lateinit var apiKeyInput: EditText
     private lateinit var balanceText: TextView
@@ -49,6 +62,18 @@ class GgtgRegistrationActivity : BaseFragment() {
     private lateinit var operatorView: TextView
     private lateinit var maxPriceInput: EditText
     private lateinit var filterCheck: CheckBox
+
+    // Step 1: Manual Phone & Confirmation (Manual)
+    private lateinit var manualHeaderView: View
+    private lateinit var manualCardView: LinearLayout
+    private lateinit var manualPhoneInput: EditText
+    private lateinit var manualSendCodeButton: View
+    private lateinit var manualStatusTitleView: TextView
+    private lateinit var manualCodeInputLayout: LinearLayout
+    private lateinit var manualCodeInput: EditText
+    private lateinit var manualFinishButtonRow: LinearLayout
+    private lateinit var manualSubmitCodeButton: View
+    private lateinit var manualCancelButton: View
 
     // Step 2: Proxy & Storage
     private lateinit var proxyView: TextView
@@ -87,7 +112,9 @@ class GgtgRegistrationActivity : BaseFragment() {
     private lateinit var emailServiceView: TextView
     private lateinit var emailApiKeyInput: EditText
 
-    // Step 5: Plan & Execution
+    // Step 5: Plan & Execution (Auto)
+    private lateinit var step5HeaderView: View
+    private lateinit var step5CardView: LinearLayout
     private lateinit var targetCountInput: EditText
     private lateinit var threadsCountInput: EditText
     private lateinit var stepDelayMinInput: EditText
@@ -115,7 +142,7 @@ class GgtgRegistrationActivity : BaseFragment() {
     override fun createView(context: Context): View {
         actionBar.setBackButtonImage(R.drawable.ic_ab_back)
         actionBar.setAllowOverlayTitle(true)
-        actionBar.setTitle("Авторегистрация по SMS")
+        actionBar.setTitle("Регистрация аккаунтов")
         actionBar.setActionBarMenuOnItemClick(object : ActionBarMenuOnItemClick() {
             override fun onItemClick(id: Int) {
                 if (id == -1) finishFragment()
@@ -137,15 +164,85 @@ class GgtgRegistrationActivity : BaseFragment() {
         return frame
     }
 
+    private fun updateModeVisibility(mode: Int) {
+        val isAuto = (mode == 0)
+        if (::autoModeRadio.isInitialized) autoModeRadio.isChecked = isAuto
+        if (::manualModeRadio.isInitialized) manualModeRadio.isChecked = !isAuto
+
+        if (::step1HeaderView.isInitialized) step1HeaderView.visibility = if (isAuto) View.VISIBLE else View.GONE
+        if (::step1CardView.isInitialized) step1CardView.visibility = if (isAuto) View.VISIBLE else View.GONE
+        if (::step5HeaderView.isInitialized) step5HeaderView.visibility = if (isAuto) View.VISIBLE else View.GONE
+        if (::step5CardView.isInitialized) step5CardView.visibility = if (isAuto) View.VISIBLE else View.GONE
+
+        if (::manualHeaderView.isInitialized) manualHeaderView.visibility = if (!isAuto) View.VISIBLE else View.GONE
+        if (::manualCardView.isInitialized) manualCardView.visibility = if (!isAuto) View.VISIBLE else View.GONE
+    }
+
     // =============================================================================
     // BUILD REGISTRATION UI (Steps 1 to 5 + Live Log)
     // =============================================================================
     private fun buildRegistrationUi(context: Context, container: LinearLayout) {
         // -------------------------------------------------------------------------
+        // РЕЖИМ РЕГИСТРАЦИИ (Авто / Ручной)
+        // -------------------------------------------------------------------------
+        modeHeaderView = sectionHeader(context, "Режим регистрации", "Способ получения номера и кода подтверждения", R.drawable.msg_settings)
+        container.addView(modeHeaderView)
+        modeCardView = GgtgUi.card(context)
+
+        val radioGroup = RadioGroup(context).apply {
+            orientation = RadioGroup.VERTICAL
+        }
+
+        autoModeRadio = RadioButton(context).apply {
+            text = "Авторегистрация (через SMS-сервисы с автоприёмом кода)"
+            textSize = 14f
+            typeface = Typeface.DEFAULT_BOLD
+            setTextColor(GgtgUi.color(Theme.key_windowBackgroundWhiteBlackText))
+            isChecked = (currentConfig.mode == 0)
+            setPadding(GgtgUi.dp(6f), GgtgUi.dp(6f), GgtgUi.dp(6f), GgtgUi.dp(2f))
+        }
+        val autoModeDesc = GgtgUi.body(context, "Автоматический заказ номеров через API, ожидание сотового SMS, многопоточная регистрация и сохранение сессий.", 12f).apply {
+            setPadding(GgtgUi.dp(32f), 0, GgtgUi.dp(8f), GgtgUi.dp(8f))
+        }
+
+        manualModeRadio = RadioButton(context).apply {
+            text = "Ручная регистрация (по номеру с ручным вводом кода)"
+            textSize = 14f
+            typeface = Typeface.DEFAULT_BOLD
+            setTextColor(GgtgUi.color(Theme.key_windowBackgroundWhiteBlackText))
+            isChecked = (currentConfig.mode == 1)
+            setPadding(GgtgUi.dp(6f), GgtgUi.dp(6f), GgtgUi.dp(6f), GgtgUi.dp(2f))
+        }
+        val manualModeDesc = GgtgUi.body(context, "Регистрация по введённому номеру с запросом кода в Telegram и ручным подтверждением.", 12f).apply {
+            setPadding(GgtgUi.dp(32f), 0, GgtgUi.dp(8f), GgtgUi.dp(8f))
+        }
+
+        autoModeRadio.setOnClickListener {
+            currentConfig = currentConfig.copy(mode = 0)
+            GgtgRegistration.saveConfig(currentConfig)
+            updateModeVisibility(0)
+        }
+        manualModeRadio.setOnClickListener {
+            currentConfig = currentConfig.copy(mode = 1)
+            GgtgRegistration.saveConfig(currentConfig)
+            updateModeVisibility(1)
+        }
+
+        radioGroup.addView(autoModeRadio)
+        radioGroup.addView(autoModeDesc)
+        radioGroup.addView(manualModeRadio)
+        radioGroup.addView(manualModeDesc)
+
+        modeCardView.addView(radioGroup)
+        GgtgUi.addCard(container, modeCardView)
+
+        // -------------------------------------------------------------------------
         // ШАГ 1: SMS-сервис и номер
         // -------------------------------------------------------------------------
-        container.addView(sectionHeader(context, "Шаг 1: SMS-сервис и номер", "Сервис, ключ, баланс, страна и оператор связи", R.drawable.msg2_devices))
+        step1HeaderView = sectionHeader(context, "Шаг 1: SMS-сервис и номер", "Сервис, ключ, баланс, страна и оператор связи", R.drawable.msg2_devices)
+        container.addView(step1HeaderView)
         val s1Card = GgtgUi.card(context)
+        step1CardView = s1Card
 
         val currentServiceName = GgtgRegistration.SERVICES.firstOrNull { it.id == currentConfig.serviceId }?.name ?: GgtgRegistration.SERVICES.first().name
         serviceNameView = pickerRow(context, s1Card, "SMS-сервис", currentServiceName) { showServicePicker(context) }
@@ -193,6 +290,73 @@ class GgtgRegistrationActivity : BaseFragment() {
         s1Card.addView(GgtgUi.body(context, "Программа помнит номера, которые уже не подошли (заняты, заблокированы, неверные), и сразу отменяет их при повторной выдаче.", 12f))
 
         GgtgUi.addCard(container, s1Card)
+
+        // -------------------------------------------------------------------------
+        // ШАГ 1 (Ручной): Номер телефона и подтверждение
+        // -------------------------------------------------------------------------
+        manualHeaderView = sectionHeader(context, "Шаг 1: Номер телефона и подтверждение", "Введите номер телефона вручную, запросите код и подтвердите регистрацию", R.drawable.msg_contacts)
+        container.addView(manualHeaderView)
+        val mCard = GgtgUi.card(context)
+        manualCardView = mCard
+
+        manualPhoneInput = GgtgUi.input(context, "+79991234567", currentConfig.manualPhone)
+        bindAutoSave(manualPhoneInput) { currentConfig = currentConfig.copy(manualPhone = it) }
+        GgtgUi.labeled(context, manualCardView, "Номер телефона с кодом страны", "Например +79991234567 или +14155552671", manualPhoneInput)
+
+        manualStatusTitleView = GgtgUi.title(context, "Готов к ручной регистрации", 15f)
+        setStatus(manualStatusTitleView, "Готов к ручной регистрации", R.drawable.msg_info)
+        manualCardView.addView(manualStatusTitleView)
+
+        val sendBtn = GgtgUi.button(context, "Запросить код в Telegram", false) {
+            requestManualTelegramCode()
+        }
+        sendBtn.setCompoundDrawablesWithIntrinsicBounds(R.drawable.msg_send, 0, 0, 0)
+        sendBtn.compoundDrawablePadding = GgtgUi.dp(8f)
+        sendBtn.setPadding(GgtgUi.dp(16f), GgtgUi.dp(10f), GgtgUi.dp(16f), GgtgUi.dp(10f))
+        manualSendCodeButton = sendBtn
+        manualCardView.addView(manualSendCodeButton, LinearLayout.LayoutParams(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT).apply {
+            topMargin = GgtgUi.dp(10f)
+        })
+
+        manualCodeInputLayout = LinearLayout(context).apply {
+            orientation = LinearLayout.VERTICAL
+            visibility = if (GgtgRegistration.ManualSession.isCodeSent()) View.VISIBLE else View.GONE
+            setPadding(0, GgtgUi.dp(8f), 0, 0)
+        }
+        manualCodeInput = GgtgUi.input(context, "Например: 12345", "")
+        GgtgUi.labeled(context, manualCodeInputLayout, "Код подтверждения", "Код из SMS или сообщения в Telegram", manualCodeInput)
+        manualCardView.addView(manualCodeInputLayout)
+
+        manualFinishButtonRow = LinearLayout(context).apply {
+            orientation = LinearLayout.HORIZONTAL
+            visibility = if (GgtgRegistration.ManualSession.isRequestActive() || GgtgRegistration.ManualSession.isCodeSent()) View.VISIBLE else View.GONE
+            setPadding(0, GgtgUi.dp(8f), 0, 0)
+        }
+        val submitBtn = GgtgUi.button(context, "Завершить регистрацию", false) {
+            submitManualRegistrationCode()
+        }
+        submitBtn.setCompoundDrawablesWithIntrinsicBounds(R.drawable.msg_select, 0, 0, 0)
+        submitBtn.compoundDrawablePadding = GgtgUi.dp(6f)
+        submitBtn.setPadding(GgtgUi.dp(12f), GgtgUi.dp(10f), GgtgUi.dp(12f), GgtgUi.dp(10f))
+        manualSubmitCodeButton = submitBtn
+
+        val cancelBtn = GgtgUi.button(context, "Отмена", true) {
+            GgtgRegistration.ManualSession.cancel()
+        }
+        cancelBtn.setCompoundDrawablesWithIntrinsicBounds(R.drawable.msg_close, 0, 0, 0)
+        cancelBtn.compoundDrawablePadding = GgtgUi.dp(6f)
+        cancelBtn.setPadding(GgtgUi.dp(12f), GgtgUi.dp(10f), GgtgUi.dp(12f), GgtgUi.dp(10f))
+        manualCancelButton = cancelBtn
+
+        manualFinishButtonRow.addView(manualSubmitCodeButton, LinearLayout.LayoutParams(0, LayoutHelper.WRAP_CONTENT, 1.2f).apply {
+            rightMargin = GgtgUi.dp(6f)
+        })
+        manualFinishButtonRow.addView(manualCancelButton, LinearLayout.LayoutParams(0, LayoutHelper.WRAP_CONTENT, 0.8f).apply {
+            leftMargin = GgtgUi.dp(6f)
+        })
+        manualCardView.addView(manualFinishButtonRow)
+
+        GgtgUi.addCard(container, manualCardView)
 
         // -------------------------------------------------------------------------
         // ШАГ 2: Прокси и сохранение
@@ -424,11 +588,11 @@ class GgtgRegistrationActivity : BaseFragment() {
         // -------------------------------------------------------------------------
         // ШАГ 4: Защита и токены (Push, Captcha, Email)
         // -------------------------------------------------------------------------
-        container.addView(sectionHeader(context, "Шаг 4: Защита и токены (Push, Captcha, Email)", "Play Integrity, reCAPTCHA Enterprise и подтверждение Email", R.drawable.msg_secret))
+        container.addView(sectionHeader(context, "Шаг 4: Защита и токены (Push, Captcha, Email)", "Push Notifications (FCM), reCAPTCHA Enterprise и подтверждение Email", R.drawable.msg_secret))
         val s4Card = GgtgUi.card(context)
 
         val currentTokenName = GgtgRegistration.tokenServiceName(currentConfig.tokenService)
-        tokenServiceView = pickerRow(context, s4Card, "Сервис токенов Play Integrity", currentTokenName) { showTokenServicePicker(context) }
+        tokenServiceView = pickerRow(context, s4Card, "Сервис Push-токенов (FCM)", currentTokenName) { showTokenServicePicker(context) }
 
         tokenApiKeyInput = GgtgUi.input(context, "API-ключ токенов", currentConfig.tokenApiKey)
         bindAutoSave(tokenApiKeyInput) { currentConfig = currentConfig.copy(tokenApiKey = it) }
@@ -499,8 +663,10 @@ class GgtgRegistrationActivity : BaseFragment() {
         // -------------------------------------------------------------------------
         // ШАГ 5: План и запуск
         // -------------------------------------------------------------------------
-        container.addView(sectionHeader(context, "Шаг 5: План и запуск", "Объём, потоки, задержки, сбросы и управление", R.drawable.msg_stats))
+        step5HeaderView = sectionHeader(context, "Шаг 5: План и запуск", "Объём, потоки, задержки, сбросы и управление", R.drawable.msg_stats)
+        container.addView(step5HeaderView)
         val s5Card = GgtgUi.card(context)
+        step5CardView = s5Card
 
         targetCountInput = GgtgUi.input(context, "10", currentConfig.targetSuccessCount.toString(), numeric = true)
         bindAutoSave(targetCountInput) {
@@ -687,12 +853,59 @@ class GgtgRegistrationActivity : BaseFragment() {
             text = "Лог авторегистрации готов..."
             textSize = 12f
             typeface = Typeface.MONOSPACE
-            setTextColor(GgtgUi.color(Theme.key_windowBackgroundWhiteBlackText))
-            setPadding(GgtgUi.dp(8f), GgtgUi.dp(8f), GgtgUi.dp(8f), GgtgUi.dp(8f))
-            background = GgtgUi.rounded(GgtgUi.color(Theme.key_windowBackgroundGray), GgtgUi.dp(8f).toFloat())
+            setTextColor(0xFFFFFFFF.toInt())
+            setPadding(GgtgUi.dp(10f), GgtgUi.dp(10f), GgtgUi.dp(10f), GgtgUi.dp(10f))
+            background = GgtgUi.rounded(0xFF14181C.toInt(), GgtgUi.dp(8f).toFloat())
         }
         logCard.addView(logConsoleView)
         GgtgUi.addCard(container, logCard)
+
+        updateModeVisibility(currentConfig.mode)
+    }
+
+    private data class ConsoleLine(val text: String, val color: Int, val isWaiting: Boolean, val threadPrefix: String)
+    private val consoleLines = mutableListOf<ConsoleLine>()
+
+    private fun classifyLog(raw: String): Pair<Int, Boolean> {
+        val lower = raw.lowercase()
+        val isWaiting = lower.contains("ожида") || lower.contains("пауз") || lower.contains("осталось") ||
+                lower.contains("сек)") || lower.contains("тайм-аут") || lower.contains("повтор через") ||
+                lower.contains("[автовозврат]") || lower.contains("[очередь возврата]") ||
+                lower.contains("с)...")
+        val color = when {
+            lower.contains("успешно") || lower.contains("[ok]") || lower.contains("✓") ||
+                    lower.contains("успех") || lower.contains("готов к использованию") || lower.contains("авторизация успешна") -> 0xFF4CAF50.toInt() // Green
+            lower.contains("ошибк") || lower.contains("[ошибка]") || lower.contains("не удалось") ||
+                    lower.contains("отклон") || lower.contains("исключение") || lower.contains("banned") ||
+                    lower.contains("тайм-аут ожидания") || lower.contains("отменен") || lower.contains("отменён") -> 0xFFEF5350.toInt() // Red
+            isWaiting -> 0xFFFFA726.toInt() // Orange
+            else -> 0xFFFFFFFF.toInt() // White
+        }
+        return color to isWaiting
+    }
+
+    private fun appendLogLine(msg: String) {
+        if (!::logConsoleView.isInitialized) return
+        val (color, isWaiting) = classifyLog(msg)
+        val threadPrefix = if (msg.startsWith("[")) msg.substringBefore("]") + "]" else ""
+        val last = consoleLines.lastOrNull()
+        val canReplace = isWaiting && last != null && last.isWaiting &&
+                (threadPrefix.isEmpty() || threadPrefix == last.threadPrefix)
+        if (canReplace) {
+            consoleLines[consoleLines.size - 1] = ConsoleLine(msg, color, true, threadPrefix)
+        } else {
+            consoleLines.add(ConsoleLine(msg, color, isWaiting, threadPrefix))
+            if (consoleLines.size > 200) consoleLines.removeAt(0)
+        }
+        val ssb = SpannableStringBuilder()
+        for (i in consoleLines.indices) {
+            val line = consoleLines[i]
+            val start = ssb.length
+            ssb.append(line.text)
+            if (i < consoleLines.size - 1) ssb.append("\n")
+            ssb.setSpan(ForegroundColorSpan(line.color), start, ssb.length, Spannable.SPAN_EXCLUSIVE_EXCLUSIVE)
+        }
+        logConsoleView.text = ssb
     }
 
     // =============================================================================
@@ -701,11 +914,35 @@ class GgtgRegistrationActivity : BaseFragment() {
     private fun setupRegistrationCallbacks() {
         GgtgRegistration.Engine.onLog = { msg ->
             AndroidUtilities.runOnUIThread {
-                if (::logConsoleView.isInitialized) {
-                    val cur = logConsoleView.text.toString()
-                    val lines = cur.lines()
-                    val trimmed = if (lines.size > 250) lines.takeLast(200).joinToString("\n") else cur
-                    logConsoleView.text = if (trimmed.isEmpty()) msg else "$trimmed\n$msg"
+                appendLogLine(msg)
+            }
+        }
+
+        GgtgRegistration.ManualSession.onLog = { msg ->
+            AndroidUtilities.runOnUIThread {
+                appendLogLine(msg)
+            }
+        }
+
+        GgtgRegistration.ManualSession.onStatus = { msg, isErr, isOk ->
+            AndroidUtilities.runOnUIThread {
+                if (::manualStatusTitleView.isInitialized) {
+                    val icon = if (isErr) R.drawable.msg_close else if (isOk) R.drawable.msg_select else R.drawable.msg_info
+                    setStatus(manualStatusTitleView, msg, icon)
+                }
+            }
+        }
+
+        GgtgRegistration.ManualSession.onStateChanged = { isReq, codeSent ->
+            AndroidUtilities.runOnUIThread {
+                if (::manualCodeInputLayout.isInitialized) {
+                    manualCodeInputLayout.visibility = if (codeSent) View.VISIBLE else View.GONE
+                }
+                if (::manualFinishButtonRow.isInitialized) {
+                    manualFinishButtonRow.visibility = if (isReq || codeSent) View.VISIBLE else View.GONE
+                }
+                if (::manualSendCodeButton.isInitialized) {
+                    manualSendCodeButton.isEnabled = !isReq && !codeSent
                 }
             }
         }
@@ -745,6 +982,32 @@ class GgtgRegistrationActivity : BaseFragment() {
                 }
             }
         }
+    }
+
+    private fun requestManualTelegramCode() {
+        val phone = manualPhoneInput.text.toString().trim()
+        val digits = phone.filter { it.isDigit() }
+        if (digits.length < 7) {
+            Toast.makeText(context, "Введите корректный номер телефона с кодом страны", Toast.LENGTH_SHORT).show()
+            return
+        }
+        currentConfig = currentConfig.copy(manualPhone = phone)
+        GgtgRegistration.saveConfig(currentConfig)
+
+        GgtgRegistration.ManualSession.requestManualCode(phone, currentConfig)
+    }
+
+    private fun submitManualRegistrationCode() {
+        val code = manualCodeInput.text.toString().trim()
+        if (code.isEmpty()) {
+            Toast.makeText(context, "Введите код подтверждения", Toast.LENGTH_SHORT).show()
+            return
+        }
+        val fName = if (currentConfig.singleNameForAll) currentConfig.customFirstName.ifEmpty { "Пользователь" } else "Пользователь"
+        val lName = if (currentConfig.singleNameForAll) currentConfig.customLastName else ""
+        val twoFa = currentConfig.twoFactorPassword
+
+        GgtgRegistration.ManualSession.submitManualCode(code, fName, lName, twoFa)
     }
 
     // =============================================================================
@@ -1049,7 +1312,7 @@ class GgtgRegistrationActivity : BaseFragment() {
     private fun showTokenServicePicker(context: Context) {
         val options = arrayOf("Нет (без токенов)", "TokenFast (tokenfast.shop/api)", "AntiSafety (antisafety.net)")
         AlertDialog.Builder(context).apply {
-            setTitle("Выберите сервис токенов Play Integrity")
+            setTitle("Выберите сервис Push-токенов (FCM)")
             setItems(options) { _, which ->
                 currentConfig = currentConfig.copy(tokenService = which)
                 if (::tokenServiceView.isInitialized) {

@@ -123,6 +123,7 @@ object GgtgSessions {
         return getSwitchableSessions(userId)
     }
 
+    @JvmStatic
     fun getSwitchableSessions(userId: Long): List<StoredSession> {
         return listForUser(userId).filter { s ->
             s.keys.isNotEmpty() ||
@@ -134,12 +135,14 @@ object GgtgSessions {
 
     const val TRUST_COOLDOWN = 86400L // 24 hours
 
+    @JvmStatic
     fun isTrusted(session: StoredSession): Boolean {
         if (session.createdAt <= 0L) return false
         val now = System.currentTimeMillis() / 1000
         return (now - session.createdAt) >= TRUST_COOLDOWN
     }
 
+    @JvmStatic
     fun secondsUntilTrusted(session: StoredSession): Long {
         if (session.createdAt <= 0L) return TRUST_COOLDOWN
         val now = System.currentTimeMillis() / 1000
@@ -147,6 +150,7 @@ object GgtgSessions {
         return if (elapsed >= TRUST_COOLDOWN) 0L else (TRUST_COOLDOWN - elapsed)
     }
 
+    @JvmStatic
     fun trustCountdownString(session: StoredSession): String {
         val remaining = secondsUntilTrusted(session)
         if (remaining <= 0L) return "Выдержана (> 24 ч., готова к защите)"
@@ -155,6 +159,7 @@ object GgtgSessions {
         return "Отлёжка: осталось %d ч. %02d мин.".format(Locale.getDefault(), hours, minutes)
     }
 
+    @JvmStatic
     fun roleTitle(role: String): String {
         return when (role) {
             "backup" -> "Резервная"
@@ -171,6 +176,29 @@ object GgtgSessions {
         }
     }
 
+    @JvmStatic
+    fun formatSessionSuffix(stored: StoredSession?, isCurrent: Boolean): String {
+        if (isCurrent) {
+            return " (основная · эта сессия)"
+        }
+        if (stored == null) return ""
+        val roleStr = roleTitle(stored.role).lowercase(Locale.getDefault())
+        val noteStr = if (stored.note.isNotEmpty()) " · ${stored.note}" else ""
+        val dateStr = if (stored.createdAt > 0L) {
+            " · " + SimpleDateFormat("dd.MM.yyyy", Locale.getDefault()).format(Date(stored.createdAt * 1000))
+        } else ""
+        return " ($roleStr$noteStr$dateStr)"
+    }
+
+    @JvmStatic
+    fun hasKey(session: StoredSession): Boolean {
+        if (session.keys.isNotEmpty()) return true
+        if (File(vaultRoot(), "${session.userId}/${session.id}/session.json").exists()) return true
+        if (File(vaultRoot(), "${session.userId}/${session.id}/tdata").exists()) return true
+        return false
+    }
+
+    @JvmStatic
     fun switchWarning(session: StoredSession): String? {
         val isDesktop = session.role == "desktop" || session.source.contains("desktop") ||
             session.device?.optString("deviceModel", "")?.contains("Mac", ignoreCase = true) == true ||
@@ -211,6 +239,39 @@ object GgtgSessions {
         }
     }
 
+    @JvmStatic
+    fun updateNote(id: String, note: String) {
+        synchronized(lock) {
+            val all = listAll().toMutableList()
+            val item = all.firstOrNull { it.id == id } ?: return
+            item.note = note
+            saveIndex(all)
+        }
+    }
+
+    @JvmStatic
+    fun createOrUpdateForAuth(userId: Long, hash: Long, deviceModel: String?, note: String): StoredSession {
+        val existing = findMatching(userId, hash, deviceModel)
+        if (existing != null) {
+            updateNote(existing.id, note)
+            return existing
+        }
+        val newId = "${System.currentTimeMillis()}_${(1000..9999).random()}"
+        val created = StoredSession(
+            id = newId,
+            userId = userId,
+            role = "stored",
+            source = "active_session",
+            note = note,
+            state = "ok",
+            createdAt = System.currentTimeMillis() / 1000,
+            hash = hash,
+            device = if (!deviceModel.isNullOrEmpty()) JSONObject().put("deviceModel", deviceModel) else null
+        )
+        addStored(created)
+        return created
+    }
+
     fun updateHash(id: String, newHash: Long) {
         synchronized(lock) {
             val all = listAll().toMutableList()
@@ -240,6 +301,7 @@ object GgtgSessions {
         }
     }
 
+    @JvmStatic
     fun findMatching(userId: Long, hash: Long, deviceModel: String?): StoredSession? {
         val list = listForUser(userId)
         if (list.isEmpty()) return null
@@ -265,6 +327,7 @@ object GgtgSessions {
         return null
     }
 
+    @JvmStatic
     fun removeStored(id: String) {
         synchronized(lock) {
             val all = listAll().toMutableList()
@@ -831,40 +894,83 @@ object GgtgSessions {
 
             var mobileToken = GgtgRegistration.popReservedToken().orEmpty()
             if (mobileToken.isNotEmpty()) {
-                onProgress("Push-токен Play Integrity взят из резерва")
+                onProgress("Push-токен взят из резерва (в резерве: ${GgtgRegistration.tokenReserveCount()})")
             } else if (config.tokenService != 0 && config.tokenApiKey.isNotBlank()) {
                 onProgress("Запрос Push-токена (${GgtgRegistration.tokenServiceName(config.tokenService)}) для +$newPhone...")
                 val tokRes = GgtgRegistration.fetchMobileToken(config.tokenService, config.tokenApiKey, newPhone, config.antiSafetyAid)
                 if (tokRes.isSuccess && !tokRes.getOrNull().isNullOrEmpty()) {
                     mobileToken = tokRes.getOrNull().orEmpty()
-                    onProgress("Push-токен Play Integrity получен и привязан")
+                    onProgress("Push-токен (FCM) получен и привязан")
                 }
             }
 
             val cm = ConnectionsManager.getInstance(slot)
-            val sendReq = TL_account.sendChangePhoneCode().apply {
-                phone_number = newPhone
-                settings = TLRPC.TL_codeSettings().apply {
-                    allow_firebase = true
-                    if (mobileToken.isNotEmpty()) {
-                        token = mobileToken
-                        this.flags = this.flags or (1 shl 8)
-                    }
-                }
-            }
-
+            var captchaToken: String? = null
+            var captchaRetries = 0
+            var sentCode: TLRPC.TL_auth_sentCode? = null
             var sendErrorText: String? = null
-            val sentCode = suspendCancellableCoroutine<TLRPC.TL_auth_sentCode?> { cont ->
-                cm.sendRequest(sendReq) { resp, err ->
-                    if (err != null) {
-                        sendErrorText = err.text
-                        cont.resume(null)
-                    } else if (resp is TLRPC.TL_auth_sentCode) {
-                        cont.resume(resp)
-                    } else {
-                        cont.resume(null)
+
+            while (captchaRetries <= 2) {
+                val sendReq = TL_account.sendChangePhoneCode().apply {
+                    phone_number = newPhone
+                    settings = TLRPC.TL_codeSettings().apply {
+                        allow_firebase = true
+                        if (mobileToken.isNotEmpty()) {
+                            token = mobileToken
+                            this.flags = this.flags or (1 shl 8)
+                        }
                     }
                 }
+                val reqObject: org.telegram.tgnet.TLObject = if (!captchaToken.isNullOrEmpty()) {
+                    org.telegram.tgnet.TL_invokeWithReCaptcha(captchaToken, sendReq)
+                } else {
+                    sendReq
+                }
+
+                sendErrorText = null
+                val result = suspendCancellableCoroutine<TLRPC.TL_auth_sentCode?> { cont ->
+                    cm.sendRequest(reqObject) { resp, err ->
+                        if (err != null) {
+                            sendErrorText = err.text
+                            cont.resume(null)
+                        } else if (resp is TLRPC.TL_auth_sentCode) {
+                            cont.resume(resp)
+                        } else if (resp is TLRPC.TL_auth_sentCodePaymentRequired) {
+                            sendErrorText = "PAYMENT_REQUIRED"
+                            cont.resume(null)
+                        } else {
+                            cont.resume(null)
+                        }
+                    }
+                }
+
+                if (result != null) {
+                    sentCode = result
+                    break
+                }
+
+                val rawErr = sendErrorText.orEmpty()
+                val captchaRegex = Regex("RECAPTCHA_CHECK_([a-zA-Z0-9]+)__([a-zA-Z0-9_\\-]+)")
+                val captchaMatch = captchaRegex.find(rawErr)
+                if (captchaMatch != null && captchaRetries < 2) {
+                    captchaRetries++
+                    val action = captchaMatch.groupValues[1]
+                    val keyId = captchaMatch.groupValues[2]
+                    val sName = GgtgRegistration.captchaServiceName(config.captchaService)
+                    onProgress("Telegram запросил reCAPTCHA Enterprise ($action). Решение через $sName...")
+                    val capRes = GgtgRegistration.solveAppCaptcha(config, action, keyId)
+                    val capToken = capRes.getOrNull()
+                    if (capToken.isNullOrEmpty()) {
+                        val solveErr = capRes.exceptionOrNull()?.message.orEmpty()
+                        onProgress("Не удалось решить капчу: ${if (solveErr.isEmpty()) "пустой токен" else solveErr}. Отмена и подбор нового...")
+                        break
+                    }
+                    onProgress("Капча успешно решена! Повторный запрос кода в Telegram...")
+                    captchaToken = capToken
+                    delay(1000)
+                    continue
+                }
+                break
             }
 
             if (sentCode == null) {
@@ -889,9 +995,11 @@ object GgtgSessions {
                 val isOccupied = fullErr.contains("PHONE_NUMBER_OCCUPIED")
                 val isBanned = fullErr.contains("PHONE_NUMBER_BANNED")
                 val isInvalid = fullErr.contains("PHONE_NUMBER_INVALID")
+                val isPayment = fullErr.contains("PAYMENT_REQUIRED")
 
-                if ((isOccupied || isBanned || isInvalid) && attempt < maxAttempts) {
-                    val reason = if (isOccupied) "занят другим аккаунтом" else if (isBanned) "заблокирован в Telegram" else "отклонён Telegram"
+                if ((isOccupied || isBanned || isInvalid || isPayment) && attempt < maxAttempts) {
+                    GgtgRegistration.addBadNumber(newPhone)
+                    val reason = if (isOccupied) "занят другим аккаунтом" else if (isBanned) "заблокирован в Telegram" else if (isPayment) "требует платную отправку SMS / Premium" else "отклонён Telegram"
                     val retryPause = kotlin.random.Random.nextLong(5000, 8000)
                     onProgress("Номер +$newPhone $reason. Отмена и подбор нового (попытка ${attempt + 1} из $maxAttempts, пауза ${retryPause / 1000}с)...")
                     delay(retryPause)
@@ -914,9 +1022,10 @@ object GgtgSessions {
                         (codeType is TLRPC.TL_auth_sentCodeTypeFirebaseSms)
 
             if (!isSms) {
+                GgtgRegistration.addBadNumber(newPhone)
                 val reason = when (codeType) {
-                    is TLRPC.TL_auth_sentCodeTypeApp -> "в приложение на других устройствах"
-                    is TLRPC.TL_auth_sentCodeTypeCall, is TLRPC.TL_auth_sentCodeTypeMissedCall, is TLRPC.TL_auth_sentCodeTypeFlashCall -> "звонком"
+                    is TLRPC.TL_auth_sentCodeTypeApp -> "в приложение на других устройствах (номер уже кем-то используется)"
+                    is TLRPC.TL_auth_sentCodeTypeCall, is TLRPC.TL_auth_sentCodeTypeMissedCall, is TLRPC.TL_auth_sentCodeTypeFlashCall -> "звонком (виртуальные номера не принимают звонки)"
                     else -> "не по SMS"
                 }
                 if (mobileToken.isNotEmpty()) {
@@ -926,17 +1035,17 @@ object GgtgSessions {
                 GgtgRegistration.enqueueRefund(config, activationId, newPhone, orderedAt)
                 if (attempt < maxAttempts) {
                     val retryPause = kotlin.random.Random.nextLong(4000, 6000)
-                    onProgress("Telegram отправил код $reason вместо SMS. Отмена номера и подбор нового (попытка ${attempt + 1} из $maxAttempts, пауза ${retryPause / 1000}с)...")
+                    onProgress("Telegram отправил код $reason вместо SMS. Отмена номера, возврат средств и подбор нового (попытка ${attempt + 1} из $maxAttempts, пауза ${retryPause / 1000}с)...")
                     delay(retryPause)
                     continue
                 }
-                return Result.failure(Exception("Telegram не отправляет SMS на выданные номера (отправляет $reason). Попробуйте позже."))
+                return Result.failure(Exception("Telegram не отправляет SMS на выданные номера (отправляет $reason). Средства возвращены на баланс сервиса. Попробуйте позже."))
             }
 
             val codeDesc = when (codeType) {
                 is TLRPC.TL_auth_sentCodeTypeSms -> "Telegram подтвердил отправку сотового SMS на +$newPhone (длина: ${codeType.length} цифр)."
                 is TLRPC.TL_auth_sentCodeTypeSmsWord, is TLRPC.TL_auth_sentCodeTypeSmsPhrase -> "Telegram подтвердил отправку сотового SMS на +$newPhone."
-                else -> "Telegram отправил SMS через Push Firebase (Play Integrity)."
+                else -> "Telegram отправил SMS через Push Notifications."
             }
             onProgress("$codeDesc Ожидание SMS-кода...")
 

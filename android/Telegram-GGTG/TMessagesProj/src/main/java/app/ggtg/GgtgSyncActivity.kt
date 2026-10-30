@@ -95,7 +95,7 @@ class GgtgSyncActivity : BaseFragment() {
         refreshStatus()
 
         // ---- pairing ----
-        GgtgUi.addCard(column, GgtgUi.actionCard(context, "", "Сканировать QR-код с Mac",
+        GgtgUi.addCard(column, GgtgUi.actionCard(context, R.drawable.msg_qrcode, "Сканировать QR-код с Mac",
             "На Mac: «Синхронизация» → «Подключить телефон по QR-коду». Больше ничего вводить не нужно.") {
             scan()
         })
@@ -192,12 +192,12 @@ class GgtgSyncActivity : BaseFragment() {
         GgtgUi.addCard(column, auto)
 
         // ---- accounts between the devices ----
-        GgtgUi.addCard(column, GgtgUi.actionCard(context, "", "Аккаунты между устройствами",
+        GgtgUi.addCard(column, GgtgUi.actionCard(context, R.drawable.msg2_devices, "Аккаунты между устройствами",
             "Принять аккаунты с Desktop или отправить свои на Desktop — новой отдельной сессией, без разрыва.") {
             presentFragment(GgtgSyncAccountsActivity())
         })
 
-        GgtgUi.addCard(column, GgtgUi.actionCard(context, "", "Свой api_id",
+        GgtgUi.addCard(column, GgtgUi.actionCard(context, R.drawable.msg_settings, "Свой api_id",
             "Если Telegram отказывает в новой сессии (API_ID_PUBLISHED_FLOOD): как получить и куда ввести.") {
             GgtgApiOverride.showDialog(context)
         })

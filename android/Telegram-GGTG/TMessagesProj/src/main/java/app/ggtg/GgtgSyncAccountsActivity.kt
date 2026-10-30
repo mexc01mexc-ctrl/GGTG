@@ -27,6 +27,7 @@ class GgtgSyncAccountsActivity : BaseFragment() {
 
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
     private var picker: GgtgAccountPicker? = null
+    private var noteInput: android.widget.EditText? = null
 
     override fun createView(context: Context): View {
         actionBar.setBackButtonImage(R.drawable.ic_ab_back)
@@ -40,15 +41,21 @@ class GgtgSyncAccountsActivity : BaseFragment() {
         fragmentView = frame
         val root = GgtgUi.page(context, frame)
 
-        GgtgUi.addCard(root, GgtgUi.infoCard(context, "", "Как это работает",
+        GgtgUi.addCard(root, GgtgUi.infoCard(context, R.drawable.msg_info, "Как это работает",
             "Каждому аккаунту выдаётся новая отдельная сессия, поэтому на телефоне и на Desktop аккаунт работает одновременно и сессии не рвутся. " +
                 "Файл с сессиями идёт через «Избранное» главного аккаунта и зашифрован вашей фразой."), top = 10f)
 
         root.addView(GgtgUi.sectionLabel(context, "Принять с Desktop"))
-        GgtgUi.addCard(root, GgtgUi.actionCard(context, "", "Принять аккаунты с Desktop",
+        GgtgUi.addCard(root, GgtgUi.actionCard(context, R.drawable.msg_download, "Принять аккаунты с Desktop",
             "На Desktop: «Синхронизация» → «Отправить аккаунты на Android…»") { receive() })
 
         root.addView(GgtgUi.sectionLabel(context, "Отправить на Desktop"))
+        val noteCard = GgtgUi.card(context)
+        val nInput = GgtgUi.input(context, "Подпись сессий (где используется, напр. Телефон мастера)")
+        noteCard.addView(nInput)
+        GgtgUi.addCard(root, noteCard)
+        noteInput = nInput
+
         val accounts = GgtgUi.card(context)
         val p = GgtgAccountPicker(context)
         p.setBackgroundColor(android.graphics.Color.TRANSPARENT)
@@ -77,7 +84,8 @@ class GgtgSyncAccountsActivity : BaseFragment() {
             return
         }
         // the new sessions are made through a throwaway slot that goes out through the account's own proxy
-        TdataExportHelper.exportForDesktop(activity, slots) { manifest, summary ->
+        val note = noteInput?.text?.toString()?.trim().orEmpty()
+        TdataExportHelper.exportForDesktop(activity, slots, note) { manifest, summary ->
             if (manifest == null) {
                 inform("Аккаунты на Desktop", summary)
             } else {

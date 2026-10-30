@@ -477,32 +477,33 @@ object GgtgDevice {
         val cloudLang = phoneGeo?.cloudLang ?: "ru"
         val tz = phoneGeo?.tzOffset
 
-        // Pick randomly between Android and Apple iPhone (iOS)
-        val pickIos = java.util.Random().nextBoolean()
-        if (pickIos) {
-            val profile = GgtgIosProfiles.random(phone)
+        if (isDesktop) {
+            val profile = GgtgDesktopProfiles.random(phone)
             save(
                 slot, profile.deviceModel, profile.systemVersion,
                 sysLang, cloudLang, tz,
-                profile.appVersion, GgtgIosProfiles.LANG_PACK,
-                GgtgIosProfiles.APP_ID, GgtgIosProfiles.APP_HASH
+                profile.appVersion, GgtgDesktopProfiles.LANG_PACK,
+                GgtgDesktopProfiles.APP_ID, GgtgDesktopProfiles.APP_HASH
             )
-        } else {
-            val profile = GgtgAndroidProfiles.random()
-            save(
-                slot, profile.deviceModel, profile.systemVersion,
-                sysLang, cloudLang, tz,
-                profile.appVersion, "android", 6, "eb06d4abfb49dc3eeb1aeb98ae0f581e"
-            )
+            autoGeoAfterProxy(slot)
+            return false
         }
+
+        // On Android, use native Android device profile (APP_ID 6, lang_pack android) to ensure 100% platform authenticity
+        val profile = GgtgAndroidProfiles.random()
+        save(
+            slot, profile.deviceModel, profile.systemVersion,
+            sysLang, cloudLang, tz,
+            profile.appVersion, "android", 6, "eb06d4abfb49dc3eeb1aeb98ae0f581e"
+        )
         autoGeoAfterProxy(slot)
         return false
     }
 
     /**
      * When logging in or registering with a phone number, automatically generates
-     * new realistic device parameters (randomly picking between Android and iPhone)
-     * matched to the phone country code and geo, so the real device hardware is never exposed.
+     * new realistic Android device parameters matched to the phone country code and geo,
+     * so the real device hardware is never exposed while remaining 100% platform authentic.
      */
     @JvmStatic
     fun randomizeForPhoneLogin(slot: Int, phone: String) {
@@ -511,23 +512,12 @@ object GgtgDevice {
         val cloudLang = phoneGeo?.cloudLang ?: "ru"
         val tz = phoneGeo?.tzOffset
 
-        val pickIos = java.util.Random().nextBoolean()
-        if (pickIos) {
-            val p = GgtgIosProfiles.random(phone)
-            save(
-                slot, p.deviceModel, p.systemVersion,
-                sysLang, cloudLang, tz,
-                p.appVersion, GgtgIosProfiles.LANG_PACK,
-                GgtgIosProfiles.APP_ID, GgtgIosProfiles.APP_HASH
-            )
-        } else {
-            val p = GgtgAndroidProfiles.random()
-            save(
-                slot, p.deviceModel, p.systemVersion,
-                sysLang, cloudLang, tz,
-                p.appVersion, "android", 6, "eb06d4abfb49dc3eeb1aeb98ae0f581e"
-            )
-        }
+        val p = GgtgAndroidProfiles.random()
+        save(
+            slot, p.deviceModel, p.systemVersion,
+            sysLang, cloudLang, tz,
+            p.appVersion, "android", 6, "eb06d4abfb49dc3eeb1aeb98ae0f581e"
+        )
         autoGeoAfterProxy(slot)
     }
 

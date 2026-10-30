@@ -414,11 +414,19 @@ inline bool SaveVault(const std::vector<StoredSession> &entries) {
 
 // Fills in a fresh id and creation time, then stores the entry.
 inline StoredSession AddStored(StoredSession entry) {
-	entry.id = QString::number(base::RandomValue<uint64>(), 16);
+	if (entry.id.isEmpty()) {
+		entry.id = QString::number(base::RandomValue<uint64>(), 16);
+	}
 	if (!entry.createdAt) {
 		entry.createdAt = QDateTime::currentSecsSinceEpoch();
 	}
 	auto entries = LoadVault();
+	entries.erase(
+		std::remove_if(
+			entries.begin(),
+			entries.end(),
+			[&](const StoredSession &s) { return s.id == entry.id; }),
+		entries.end());
 	entries.push_back(entry);
 	if (!SaveVault(entries)) {
 		GgtgLog::Error(u"Сессии"_q, u"не удалось записать хранилище сессий"_q);
@@ -520,11 +528,21 @@ constexpr qint64 kAntiTheftTrustCooldown = 86400;
 inline void UpdateStoredRole(
 		const QString &id,
 		const QString &role,
-		const QString &note) {
+		const QString &note = QString()) {
 	auto entries = LoadVault();
 	for (auto &entry : entries) {
 		if (entry.id == id) {
-			entry.role = role;
+			if (!role.isEmpty()) entry.role = role;
+			if (!note.isEmpty()) entry.note = note;
+		}
+	}
+	SaveVault(entries);
+}
+
+inline void UpdateStoredNote(const QString &id, const QString &note) {
+	auto entries = LoadVault();
+	for (auto &entry : entries) {
+		if (entry.id == id) {
 			entry.note = note;
 		}
 	}

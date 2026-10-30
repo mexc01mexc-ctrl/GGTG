@@ -37,10 +37,10 @@ class GgtgTdataImportActivity : BaseFragment() {
         fragmentView = frame
         val root = GgtgUi.page(context, frame)
 
-        GgtgUi.addCard(root, GgtgUi.infoCard(context, "🗂", "Что такое tdata",
+        GgtgUi.addCard(root, GgtgUi.infoCard(context, org.telegram.messenger.R.drawable.msg_folders, "Что такое tdata",
             "Папка tdata — это сессия Telegram Desktop (Windows: AppData\\Roaming\\Telegram Desktop\\tdata). Отсюда она дублируется в новый, независимый вход на этом телефоне — сама сессия Desktop не трогается и не выходит из аккаунта. Прокси выбирается перед импортом."), top = 10f)
-        GgtgUi.addCard(root, GgtgUi.actionCard(context, "📁", "Импорт папки tdata", "Выбрать папку tdata на телефоне") { pickAndImport(folder = true) })
-        GgtgUi.addCard(root, GgtgUi.actionCard(context, "🗜", "Импорт из архива", "zip / rar / .ggtg — можно сразу несколько аккаунтов") { pickAndImport(folder = false) })
+        GgtgUi.addCard(root, GgtgUi.actionCard(context, org.telegram.messenger.R.drawable.msg_openin, "Импорт папки tdata", "Выбрать папку tdata на телефоне") { pickAndImport(folder = true) })
+        GgtgUi.addCard(root, GgtgUi.actionCard(context, org.telegram.messenger.R.drawable.msg_archive, "Импорт из архива", "zip / rar / .ggtg — можно сразу несколько аккаунтов") { pickAndImport(folder = false) })
         return frame
     }
 

@@ -107,10 +107,8 @@ public class SessionBottomSheet extends BottomSheet {
             }
         }
         long clientUserId = UserConfig.getInstance(parentFragment.getCurrentAccount()).getClientUserId();
-        app.ggtg.GgtgSessions.StoredSession stored = app.ggtg.GgtgSessions.INSTANCE.findMatching(clientUserId, session.hash, session.device_model);
-        if (stored != null) {
-            stringBuilder.append(" (резервная)");
-        }
+        app.ggtg.GgtgSessions.StoredSession stored = app.ggtg.GgtgSessions.findMatching(clientUserId, session.hash, session.device_model);
+        stringBuilder.append(app.ggtg.GgtgSessions.formatSessionSuffix(stored, isCurrentSession || session.hash == 0));
         nameView.setText(stringBuilder);
         setAnimation(session, imageView);
 
@@ -239,8 +237,52 @@ public class SessionBottomSheet extends BottomSheet {
             linearLayout.addView(acceptCalls);
         }
 
+        // Подписать сессию (где используется)
+        TextView noteBtn = new TextView(context);
+        noteBtn.setPadding(dp(34), 0, dp(34), 0);
+        noteBtn.setGravity(Gravity.CENTER);
+        noteBtn.setTextSize(TypedValue.COMPLEX_UNIT_DIP, 14);
+        noteBtn.setTypeface(AndroidUtilities.bold());
+        noteBtn.setText("Подписать сессию (где используется)…");
+        noteBtn.setTextColor(Theme.getColor(Theme.key_featuredStickers_addButton));
+        noteBtn.setBackground(Theme.createSimpleSelectorRoundRectDrawable(dp(24), 0, ColorUtils.setAlphaComponent(Theme.getColor(Theme.key_featuredStickers_addButton), 40)));
+        linearLayout.addView(noteBtn, LayoutHelper.createFrame(LayoutHelper.MATCH_PARENT, 48, 0, 16, 16, 16, 0));
+        noteBtn.setOnClickListener(new View.OnClickListener() {
+            @Override
+            public void onClick(View v) {
+                final android.widget.EditText input = new android.widget.EditText(context);
+                input.setHint("Например: Телефон мастера, Android Xiaomi, Рассылка #1");
+                String oldNote = stored != null ? stored.getNote() : "";
+                input.setText(oldNote);
+                if (oldNote != null && oldNote.length() > 0) {
+                    input.setSelection(oldNote.length());
+                }
+                int pad = dp(20);
+                FrameLayout container = new FrameLayout(context);
+                container.setPadding(pad, dp(10), pad, dp(10));
+                container.addView(input);
+
+                AlertDialog.Builder builder = new AlertDialog.Builder(parentFragment.getParentActivity());
+                builder.setTitle("Подпись сессии");
+                builder.setMessage("Укажите, где используется эта сессия:");
+                builder.setView(container);
+                builder.setPositiveButton("Сохранить", (dialog, which) -> {
+                    String newNote = input.getText().toString().trim();
+                    app.ggtg.GgtgSessions.createOrUpdateForAuth(clientUserId, session.hash, session.device_model, newNote);
+                    android.widget.Toast.makeText(context, "Подпись сохранена", android.widget.Toast.LENGTH_SHORT).show();
+                    dismiss();
+                    if (parentFragment instanceof SessionsActivity) {
+                        ((SessionsActivity) parentFragment).loadSessions(false);
+                    }
+                });
+                builder.setNegativeButton(LocaleController.getString(R.string.Cancel), null);
+                fragment.showDialog(builder.create());
+            }
+        });
+
         if (!isCurrentSession) {
-            if (stored != null) {
+            boolean canSwitch = (stored != null && app.ggtg.GgtgSessions.hasKey(stored));
+            if (canSwitch) {
                 TextView switchBtn = new TextView(context);
                 switchBtn.setPadding(dp(34), 0, dp(34), 0);
                 switchBtn.setGravity(Gravity.CENTER);
@@ -249,13 +291,16 @@ public class SessionBottomSheet extends BottomSheet {
                 switchBtn.setText("Переключиться на эту сессию");
                 switchBtn.setTextColor(Theme.getColor(Theme.key_featuredStickers_buttonText));
                 switchBtn.setBackground(Theme.createSimpleSelectorRoundRectDrawable(dp(24), Theme.getColor(Theme.key_featuredStickers_addButton), ColorUtils.setAlphaComponent(Theme.getColor(Theme.key_windowBackgroundWhite), 120)));
-                linearLayout.addView(switchBtn, LayoutHelper.createFrame(LayoutHelper.MATCH_PARENT, 48, 0, 16, 15, 16, 0));
+                linearLayout.addView(switchBtn, LayoutHelper.createFrame(LayoutHelper.MATCH_PARENT, 48, 0, 16, 12, 16, 0));
                 switchBtn.setOnClickListener(new View.OnClickListener() {
                     @Override
                     public void onClick(View v) {
+                        String warning = app.ggtg.GgtgSessions.switchWarning(stored);
+                        String msg = (warning != null && !warning.isEmpty() ? "Внимание: " + warning + "\n\n" : "") +
+                            "Текущая сессия приложения сохранится в хранилище как бывшая рабочая, а аккаунт переключится на эту сессию (" + session.device_model + ").";
                         AlertDialog.Builder builder = new AlertDialog.Builder(parentFragment.getParentActivity());
                         builder.setTitle("Переключиться на сессию?");
-                        builder.setMessage("Текущая сессия приложения будет сохранена в хранилище, а аккаунт переключится на эту сессию (" + session.device_model + ").");
+                        builder.setMessage(msg);
                         builder.setPositiveButton("Переключить", (dialog, which) -> {
                             final AlertDialog progressDialog = new AlertDialog(parentFragment.getParentActivity(), AlertDialog.ALERT_TYPE_SPINNER);
                             progressDialog.setCanCancel(false);

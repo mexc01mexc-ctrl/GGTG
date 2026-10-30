@@ -93,6 +93,8 @@ object GgtgImportSupport {
         user.flags = user.flags or 1024
         val uc = UserConfig.getInstance(targetSlot)
         uc.loadConfig()
+        uc.syncContacts = false
+        uc.suggestContacts = false
         uc.setCurrentUser(user)
         uc.saveConfig(true)
         val prefsName = if (targetSlot == 0) "userconfing" else "userconfig$targetSlot"

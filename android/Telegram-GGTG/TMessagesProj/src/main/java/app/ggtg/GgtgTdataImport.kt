@@ -84,14 +84,16 @@ object TdataImportHelper {
         pickedTreeCallback = { treeUri ->
             progressDialog.show()
             MainScope().launch {
-                try {
-                    val result = importFromSafTree(activity, treeUri, proxySource, progressDialog, createBackup)
-                    progressDialog.dismiss()
-                    onDone(result, null)
-                } catch (t: Throwable) {
-                    FileLog.e("tdata import failed", t)
-                    progressDialog.dismiss()
-                    onDone(null, t)
+                GgtgWakeLock.withLock("tdata_folder_import") {
+                    try {
+                        val result = importFromSafTree(activity, treeUri, proxySource, progressDialog, createBackup)
+                        progressDialog.dismiss()
+                        onDone(result, null)
+                    } catch (t: Throwable) {
+                        FileLog.e("tdata import failed", t)
+                        progressDialog.dismiss()
+                        onDone(null, t)
+                    }
                 }
             }
         }
@@ -104,14 +106,16 @@ object TdataImportHelper {
         pickedFileCallback = { fileUri ->
             progressDialog.show()
             MainScope().launch {
-                try {
-                    val result = importFromArchive(activity, fileUri, proxySource, progressDialog, createBackup)
-                    progressDialog.dismiss()
-                    onDone(result, null)
-                } catch (t: Throwable) {
-                    FileLog.e("tdata archive import failed", t)
-                    progressDialog.dismiss()
-                    onDone(null, t)
+                GgtgWakeLock.withLock("tdata_archive_import") {
+                    try {
+                        val result = importFromArchive(activity, fileUri, proxySource, progressDialog, createBackup)
+                        progressDialog.dismiss()
+                        onDone(result, null)
+                    } catch (t: Throwable) {
+                        FileLog.e("tdata archive import failed", t)
+                        progressDialog.dismiss()
+                        onDone(null, t)
+                    }
                 }
             }
         }
@@ -137,14 +141,16 @@ object TdataImportHelper {
                     val progressDialog = TdataImportProgressDialog(activity)
                     progressDialog.show()
                     MainScope().launch {
-                        try {
-                            val result = importFromArchive(activity, fileUri, source, progressDialog, createBackup)
-                            progressDialog.dismiss()
-                            onDone(result, null)
-                        } catch (t: Throwable) {
-                            FileLog.e("archive import failed", t)
-                            progressDialog.dismiss()
-                            onDone(null, t)
+                        GgtgWakeLock.withLock("tdata_archive_import") {
+                            try {
+                                val result = importFromArchive(activity, fileUri, source, progressDialog, createBackup)
+                                progressDialog.dismiss()
+                                onDone(result, null)
+                            } catch (t: Throwable) {
+                                FileLog.e("archive import failed", t)
+                                progressDialog.dismiss()
+                                onDone(null, t)
+                            }
                         }
                     }
                 }
@@ -402,8 +408,17 @@ object TdataImportHelper {
     ): Result<Long> {
         // proxy both slots BEFORE either one's ConnectionsManager is ever touched (construction
         // applies whatever proxy state UserConfig already holds at that moment)
-        ConnectionsManager.setProxySettingsForAccount(tempSlot, true, tempProxy.address, tempProxy.port, tempProxy.username, tempProxy.password, tempProxy.secret)
-        ConnectionsManager.setProxySettingsForAccount(targetSlot, true, targetProxy.address, targetProxy.port, targetProxy.username, targetProxy.password, targetProxy.secret)
+        if (tempProxy.address.isNotEmpty()) {
+            ConnectionsManager.setProxySettingsForAccount(tempSlot, true, tempProxy.address, tempProxy.port, tempProxy.username, tempProxy.password, tempProxy.secret)
+        } else {
+            ConnectionsManager.setProxySettingsForAccount(tempSlot, false, "", 0, "", "", "")
+        }
+        if (targetProxy.address.isNotEmpty()) {
+            ConnectionsManager.setProxySettingsForAccount(targetSlot, true, targetProxy.address, targetProxy.port, targetProxy.username, targetProxy.password, targetProxy.secret)
+        } else {
+            ConnectionsManager.setProxySettingsForAccount(targetSlot, false, "", 0, "", "", "")
+        }
+        GgtgDevice.assignNew(tempSlot, isDesktop = true)
         GgtgDevice.assignNew(targetSlot, device, isDesktop = false)
 
         FileLog.d("tdata handoff: installing temp key on slot=$tempSlot userId=${account.userId}")

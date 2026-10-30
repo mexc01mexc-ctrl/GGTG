@@ -433,7 +433,8 @@ SeparatePanel::SeparatePanel(SeparatePanelArgs &&args)
 , _back(this, object_ptr<IconButton>(this, st::separatePanelBack))
 , _body(this)
 , _titleHeight(st::separatePanelTitleHeight)
-, _noShadow(args.noShadow) {
+, _noShadow(args.noShadow)
+, _isWindow(args.isWindow) {
 	setMouseTracking(true);
 	setWindowIcon(QGuiApplication::windowIcon());
 	initControls();
@@ -453,7 +454,11 @@ SeparatePanel::SeparatePanel(SeparatePanelArgs &&args)
 		Platform::SetWindowMargins(
 			this,
 			_useTransparency ? computePadding() : QMargins());
-		Platform::SetForeignTransientParent(this, _transientParent);
+		if (_isWindow) {
+			Platform::ClearTransientParent(this);
+		} else {
+			Platform::SetForeignTransientParent(this, _transientParent);
+		}
 	}, lifetime());
 
 	events(
@@ -1069,14 +1074,19 @@ bool SeparatePanel::eventHook(QEvent *e) {
 }
 
 void SeparatePanel::initLayout(const SeparatePanelArgs &args) {
-	auto flags = Qt::WindowFlags(Qt::FramelessWindowHint)
-		| Qt::WindowStaysOnTopHint
-		| Qt::Dialog;
+	auto flags = Qt::WindowFlags(Qt::FramelessWindowHint);
+	if (args.isWindow) {
+		flags |= Qt::Window;
+	} else {
+		flags |= Qt::WindowStaysOnTopHint | Qt::Dialog;
+	}
 	if (!_noShadow) {
 		flags |= Qt::NoDropShadowWindowHint;
 	}
 	setWindowFlags(flags);
-	setAttribute(Qt::WA_MacAlwaysShowToolWindow);
+	if (!args.isWindow) {
+		setAttribute(Qt::WA_MacAlwaysShowToolWindow);
+	}
 	setAttribute(Qt::WA_NoSystemBackground, true);
 	setAttribute(Qt::WA_TranslucentBackground, true);
 
@@ -1528,7 +1538,11 @@ void SeparatePanel::updateControlsGeometry() {
 void SeparatePanel::paintEvent(QPaintEvent *e) {
 	if (!_exposed && windowHandle() && windowHandle()->isExposed()) {
 		_exposed = true;
-		Platform::SetForeignTransientParent(this, _transientParent);
+		if (_isWindow) {
+			Platform::ClearTransientParent(this);
+		} else {
+			Platform::SetForeignTransientParent(this, _transientParent);
+		}
 	}
 	auto p = QPainter(this);
 	if (!_animationCache.isNull()) {

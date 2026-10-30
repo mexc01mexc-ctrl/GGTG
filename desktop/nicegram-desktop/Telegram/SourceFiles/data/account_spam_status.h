@@ -8,6 +8,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #pragma once
 
 #include <QtCore/QString>
+#include <QtCore/QJsonObject>
 
 #include <optional>
 
@@ -31,6 +32,11 @@ struct AccountSpamStatus {
 	qint64 until = 0; // unix seconds, only meaningful for Temporary
 	qint64 checkedAt = 0; // unix seconds
 };
+
+[[nodiscard]] QString StateToString(AccountSpamState state);
+[[nodiscard]] AccountSpamState StateFromString(const QString &raw);
+[[nodiscard]] QJsonObject AllAccountSpamStatusesJson();
+int MergeAccountSpamStatusesJson(const QJsonObject &statuses);
 
 [[nodiscard]] std::optional<AccountSpamStatus> FindAccountSpamStatus(
 	uint64 userId);

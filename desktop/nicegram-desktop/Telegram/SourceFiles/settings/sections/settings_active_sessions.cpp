@@ -418,7 +418,8 @@ void SessionInfoBox(
 		const EntryData &data,
 		Fn<void(uint64)> terminate,
 		Fn<void()> exportAction,
-		Fn<void()> switchAction) {
+		Fn<void()> switchAction,
+		Fn<void()> editNoteAction = nullptr) {
 	box->setWidth(st::accountsBoxWidth);
 
 	const auto shown = box->lifetime().make_state<rpl::event_stream<>>();
@@ -483,12 +484,23 @@ void SessionInfoBox(
 		AddDividerText(container, tr::lng_sessions_location_about());
 	}
 
-	if (switchAction || exportAction) {
+	if (switchAction || exportAction || editNoteAction) {
 		Ui::AddSkip(container, st::sessionSubtitleSkip);
 		Ui::AddDivider(container);
 		Ui::AddSkip(container, st::sessionSubtitleSkip);
 		Ui::AddSubsectionTitle(container, rpl::single(u"Действия"_q));
 
+		if (editNoteAction) {
+			const auto btn = container->add(
+				object_ptr<Ui::SettingsButton>(
+					container,
+					rpl::single(u"Подписать сессию (где используется)..."_q),
+					st::settingsButtonNoIcon));
+			btn->setClickedCallback([=] {
+				editNoteAction();
+				box->closeBox();
+			});
+		}
 		if (switchAction) {
 			const auto btn = container->add(
 				object_ptr<Ui::SettingsButton>(
@@ -1605,14 +1617,16 @@ void ShowSessionInfo(
 		const Api::Authorizations::Entry &entry,
 		Fn<void(uint64)> terminate,
 		Fn<void()> exportAction,
-		Fn<void()> switchAction) {
+		Fn<void()> switchAction,
+		Fn<void()> editNoteAction) {
 	show->showBox(Box([=](not_null<Ui::GenericBox*> box) {
 		SessionInfoBox(
 			box,
 			entry,
 			terminate,
 			exportAction,
-			switchAction);
+			switchAction,
+			editNoteAction);
 	}));
 }
 

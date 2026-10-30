@@ -1000,6 +1000,9 @@ public class ContactsController extends BaseController {
     }
 
     protected void performSyncPhoneBook(final HashMap<String, Contact> contactHashMap, final boolean request, final boolean first, final boolean schedule, final boolean force, final boolean checkCount, final boolean canceled) {
+        if (!getUserConfig().syncContacts) {
+            return;
+        }
         if (!first && !contactsBookLoaded) {
             return;
         }

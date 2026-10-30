@@ -64,6 +64,11 @@ class GgtgBulkActions(private val fragment: BaseFragment, private val onChanged:
             toast(if (started > 0) "Проверка SpamBot запущена: $started, по 2-3 аккаунта раз в 3-5 сек." else "Нет подключённых аккаунтов")
             onChanged()
         }
+        items += Item("Авто-апелляция @SpamBot", R.drawable.msg_help) {
+            val started = GgtgSpamStatus.autoAppealMany(slots)
+            toast(if (started > 0) "Авто-апелляция @SpamBot запущена: $started акк. (ход процесса во вкладке «Процессы»)" else "Нет подключённых аккаунтов")
+            onChanged()
+        }
         items += Item("Прогрев аккаунтов (повышение траста)", R.drawable.msg_stats) {
             fragment.presentFragment(GgtgWarmupActivity(slots))
         }

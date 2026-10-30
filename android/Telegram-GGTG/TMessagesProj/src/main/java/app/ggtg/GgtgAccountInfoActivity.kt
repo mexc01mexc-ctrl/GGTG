@@ -1,9 +1,13 @@
 package app.ggtg
 
 import android.content.Context
+import java.io.File
+import org.telegram.messenger.ApplicationLoader
 import android.graphics.Typeface
 import android.view.Gravity
 import android.view.View
+import android.widget.EditText
+import android.widget.FrameLayout
 import android.widget.LinearLayout
 import android.widget.TextView
 import android.widget.Toast
@@ -148,6 +152,7 @@ class GgtgAccountInfoActivity(private val slot: Int, private val onChanged: () -
             } else {
                 items.add("Создать резервную сессию")
             }
+            items.add("Принять сессию с Desktop")
             items.add("Устройства и активные сессии")
 
             androidx.appcompat.app.AlertDialog.Builder(context)
@@ -156,24 +161,60 @@ class GgtgAccountInfoActivity(private val slot: Int, private val onChanged: () -
                     val chosen = items[which]
                     when {
                         chosen.startsWith("Перейти") || chosen.startsWith("Выбрать") -> {
-                            val pickAction: (GgtgSessions.StoredSession) -> Unit = { target ->
-                                val warning = GgtgSessions.switchWarning(target)
-                                val msg = (if (!warning.isNullOrEmpty()) "Внимание: $warning\n\n" else "") +
-                                    "Текущая сессия сохранится в хранилище, а аккаунт переключится на эту сессию (${GgtgSessions.roleTitle(target.role)})."
+                            val promptEditNote: (GgtgSessions.StoredSession) -> Unit = { target ->
+                                val input = android.widget.EditText(context).apply {
+                                    hint = "Например: Телефон мастера, Android Xiaomi, Рассылка #1"
+                                    setText(target.note)
+                                    setSelection(text.length)
+                                }
+                                val pad = GgtgUi.dp(20f)
+                                val container = FrameLayout(context).apply {
+                                    setPadding(pad, GgtgUi.dp(10f), pad, GgtgUi.dp(10f))
+                                    addView(input)
+                                }
                                 androidx.appcompat.app.AlertDialog.Builder(context)
-                                    .setTitle("Переключить сессию?")
-                                    .setMessage(msg)
-                                    .setPositiveButton("Переключить") { _, _ ->
-                                        val progress = app.ggtg.ui.TdataImportProgressDialog(act, "Переключение сессии")
-                                        progress.setWorkingText("Переключение…")
-                                        GgtgSessions.swapToBackupAsync(slot, target.id) { success, retMsg ->
-                                            progress.dismiss()
-                                            if (success) {
-                                                Toast.makeText(context, "Аккаунт переключён на выбранную сессию!", Toast.LENGTH_SHORT).show()
-                                                onChanged(); rebuild()
-                                            } else {
-                                                Toast.makeText(context, "Ошибка: $retMsg", Toast.LENGTH_LONG).show()
-                                            }
+                                    .setTitle("Подпись сессии")
+                                    .setMessage("Укажите, где используется эта сессия:")
+                                    .setView(container)
+                                    .setPositiveButton("Сохранить") { _, _ ->
+                                        val newNote = input.text.toString().trim()
+                                        GgtgSessions.updateNote(target.id, newNote)
+                                        Toast.makeText(context, "Подпись сохранена", Toast.LENGTH_SHORT).show()
+                                        onChanged(); rebuild()
+                                    }
+                                    .setNegativeButton("Отмена", null)
+                                    .show()
+                            }
+
+                            val pickAction: (GgtgSessions.StoredSession) -> Unit = { target ->
+                                val actions = arrayOf("Переключить аккаунт на эту сессию", "Подписать сессию (где используется)")
+                                androidx.appcompat.app.AlertDialog.Builder(context)
+                                    .setTitle(GgtgSessions.roleTitle(target.role) + if (target.note.isNotEmpty()) " (${target.note})" else "")
+                                    .setItems(actions) { _, actIdx ->
+                                        if (actIdx == 0) {
+                                            val warning = GgtgSessions.switchWarning(target)
+                                            val msg = (if (!warning.isNullOrEmpty()) "Внимание: $warning\n\n" else "") +
+                                                "Текущая сессия сохранится в хранилище, а аккаунт переключится на эту сессию (${GgtgSessions.roleTitle(target.role)})."
+                                            androidx.appcompat.app.AlertDialog.Builder(context)
+                                                .setTitle("Переключить сессию?")
+                                                .setMessage(msg)
+                                                .setPositiveButton("Переключить") { _, _ ->
+                                                    val progress = app.ggtg.ui.TdataImportProgressDialog(act, "Переключение сессии")
+                                                    progress.setWorkingText("Переключение…")
+                                                    GgtgSessions.swapToBackupAsync(slot, target.id) { success, retMsg ->
+                                                        progress.dismiss()
+                                                        if (success) {
+                                                            Toast.makeText(context, "Аккаунт переключён на выбранную сессию!", Toast.LENGTH_SHORT).show()
+                                                            onChanged(); rebuild()
+                                                        } else {
+                                                            Toast.makeText(context, "Ошибка: $retMsg", Toast.LENGTH_LONG).show()
+                                                        }
+                                                    }
+                                                }
+                                                .setNegativeButton("Отмена", null)
+                                                .show()
+                                        } else {
+                                            promptEditNote(target)
                                         }
                                     }
                                     .setNegativeButton("Отмена", null)
@@ -187,7 +228,8 @@ class GgtgAccountInfoActivity(private val slot: Int, private val onChanged: () -
                                     val title = GgtgSessions.roleTitle(s.role)
                                     val dev = s.device?.optString("deviceModel", "")?.ifEmpty { null }
                                     val dateStr = java.text.SimpleDateFormat("dd.MM.yyyy", java.util.Locale.getDefault()).format(java.util.Date(s.createdAt * 1000))
-                                    "$title ${dev?.let { "($it) " } ?: ""}· $dateStr"
+                                    val noteStr = if (s.note.isNotEmpty()) " · ${s.note}" else ""
+                                    "$title ${dev?.let { "($it) " } ?: ""}· $dateStr$noteStr"
                                 }.toTypedArray()
                                 androidx.appcompat.app.AlertDialog.Builder(context)
                                     .setTitle("Выберите сессию")
@@ -265,8 +307,75 @@ class GgtgAccountInfoActivity(private val slot: Int, private val onChanged: () -
                         chosen == "Смена номера (миграция)" -> {
                             presentFragment(GgtgPhoneMigrationActivity(listOf(slot)))
                         }
+                        chosen == "Принять сессию с Desktop" -> {
+                            if (GgtgSyncTransport.mainSlot() == null || GgtgSync.loadSettings().passphrase.isEmpty()) {
+                                androidx.appcompat.app.AlertDialog.Builder(context)
+                                    .setTitle("Синхронизация")
+                                    .setMessage("Сначала настройте синхронизацию: главный аккаунт и пароль в разделе «Главная» → «Синхронизация».")
+                                    .setPositiveButton("Понятно", null)
+                                    .show()
+                                return@setItems
+                            }
+                            val progress = app.ggtg.ui.TdataImportProgressDialog(act, "Синхронизация")
+                            progress.setWorkingText("Поиск сессий с Desktop…")
+                            GgtgSyncTransport.findIncoming { list, error ->
+                                if (error.isNotEmpty()) {
+                                    progress.dismiss()
+                                    Toast.makeText(context, error, Toast.LENGTH_LONG).show()
+                                    return@findIncoming
+                                }
+                                val remote = list.firstOrNull()
+                                if (remote == null) {
+                                    progress.dismiss()
+                                    androidx.appcompat.app.AlertDialog.Builder(context)
+                                        .setTitle("Сессии с Desktop")
+                                        .setMessage("С Desktop пока не отправлено сессий.\n\n" +
+                                            "Как отправить сессию с компьютера на телефон:\n" +
+                                            "1. На Desktop откройте «Настройки» → «Синхронизация» → «Отправить аккаунты на Android…» (или откройте этот аккаунт → «Сессии» → «Отправить на Android»).\n" +
+                                            "2. После отправки нажмите здесь «Принять сессию с Desktop».")
+                                        .setPositiveButton("Понятно", null)
+                                        .show()
+                                    return@findIncoming
+                                }
+                                progress.setWorkingText("Загрузка сессии с Desktop…")
+                                GgtgSyncTransport.fetchIncoming(remote) { bytes, problem ->
+                                    if (bytes == null) {
+                                        progress.dismiss()
+                                        Toast.makeText(context, problem, Toast.LENGTH_LONG).show()
+                                        return@fetchIncoming
+                                    }
+                                    val copy = java.io.File(ApplicationLoader.applicationContext.cacheDir, "ggtg_sync_accounts.ggtg")
+                                    try { copy.writeBytes(bytes) } catch (t: Throwable) {
+                                        progress.dismiss()
+                                        Toast.makeText(context, "Не удалось сохранить файл", Toast.LENGTH_SHORT).show()
+                                        return@fetchIncoming
+                                    }
+                                    if (!GgtgPackImporter.isPack(copy)) {
+                                        copy.delete()
+                                        progress.dismiss()
+                                        Toast.makeText(context, "Это не экспорт GGTG", Toast.LENGTH_SHORT).show()
+                                        return@fetchIncoming
+                                    }
+                                    kotlinx.coroutines.MainScope().launch {
+                                        val res = GgtgPackImporter.import(copy, null, progress)
+                                        progress.dismiss()
+                                        if (res.imported.isNotEmpty()) {
+                                            Toast.makeText(context, "Сессия с Desktop успешно получена и добавлена!", Toast.LENGTH_LONG).show()
+                                            onChanged(); rebuild()
+                                        } else if (res.alreadyLoggedIn > 0) {
+                                            Toast.makeText(context, "Сессия добавлена в хранилище как резервная!", Toast.LENGTH_LONG).show()
+                                            onChanged(); rebuild()
+                                        } else {
+                                            Toast.makeText(context, "Результат: ${res.failReason ?: "не удалось импортировать"}", Toast.LENGTH_LONG).show()
+                                        }
+                                    }
+                                }
+                            }
+                        }
                         chosen.contains("сессии") -> {
-                            presentFragment(SessionsActivity(0))
+                            val f = SessionsActivity(0)
+                            f.setCurrentAccount(slot)
+                            presentFragment(f)
                         }
                     }
                 }

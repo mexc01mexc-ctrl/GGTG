@@ -70,6 +70,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "ui/text/text_options.h"
 #include "ui/text/text_utilities.h"
 #include "ui/ui_utility.h"
+#include "ui/platform/ui_platform_utility.h"
 #include "ui/unread_badge_paint.h"
 #include "ui/vertical_list.h"
 #include "ui/widgets/menu/menu_add_action_callback_factory.h"
@@ -1134,16 +1135,15 @@ protected:
 		const auto &clock = _active
 			? st::historySendingInvertedIcon
 			: st::historySendingIcon;
-		const auto clockSkip = _busy ? (clock.width() + style::ConvertScale(4)) : 0;
+		const auto clockMarginRight = style::ConvertScale(20);
+		const auto clockWidth = clock.width();
 		const auto available = width()
 			- st::ggtgSidebarTextLeft
-			- st::ggtgSidebarTextRight
-			- clockSkip;
+			- (_busy ? (clockMarginRight + clockWidth + style::ConvertScale(6)) : st::ggtgSidebarTextRight);
 		if (_busy) {
 			clock.paint(
 				p,
-				width() - st::ggtgSidebarTextRight - clock.width()
-					+ style::ConvertScale(4),
+				width() - clockMarginRight - clockWidth,
 				(height() - clock.height()) / 2,
 				width());
 		}
@@ -2148,15 +2148,14 @@ void OpenGgtgShell(not_null<Window::SessionController*> controller) {
 	if (Core::BlockedReason(Core::GuardedAction::EditBases).isEmpty()) {
 		Data::RemoveDuplicatesAcrossBases();
 	}
-	const auto panel = new Ui::SeparatePanel({ .noShadow = true });
+	const auto panel = new Ui::SeparatePanel({
+		.noShadow = true,
+		.isWindow = true,
+	});
 	GgtgPanel() = QPointer<Ui::SeparatePanel>(panel);
 	panel->setNoShadow(true);
-	// SeparatePanel defaults to always-on-top (it's normally used for
-	// modal-ish flows like Payments/Passport that sit over the main
-	// window) - this is meant to behave like an ordinary window the user
-	// can send behind other apps, so that's turned back off here, the same
-	// way Payments::Panel does for its own non-modal case.
 	panel->setWindowFlag(Qt::WindowStaysOnTopHint, false);
+	Ui::Platform::ClearTransientParent(panel);
 	// No title bar: the content starts at the very top (the name moves
 	// into the sidebar, the close button stays at the top right, and the
 	// window is dragged by its header - see GgtgShellHost).
@@ -2773,9 +2772,9 @@ void FillGgtgShell(
 		.group = u"Аккаунты"_q,
 		.icon = &st::menuIconPhone,
 		.label = rpl::single(u"Регистрация"_q),
-		.title = u"Авторегистрация"_q,
-		.subtitle = u"Авторегистрация аккаунтов через SMS-сервисы с прокси."_q,
-		.description = u"Автоматическая регистрация новых аккаунтов Telegram через сервисы SMS-активаций (SMS-Activate, 5SIM, Vak-SMS, SMSHub и др.). Задайте API-ключ, выберите сервис, страну и список прокси. Программа сама запросит номер, примет SMS-код, зарегистрирует аккаунт, установит пароль 2FA и сохранит новую сессию."_q,
+		.title = u"Регистрация аккаунтов"_q,
+		.subtitle = u"Автоматическая (по SMS) и ручная регистрация аккаунтов."_q,
+		.description = u"Регистрация новых аккаунтов Telegram: автоматическая через сервисы SMS-активаций (SMS-Activate, 5SIM, Vak-SMS, SMSHub и др.) или ручная по введённому номеру телефона. Программа эмулирует мобильные профили, использует прокси, защитные Push-токены (FCM), решает капчу, устанавливает 2FA и сохраняет сессии."_q,
 		.makeBox = [=](not_null<Ui::SeparatePanel*>) {
 			return Settings::MakeRegistrationBox(controller);
 		},
@@ -2783,7 +2782,7 @@ void FillGgtgShell(
 	sections.push_back({
 		.key = u"phone_migration"_q,
 		.group = u"Аккаунты"_q,
-		.icon = &st::menuIconPhone,
+		.icon = &st::menuIconReplace,
 		.label = rpl::single(u"Смена номера"_q),
 		.title = u"Смена номера (миграция)"_q,
 		.subtitle = u"Замена страны и номера на существующих аккаунтах через SMS."_q,

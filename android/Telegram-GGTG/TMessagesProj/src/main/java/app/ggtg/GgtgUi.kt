@@ -159,8 +159,11 @@ object GgtgUi {
         return if (res != null) android.widget.ImageView(context).apply {
             setImageDrawable(icon(context, res, tint))
             layoutParams = android.widget.FrameLayout.LayoutParams(dp(sizeDp), dp(sizeDp), Gravity.CENTER)
-        } else TextView(context).apply {
+        } else if (glyph.isNotEmpty()) TextView(context).apply {
             text = glyph; textSize = sizeDp * 0.8f; gravity = Gravity.CENTER
+        } else android.widget.ImageView(context).apply {
+            setImageDrawable(icon(context, org.telegram.messenger.R.drawable.msg_info, tint))
+            layoutParams = android.widget.FrameLayout.LayoutParams(dp(sizeDp), dp(sizeDp), Gravity.CENTER)
         }
     }
 
@@ -278,11 +281,34 @@ object GgtgUi {
         return card
     }
 
+    fun infoCard(context: Context, res: Int, title: String, text: String): LinearLayout {
+        val card = card(context)
+        val row = LinearLayout(context).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL }
+        row.addView(badge(context, res), LinearLayout.LayoutParams(dp(40f), dp(40f)).apply { rightMargin = dp(12f) })
+        row.addView(title(context, title), LinearLayout.LayoutParams(0, WRAP, 1f))
+        card.addView(row)
+        card.addView(body(context, text, 14f), LinearLayout.LayoutParams(MATCH, WRAP).apply { topMargin = dp(8f) })
+        return card
+    }
+
     /** Tappable row card: badge + title + wrapping subtitle + chevron. */
     fun actionCard(context: Context, glyph: String, title: String, sub: String, onClick: () -> Unit): LinearLayout {
         val card = card(context, onClick)
         val row = LinearLayout(context).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL }
         row.addView(badge(context, glyph), LinearLayout.LayoutParams(dp(40f), dp(40f)).apply { rightMargin = dp(12f) })
+        val texts = LinearLayout(context).apply { orientation = LinearLayout.VERTICAL }
+        texts.addView(title(context, title))
+        texts.addView(body(context, sub), LinearLayout.LayoutParams(MATCH, WRAP).apply { topMargin = dp(2f) })
+        row.addView(texts, LinearLayout.LayoutParams(0, WRAP, 1f))
+        row.addView(TextView(context).apply { text = "›"; textSize = 22f; setTextColor(color(Theme.key_windowBackgroundWhiteGrayText)) })
+        card.addView(row)
+        return card
+    }
+
+    fun actionCard(context: Context, res: Int, title: String, sub: String, onClick: () -> Unit): LinearLayout {
+        val card = card(context, onClick)
+        val row = LinearLayout(context).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL }
+        row.addView(badge(context, res), LinearLayout.LayoutParams(dp(40f), dp(40f)).apply { rightMargin = dp(12f) })
         val texts = LinearLayout(context).apply { orientation = LinearLayout.VERTICAL }
         texts.addView(title(context, title))
         texts.addView(body(context, sub), LinearLayout.LayoutParams(MATCH, WRAP).apply { topMargin = dp(2f) })

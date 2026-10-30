@@ -477,7 +477,7 @@ class GgtgSessionJsonImportActivity : BaseFragment() {
             root,
             GgtgUi.infoCard(
                 context,
-                "",
+                org.telegram.messenger.R.drawable.msg_info,
                 "Импорт сессий с JSON",
                 "Импорт аккаунтов Telethon, Pyrogram и любого стороннего софта. Поддерживаются архивы zip и папки с файлами .session и .json. Пароли 2FA, параметры устройств, прокси и папки аккаунтов определяются и применяются автоматически."
             ),
@@ -489,7 +489,7 @@ class GgtgSessionJsonImportActivity : BaseFragment() {
             root,
             GgtgUi.actionCard(
                 context,
-                "",
+                org.telegram.messenger.R.drawable.msg_archive,
                 "Выбрать архив (.zip)",
                 "Zip-архив с папками аккаунтов или файлами .session и .json"
             ) {
@@ -506,7 +506,7 @@ class GgtgSessionJsonImportActivity : BaseFragment() {
             root,
             GgtgUi.actionCard(
                 context,
-                "",
+                org.telegram.messenger.R.drawable.msg_folders,
                 "Выбрать папку",
                 "Папка на телефоне, содержащая файлы .session и .json"
             ) {
@@ -654,24 +654,26 @@ class GgtgSessionJsonImportActivity : BaseFragment() {
         progress.show()
 
         scope.launch {
-            try {
-                val result = withContext(Dispatchers.IO) {
-                    GgtgSessionJsonSupport.importAccounts(accounts, source, progress, createBackup)
+            GgtgWakeLock.withLock("session_json_import") {
+                try {
+                    val result = withContext(Dispatchers.IO) {
+                        GgtgSessionJsonSupport.importAccounts(accounts, source, progress, createBackup)
+                    }
+                    progress.dismiss()
+                    AlertDialog.Builder(activity)
+                        .setTitle("Импорт Сессия + JSON")
+                        .setMessage(GgtgImportSupport.buildResultMessage(result))
+                        .setPositiveButton("Закрыть", null)
+                        .show()
+                    if (result.imported.isNotEmpty()) {
+                        finishFragment()
+                    }
+                } catch (t: Throwable) {
+                    progress.dismiss()
+                    Toast.makeText(activity, "Ошибка импорта: ${t.message ?: t.javaClass.simpleName}", Toast.LENGTH_LONG).show()
+                } finally {
+                    withContext(Dispatchers.IO) { stagingDir.deleteRecursively() }
                 }
-                progress.dismiss()
-                AlertDialog.Builder(activity)
-                    .setTitle("Импорт Сессия + JSON")
-                    .setMessage(GgtgImportSupport.buildResultMessage(result))
-                    .setPositiveButton("Закрыть", null)
-                    .show()
-                if (result.imported.isNotEmpty()) {
-                    finishFragment()
-                }
-            } catch (t: Throwable) {
-                progress.dismiss()
-                Toast.makeText(activity, "Ошибка импорта: ${t.message ?: t.javaClass.simpleName}", Toast.LENGTH_LONG).show()
-            } finally {
-                withContext(Dispatchers.IO) { stagingDir.deleteRecursively() }
             }
         }
     }

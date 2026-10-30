@@ -858,11 +858,45 @@ class GgtgAccountManagerActivity : BaseFragment() {
             setPadding(dp(9f), dp(5f), dp(9f), dp(5f))
             background = rounded((c and 0x00FFFFFF) or 0x22000000, dp(10f).toFloat())
             setOnClickListener {
-                scope.launch {
-                    Toast.makeText(context, "Спрашиваем @SpamBot…", Toast.LENGTH_SHORT).show()
-                    val error = withContext(Dispatchers.IO) { GgtgSpamStatus.check(slot) }
-                    Toast.makeText(context, error?.let { "SpamBot: $it" } ?: ("SpamBot: " + GgtgSpamStatus.statusText(userId)), Toast.LENGTH_SHORT).show()
+                val isBlocked = GgtgSpamStatus.isBlocked(userId)
+                val items = mutableListOf<CharSequence>("Проверить статус в @SpamBot")
+                if (isBlocked) {
+                    items.add("Подать авто-апелляцию в @SpamBot")
                 }
+                items.add("Открыть чат с @SpamBot")
+                org.telegram.ui.ActionBar.AlertDialog.Builder(context)
+                    .setTitle("SpamBot: ${GgtgAccounts.label(slot)}")
+                    .setItems(items.toTypedArray()) { _, which ->
+                        when (items[which].toString()) {
+                            "Проверить статус в @SpamBot" -> {
+                                scope.launch {
+                                    Toast.makeText(context, "Спрашиваем @SpamBot…", Toast.LENGTH_SHORT).show()
+                                    val error = withContext(Dispatchers.IO) { GgtgSpamStatus.check(slot) }
+                                    Toast.makeText(context, error?.let { "SpamBot: $it" } ?: ("SpamBot: " + GgtgSpamStatus.statusText(userId)), Toast.LENGTH_SHORT).show()
+                                    rebuildRows()
+                                }
+                            }
+                            "Подать авто-апелляцию в @SpamBot" -> {
+                                scope.launch {
+                                    Toast.makeText(context, "Отправляем апелляцию в @SpamBot…", Toast.LENGTH_SHORT).show()
+                                    val err = withContext(Dispatchers.IO) { GgtgSpamStatus.autoAppeal(slot) }
+                                    Toast.makeText(context, err ?: "Апелляция успешно отправлена в @SpamBot", Toast.LENGTH_LONG).show()
+                                    rebuildRows()
+                                }
+                            }
+                            "Открыть чат с @SpamBot" -> {
+                                if (slot != UserConfig.selectedAccount) {
+                                    LaunchActivity.instance?.switchToAccount(slot, true)
+                                }
+                                val bundle = android.os.Bundle().apply {
+                                    putLong("user_id", 178220800L)
+                                }
+                                presentFragment(org.telegram.ui.ChatActivity(bundle))
+                            }
+                        }
+                    }
+                    .setNegativeButton("Отмена", null)
+                    .show()
             }
         }
     }

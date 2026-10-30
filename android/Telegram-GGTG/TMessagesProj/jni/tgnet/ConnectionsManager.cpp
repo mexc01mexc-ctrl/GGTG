@@ -2064,7 +2064,7 @@ void ConnectionsManager::exportAuthKeys(std::vector<std::pair<int32_t, std::vect
 void ConnectionsManager::importAuthKey(int32_t dcId, ByteArray *authKey, int64_t authKeyId, bool makeCurrent) {
     // ggtg: install a permanent auth key minted elsewhere (a .ggtg pack) for a datacenter,
     // mirroring what Datacenter::onHandshakeComplete does for a freshly negotiated key.
-    scheduleTask([&, dcId, authKey, authKeyId, makeCurrent] {
+    scheduleTask([this, dcId, authKey, authKeyId, makeCurrent] {
         Datacenter *datacenter = getDatacenterWithId(dcId);
         if (datacenter == nullptr) {
             datacenter = new Datacenter(instanceNum, dcId);
@@ -2073,6 +2073,8 @@ void ConnectionsManager::importAuthKey(int32_t dcId, ByteArray *authKey, int64_t
         datacenter->clearAuthKey(HandshakeTypeAll);
         datacenter->authKeyPerm = authKey;
         datacenter->authKeyPermId = authKeyId;
+        datacenter->authorized = true;
+        datacenter->recreateSessions(HandshakeTypeAll);
         if (makeCurrent) {
             currentDatacenterId = dcId;
         }
@@ -2383,6 +2385,9 @@ void ConnectionsManager::sendMessagesToConnection(std::vector<std::unique_ptr<Ne
 }
 
 void ConnectionsManager::sendMessagesToConnectionWithConfirmation(std::vector<std::unique_ptr<NetworkMessage>> &messages, Connection *connection, bool reportAck) {
+    if (connection == nullptr) {
+        return;
+    }
     NetworkMessage *networkMessage = connection->generateConfirmationRequest();
     if (networkMessage != nullptr) {
         messages.push_back(std::unique_ptr<NetworkMessage>(networkMessage));
@@ -3187,51 +3192,64 @@ std::unique_ptr<TLObject> ConnectionsManager::wrapInLayer(TLObject *object, Data
             request->api_id = currentApiId;
             request->app_version = currentAppVersion;
             request->lang_code = currentLangCode;
-            if (currentApiId == 10840 || currentDeviceModel.find("iPhone") != std::string::npos || currentDeviceModel.find("iPad") != std::string::npos || currentSystemVersion.find("iOS") != std::string::npos) {
-                request->lang_pack = "ios";
-            } else if (currentApiId == 2040 || currentSystemVersion.find("Windows") != std::string::npos || currentSystemVersion.find("macOS") != std::string::npos || currentSystemVersion.find("OS X") != std::string::npos) {
+            if (currentApiId == 2040) {
                 request->lang_pack = "tdesktop";
+            } else if (currentApiId == 10840 || currentApiId == 8) {
+                request->lang_pack = "ios";
+            } else if (currentApiId == 6) {
+                request->lang_pack = "android";
+            } else if (currentDeviceModel.find("iPhone") != std::string::npos || currentDeviceModel.find("iPad") != std::string::npos || currentSystemVersion.find("iOS") != std::string::npos) {
+                request->lang_pack = "ios";
+                request->api_id = 10840;
+            } else if (currentSystemVersion.find("Windows") != std::string::npos || currentSystemVersion.find("macOS") != std::string::npos || currentSystemVersion.find("OS X") != std::string::npos) {
+                request->lang_pack = "tdesktop";
+                request->api_id = 2040;
             } else {
                 request->lang_pack = "android";
+                request->api_id = 6;
             }
             request->system_lang_code = currentSystemLangCode;
 
 
             auto jsonObject = new TL_jsonObject();
             request->params = std::unique_ptr<JSONValue>(jsonObject);
+            TL_jsonObjectValue *objectValue = nullptr;
 
-            if (!currentRegId.empty()) {
-                auto objectValue = new TL_jsonObjectValue();
+            // Only send Android-specific package/cert metadata if this session is Android (api_id == 6)
+            if (request->api_id == 6 && request->lang_pack == "android") {
+                if (!currentRegId.empty()) {
+                    objectValue = new TL_jsonObjectValue();
+                    jsonObject->value.push_back(std::unique_ptr<TL_jsonObjectValue>(objectValue));
+
+                    auto jsonString = new TL_jsonString();
+                    jsonString->value = currentRegId;
+                    objectValue->key = "device_token";
+                    objectValue->value = std::unique_ptr<JSONValue>(jsonString);
+                }
+                if (!certFingerprint.empty()) {
+                    objectValue = new TL_jsonObjectValue();
+                    jsonObject->value.push_back(std::unique_ptr<TL_jsonObjectValue>(objectValue));
+
+                    auto jsonString = new TL_jsonString();
+                    jsonString->value = certFingerprint;
+                    objectValue->key = "data";
+                    objectValue->value = std::unique_ptr<JSONValue>(jsonString);
+                }
+
+                objectValue = new TL_jsonObjectValue();
                 jsonObject->value.push_back(std::unique_ptr<TL_jsonObjectValue>(objectValue));
-
                 auto jsonString = new TL_jsonString();
-                jsonString->value = currentRegId;
-                objectValue->key = "device_token";
+                jsonString->value = installer;
+                objectValue->key = "installer";
+                objectValue->value = std::unique_ptr<JSONValue>(jsonString);
+
+                objectValue = new TL_jsonObjectValue();
+                jsonObject->value.push_back(std::unique_ptr<TL_jsonObjectValue>(objectValue));
+                jsonString = new TL_jsonString();
+                jsonString->value = package;
+                objectValue->key = "package_id";
                 objectValue->value = std::unique_ptr<JSONValue>(jsonString);
             }
-            if (!certFingerprint.empty()) {
-                auto objectValue = new TL_jsonObjectValue();
-                jsonObject->value.push_back(std::unique_ptr<TL_jsonObjectValue>(objectValue));
-
-                auto jsonString = new TL_jsonString();
-                jsonString->value = certFingerprint;
-                objectValue->key = "data";
-                objectValue->value = std::unique_ptr<JSONValue>(jsonString);
-            }
-
-            auto objectValue = new TL_jsonObjectValue();
-            jsonObject->value.push_back(std::unique_ptr<TL_jsonObjectValue>(objectValue));
-            auto jsonString = new TL_jsonString();
-            jsonString->value = installer;
-            objectValue->key = "installer";
-            objectValue->value = std::unique_ptr<JSONValue>(jsonString);
-
-            objectValue = new TL_jsonObjectValue();
-            jsonObject->value.push_back(std::unique_ptr<TL_jsonObjectValue>(objectValue));
-            jsonString = new TL_jsonString();
-            jsonString->value = package;
-            objectValue->key = "package_id";
-            objectValue->value = std::unique_ptr<JSONValue>(jsonString);
 
             objectValue = new TL_jsonObjectValue();
             jsonObject->value.push_back(std::unique_ptr<TL_jsonObjectValue>(objectValue));

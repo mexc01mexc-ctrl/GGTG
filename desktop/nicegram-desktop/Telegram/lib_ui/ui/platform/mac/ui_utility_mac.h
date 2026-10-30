@@ -17,9 +17,6 @@ inline bool TranslucentWindowsSupported() {
 	return true;
 }
 
-inline void ClearTransientParent(not_null<QWidget*> widget) {
-}
-
 inline void SetForeignTransientParent(
 		not_null<QWidget*> widget,
 		const ForeignParent &parent) {

@@ -12,6 +12,7 @@ For license and exceptions, see https://github.com/telegramdesktop/tdesktop/blob
 #include "core/ggtg_sync.h"
 #include "core/ggtg_sync_transport.h"
 #include "core/ggtg_sessions.h"
+#include "data/account_spam_status.h"
 #include "storage/storage_tdata_export.h"
 #include "data/data_user.h"
 #include "main/main_account.h"
@@ -97,13 +98,32 @@ inline void AcceptAccountsFromAndroid(
 			(*labels)[tag] = account;
 			list.push_back({ .data = data, .folder = tag });
 
+			if (account.contains("spamStatus")) {
+				const auto spam = account["spamStatus"].toObject();
+				const auto state = Data::StateFromString(spam["state"].toString());
+				const auto until = spam["until"].toString().toLongLong();
+				const auto checkedAt = spam["checkedAt"].toString().toLongLong();
+				if (checkedAt > 0) {
+					Data::SetAccountSpamStatus(userId, { state, until, checkedAt });
+				}
+			}
+
 			// Also persist this session in the Session Vault as an Android session
 			namespace Sessions = Core::GgtgSessions;
 			const auto uIdStr = QString::number(userId);
+			const auto accNote = account.contains("sessionNote")
+				? account["sessionNote"].toString()
+				: account["note"].toString();
+			const auto finalNote = !accNote.isEmpty()
+				? accNote
+				: u"сессия с Android (синхронизация)"_q;
 			auto alreadySaved = false;
 			for (const auto &s : Sessions::StoredForUser(Sessions::LoadVault(), uIdStr)) {
 				if (s.role == u"android"_q || s.source == u"android_sync"_q) {
 					alreadySaved = true;
+					if (!accNote.isEmpty() && (s.note.isEmpty() || s.note == u"сессия с Android (синхронизация)"_q)) {
+						Sessions::UpdateStoredNote(s.id, accNote);
+					}
 					break;
 				}
 			}
@@ -112,7 +132,7 @@ inline void AcceptAccountsFromAndroid(
 				entry.userId = uIdStr;
 				entry.role = u"android"_q;
 				entry.source = u"android_sync"_q;
-				entry.note = u"сессия с Android (синхронизация)"_q;
+				entry.note = finalNote;
 				entry.phone = account["phone"].toString();
 				entry.name = account["name"].toString();
 				entry.username = account["username"].toString();

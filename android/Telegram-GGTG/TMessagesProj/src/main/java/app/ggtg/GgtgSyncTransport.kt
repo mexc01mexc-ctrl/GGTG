@@ -147,13 +147,15 @@ object GgtgSyncTransport {
         if (slot == null) { reply(Report(false, "Главный аккаунт не подключён в этом GGTG")); return }
         running = true
         scope.launch {
-            val report = try { round(slot, settings) } catch (t: Throwable) {
-                Report(false, "Ошибка: " + (t.message ?: t.javaClass.simpleName))
+            GgtgWakeLock.withLock("sync") {
+                val report = try { round(slot, settings) } catch (t: Throwable) {
+                    Report(false, "Ошибка: " + (t.message ?: t.javaClass.simpleName))
+                }
+                running = false
+                val now = GgtgSync.loadSettings()
+                GgtgSync.saveSettings(now.copy(lastSyncAt = System.currentTimeMillis() / 1000, lastResult = report.text))
+                reply(report)
             }
-            running = false
-            val now = GgtgSync.loadSettings()
-            GgtgSync.saveSettings(now.copy(lastSyncAt = System.currentTimeMillis() / 1000, lastResult = report.text))
-            reply(report)
         }
     }
 
@@ -323,15 +325,17 @@ object GgtgSyncTransport {
         if (settings.passphrase.isEmpty()) { done(false, "Задайте фразу-пароль в «Синхронизации»"); return }
         if (slot == null) { done(false, "Главный аккаунт не подключён в этом GGTG"); return }
         scope.launch {
-            val dir = outbox()
-            val file = File(dir, "ggtg-accounts-$kind-${settings.deviceId}.bin")
-            file.writeBytes(GgtgSync.pack(payload, settings.passphrase))
-            val dialogId = UserConfig.getInstance(slot).clientUserId
-            withContext(Dispatchers.Main) {
-                SendMessagesHelper.prepareSendingDocument(AccountInstance.getInstance(slot), file.absolutePath, file.absolutePath, null, TAG,
-                    "application/octet-stream", dialogId, null, null, null, null, null, true, 0, null, null, false)
+            GgtgWakeLock.withLock("sync_send_accounts") {
+                val dir = outbox()
+                val file = File(dir, "ggtg-accounts-$kind-${settings.deviceId}.bin")
+                file.writeBytes(GgtgSync.pack(payload, settings.passphrase))
+                val dialogId = UserConfig.getInstance(slot).clientUserId
+                withContext(Dispatchers.Main) {
+                    SendMessagesHelper.prepareSendingDocument(AccountInstance.getInstance(slot), file.absolutePath, file.absolutePath, null, TAG,
+                        "application/octet-stream", dialogId, null, null, null, null, null, true, 0, null, null, false)
+                }
+                AndroidUtilities.runOnUIThread { done(true, "Файл отправляется в «Избранное» главного аккаунта. Когда он там появится, его можно принять на Desktop") }
             }
-            AndroidUtilities.runOnUIThread { done(true, "Файл отправляется в «Избранное» главного аккаунта. Когда он там появится, его можно принять на Desktop") }
         }
     }
 

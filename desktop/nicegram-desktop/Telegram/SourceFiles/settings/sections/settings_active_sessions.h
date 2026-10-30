@@ -50,6 +50,7 @@ void ShowSessionInfo(
 	const Api::Authorizations::Entry &entry,
 	Fn<void(uint64)> terminate,
 	Fn<void()> exportAction = nullptr,
-	Fn<void()> switchAction = nullptr);
+	Fn<void()> switchAction = nullptr,
+	Fn<void()> editNoteAction = nullptr);
 
 } // namespace Settings

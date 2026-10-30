@@ -8,11 +8,18 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "core/ggtg_sync.h"
 
 #include "base/unixtime.h"
+#include "core/application.h"
 #include "core/ggtg_log.h"
 #include "core/ggtg_paths.h"
 #include "core/ggtg_chat_lists.h"
-#include "mtproto/proxy_pool.h"
+#include "core/ggtg_sessions.h"
+#include "data/account_spam_status.h"
+#include "data/data_user.h"
 #include "data/scraped_members_db.h"
+#include "main/main_account.h"
+#include "main/main_domain.h"
+#include "main/main_session.h"
+#include "mtproto/proxy_pool.h"
 
 #include <QtCore/QCryptographicHash>
 #include <QtCore/QDateTime>
@@ -280,6 +287,72 @@ Snapshot BuildSnapshot(const Settings &settings) {
 	if (poolDoc.isArray()) {
 		body.insert("proxy_pools", poolDoc.array());
 	}
+
+	auto sessionNotes = QJsonArray();
+	for (const auto &item : Core::GgtgSessions::LoadVault()) {
+		if (item.userId.isEmpty() && item.phone.isEmpty()) {
+			continue;
+		}
+		if (item.note.isEmpty() && item.role.isEmpty()) {
+			continue;
+		}
+		auto obj = QJsonObject{
+			{ "id", item.id },
+			{ "userId", item.userId },
+			{ "phone", item.phone },
+			{ "role", item.role },
+			{ "note", item.note },
+		};
+		if (item.createdAt > 0) {
+			obj["createdAt"] = double(item.createdAt);
+		}
+		if (item.hash) {
+			obj["hash"] = QString::number(item.hash);
+		}
+		if (!item.device.isEmpty()) {
+			obj["device"] = item.device;
+		}
+		sessionNotes.append(obj);
+	}
+	if (!sessionNotes.isEmpty()) {
+		body.insert("session_notes", sessionNotes);
+	}
+
+	auto accountStatuses = QJsonObject();
+	const auto allSpam = Data::AllAccountSpamStatusesJson();
+	for (auto it = allSpam.begin(); it != allSpam.end(); ++it) {
+		auto entry = it.value().toObject();
+		entry["userId"] = it.key();
+		accountStatuses.insert(it.key(), entry);
+	}
+	for (const auto &account : Core::App().domain().orderedAccounts()) {
+		if (!Main::AccountIsLive(account)) {
+			continue;
+		}
+		const auto user = account->session().user();
+		const auto key = QString::number(user->id.value);
+		auto entry = accountStatuses.value(key).toObject();
+		entry["userId"] = key;
+		entry["phone"] = user->phone();
+		if (!account->folderTag().isEmpty()) {
+			entry["folder"] = account->folderTag();
+		}
+		if (account->trashed()) {
+			entry["trashed"] = true;
+		}
+		if (account->alwaysOffline()) {
+			entry["offline"] = true;
+		}
+		const auto sent = Data::CountSmsSentToday(user->id.value);
+		if (sent > 0) {
+			entry["sentToday"] = sent;
+		}
+		accountStatuses[key] = entry;
+	}
+	if (!accountStatuses.isEmpty()) {
+		body.insert("account_statuses", accountStatuses);
+	}
+
 	auto result = Snapshot();
 	// The hash covers the contents only, not who made it and when.
 	result.hash = QString::fromLatin1(QCryptographicHash::hash(
@@ -431,6 +504,81 @@ MergeResult MergeSnapshot(const QByteArray &json) {
 	if (root.contains("proxy_pools")) {
 		const auto pools = root["proxy_pools"].toArray();
 		MTP::GlobalProxyPool().mergeJson(QJsonDocument(pools).toJson(QJsonDocument::Compact));
+	}
+
+	// Merge session notes & roles across devices
+	if (root.contains("session_notes")) {
+		for (const auto &val : root["session_notes"].toArray()) {
+			const auto obj = val.toObject();
+			const auto remoteId = obj["id"].toString();
+			const auto uId = obj["userId"].toString();
+			const auto phone = obj["phone"].toString();
+			const auto note = obj["note"].toString();
+			const auto role = obj["role"].toString();
+			const auto remoteHash = obj["hash"].toString().toULongLong();
+			if (note.isEmpty() && role.isEmpty()) {
+				continue;
+			}
+			auto matched = false;
+			for (const auto &item : Core::GgtgSessions::LoadVault()) {
+				if ((!remoteId.isEmpty() && item.id == remoteId)
+					|| (remoteHash && item.hash && item.hash == remoteHash)
+					|| ((!uId.isEmpty() && item.userId == uId) || (!phone.isEmpty() && item.phone == phone))) {
+					matched = true;
+					if (!note.isEmpty() && (item.note.isEmpty() || item.note != note)) {
+						Core::GgtgSessions::UpdateStoredNote(item.id, note);
+					}
+					if (!role.isEmpty() && item.role.isEmpty()) {
+						Core::GgtgSessions::UpdateStoredRole(item.id, role);
+					}
+					if (remoteHash && !item.hash) {
+						Core::GgtgSessions::UpdateStoredHash(item.id, remoteHash);
+					}
+				}
+			}
+			if (!matched && !uId.isEmpty()) {
+				auto entry = Core::GgtgSessions::StoredSession();
+				entry.id = remoteId;
+				entry.userId = uId;
+				entry.phone = phone;
+				entry.role = role.isEmpty() ? u"stored"_q : role;
+				entry.source = u"sync"_q;
+				entry.note = note;
+				entry.createdAt = qint64(obj["createdAt"].toDouble());
+				entry.hash = remoteHash;
+				if (obj.contains("device")) {
+					entry.device = obj["device"].toObject();
+				}
+				Core::GgtgSessions::AddStored(entry);
+			}
+		}
+	}
+
+	// Merge account statuses across devices
+	if (root.contains("account_statuses")) {
+		const auto statuses = root["account_statuses"].toObject();
+		Data::MergeAccountSpamStatusesJson(statuses);
+
+		for (const auto &account : Core::App().domain().orderedAccounts()) {
+			if (!Main::AccountIsLive(account)) {
+				continue;
+			}
+			const auto user = account->session().user();
+			const auto key = QString::number(user->id.value);
+			if (!statuses.contains(key)) {
+				continue;
+			}
+			const auto entry = statuses[key].toObject();
+			if (account->folderTag().isEmpty() && entry.contains("folder")) {
+				const auto folder = entry["folder"].toString();
+				if (!folder.isEmpty()) {
+					account->setFolderTag(folder);
+				}
+			}
+			if (entry.contains("trashed") && entry["trashed"].toBool() && !account->trashed()) {
+				account->setTrashed(true);
+			}
+		}
 	}
 
 	// The AI side: whichever copy was changed later.

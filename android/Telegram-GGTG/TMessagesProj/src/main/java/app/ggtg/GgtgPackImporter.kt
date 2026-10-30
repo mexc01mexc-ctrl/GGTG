@@ -1,7 +1,9 @@
 package app.ggtg
 
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.MainScope
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import org.json.JSONObject
 import org.telegram.messenger.UserConfig
@@ -47,7 +49,10 @@ object GgtgPackImporter {
         val twoFactor: String,
         val proxy: PackProxy?,
         val device: JSONObject?,
-        val handoff: Boolean
+        val handoff: Boolean,
+        val sessionNote: String = "",
+        val sessionRole: String = "",
+        val spamStatus: JSONObject? = null
     )
 
     /** True when [file] is a zip holding a GGTG Desktop export manifest. */
@@ -61,15 +66,39 @@ object GgtgPackImporter {
         false
     }
 
-    /** True when some not-yet-logged-in account in the pack has no proxy Android can use itself, and pools exist. */
-    fun needsProxyPool(file: File): Boolean {
-        val accounts = try { readPack(file) } catch (t: Throwable) { return false }
-        val names = org.telegram.ui.Components.GgtgProxyPoolStore.getListNames()
-        val hasPools = names.any { org.telegram.ui.Components.GgtgProxyPoolStore.getCount(it) > 0 }
-        if (!hasPools) return false
-        return accounts.any { account ->
+    /** Returns how many accounts in the pack need a proxy (have no usable proxy and are not yet logged in). */
+    fun countWithoutProxy(file: File): Int {
+        val accounts = try { readPack(file) } catch (t: Throwable) { return 0 }
+        return accounts.count { account ->
             val loggedIn = (0 until UserConfig.MAX_ACCOUNT_COUNT).any { UserConfig.getInstance(it).clientUserId == account.userId }
             !loggedIn && (account.proxy == null || (account.proxy.type != "socks5" && account.proxy.type != "mtproto"))
+        }
+    }
+
+    /** True when some not-yet-logged-in account in the pack has no proxy Android can use itself, and pools exist. */
+    fun needsProxyPool(file: File): Boolean {
+        val count = countWithoutProxy(file)
+        if (count == 0) return false
+        val names = org.telegram.ui.Components.GgtgProxyPoolStore.getListNames()
+        return names.any { org.telegram.ui.Components.GgtgProxyPoolStore.getCount(it) > 0 }
+    }
+
+    fun interface ImportCallback {
+        fun onResult(success: Boolean, error: String?)
+    }
+
+    @JvmStatic
+    fun importFileAsync(activity: androidx.fragment.app.FragmentActivity, file: File, callback: ImportCallback) {
+        val progress = app.ggtg.ui.TdataImportProgressDialog(activity, "Синхронизация сессий")
+        progress.setWorkingText("Применение сессий с Desktop…")
+        MainScope().launch {
+            val res = import(file, null, progress, false)
+            try { progress.dismiss() } catch (ignored: Throwable) {}
+            if (res.imported.isNotEmpty() || res.alreadyLoggedIn > 0) {
+                callback.onResult(true, null)
+            } else {
+                callback.onResult(false, res.failReason ?: "Не удалось импортировать сессию")
+            }
         }
     }
 
@@ -78,7 +107,7 @@ object GgtgPackImporter {
         proxySource: GgtgProxySource?,
         progressDialog: app.ggtg.ui.TdataImportProgressDialog,
         createBackup: Boolean = false
-    ): GgtgImportSupport.ImportResult {
+    ): GgtgImportSupport.ImportResult = GgtgWakeLock.withLock("pack_import") {
         val accounts = withContext(Dispatchers.IO) { readPack(file) }
         if (accounts.isEmpty()) {
             return GgtgImportSupport.ImportResult(emptyList(), 0, 0, 0, "В файле .ggtg нет аккаунтов")
@@ -88,7 +117,35 @@ object GgtgPackImporter {
         var alreadyLoggedIn = 0
         for (account in accounts) {
             val exists = (0 until UserConfig.MAX_ACCOUNT_COUNT).any { UserConfig.getInstance(it).clientUserId == account.userId }
-            if (exists) alreadyLoggedIn++ else toImport += account
+            if (exists) {
+                alreadyLoggedIn++
+                val sNote = if (account.sessionNote.isNotEmpty()) account.sessionNote else "Импортированная сессия (.ggtg)"
+                val id = "${System.currentTimeMillis()}_${(1000..9999).random()}"
+                val backup = GgtgSessions.StoredSession(
+                    id = id,
+                    userId = account.userId,
+                    role = if (account.sessionRole.isNotEmpty()) account.sessionRole else "imported",
+                    source = "import_ggtg",
+                    note = sNote,
+                    state = "ok",
+                    createdAt = System.currentTimeMillis() / 1000,
+                    phone = account.phone,
+                    name = listOfNotNull(account.firstName, account.lastName).joinToString(" ").trim(),
+                    folder = account.folder.orEmpty(),
+                    twoFactor = account.twoFactor,
+                    mainDcId = account.mainDcId,
+                    keys = account.keys,
+                    device = account.device,
+                    proxy = null
+                )
+                GgtgSessions.addStored(backup)
+                val tacc = app.ggtg.tdata.TdataAccount(
+                    userId = account.userId,
+                    mainDcId = account.mainDcId,
+                    keys = account.keys
+                )
+                GgtgSessions.saveToVault(backup, tacc)
+            } else toImport += account
         }
         // same exclusion as the tdata path: never write into the slot the live login screen is bound to
         val freeSlots = (0 until UserConfig.MAX_ACCOUNT_COUNT)
@@ -107,6 +164,9 @@ object GgtgPackImporter {
         var lastFailReason: String? = null
         val total = toImport.size
         for ((i, account) in toImport.withIndex()) {
+            if (i > 0) {
+                kotlinx.coroutines.delay(2000)
+            }
             val slot = freeSlots.removeFirstOrNull()
             if (slot == null) {
                 noFreeSlot += total - i
@@ -122,30 +182,27 @@ object GgtgPackImporter {
                 continue
             }
             progressDialog.setWorking(account.phone.takeIf { it.isNotEmpty() }?.let { "+$it" }, i + 1, total)
-            // If the pack contains auth keys (standard .ggtg export / sync), install them directly.
-            // Only legacy packs without keys fall back to handoff.
+            // If handoff is requested (export from Desktop for Android), execute handoff to mint authentic Android session.
+            // Otherwise, install auth keys directly into slot.
             var result = try {
-                if (account.keys.isNotEmpty()) {
+                if (account.handoff && tempSlot != null) {
+                    handoff(account, slot, tempSlot, proxy, i + 1, total, progressDialog, keepTransitSession = createBackup)
+                } else if (account.keys.isNotEmpty()) {
                     install(account, slot, proxy)
-                } else if (account.handoff && tempSlot != null) {
-                    if (proxy == null) {
-                        Result.failure(Exception("Требуется прокси для передачи сессии"))
-                    } else {
-                        handoff(account, slot, tempSlot, proxy, i + 1, total, progressDialog, keepTransitSession = createBackup)
-                    }
                 } else {
                     install(account, slot, proxy)
                 }
             } catch (t: Throwable) {
                 Result.failure(t)
             }
-            if (result.isFailure && account.handoff && tempSlot != null && account.keys.isNotEmpty() && proxy != null
+            if (result.isFailure && account.handoff && tempSlot != null && account.keys.isNotEmpty()
                 && result.exceptionOrNull() !is TdataImportHelper.PasswordSkippedException) {
-                // If direct install failed, try handoff as fallback
-                FileLog.e("ggtg pack: direct install failed for userId=${account.userId}, trying handoff", result.exceptionOrNull())
+                // If handoff failed, fall back to direct install so the account isn't lost
+                FileLog.e("ggtg pack: handoff failed for userId=${account.userId}, falling back to direct install", result.exceptionOrNull())
+                try { ConnectionsManager.getInstance(tempSlot).cleanup(true) } catch (_: Throwable) {}
                 try { ConnectionsManager.getInstance(slot).cleanup(true) } catch (_: Throwable) {}
                 result = try {
-                    handoff(account, slot, tempSlot, proxy, i + 1, total, progressDialog, keepTransitSession = createBackup)
+                    install(account, slot, proxy)
                 } catch (t: Throwable) {
                     Result.failure(t)
                 }
@@ -175,12 +232,14 @@ object GgtgPackImporter {
                             put("appVersion", "GGTG")
                         }
                     } else account.device
+                    val sNote = if (account.sessionNote.isNotEmpty()) account.sessionNote
+                        else ("Резервная сессия (импорт .ggtg) от " + java.text.SimpleDateFormat("dd.MM.yyyy HH:mm", java.util.Locale.getDefault()).format(java.util.Date()))
                     val backup = GgtgSessions.StoredSession(
                         id = id,
                         userId = account.userId,
-                        role = "backup",
+                        role = if (account.sessionRole.isNotEmpty()) account.sessionRole else "backup",
                         source = "import_ggtg",
-                        note = "Резервная сессия (импорт .ggtg) от " + java.text.SimpleDateFormat("dd.MM.yyyy HH:mm", java.util.Locale.getDefault()).format(java.util.Date()),
+                        note = sNote,
                         state = "ok",
                         createdAt = System.currentTimeMillis() / 1000,
                         phone = uc.currentUser?.phone.orEmpty().ifEmpty { account.phone },
@@ -217,7 +276,7 @@ object GgtgPackImporter {
         if (imported.isNotEmpty()) {
             GgtgImportSupport.selectImportedSlotIfIdle(firstImportedSlot)
         }
-        return GgtgImportSupport.ImportResult(imported, alreadyLoggedIn, noFreeSlot, failed, lastFailReason, noFreeProxy)
+        GgtgImportSupport.ImportResult(imported, alreadyLoggedIn, noFreeSlot, failed, lastFailReason, noFreeProxy)
     }
 
     /** This phone makes its own session from the Mac's (see the top of the file), then ends the Mac's one. */
@@ -225,7 +284,7 @@ object GgtgPackImporter {
         account: PackAccount,
         slot: Int,
         tempSlot: Int,
-        proxy: PackProxy,
+        proxy: PackProxy?,
         index: Int,
         total: Int,
         progressDialog: app.ggtg.ui.TdataImportProgressDialog,
@@ -233,8 +292,12 @@ object GgtgPackImporter {
     ): Result<Long> {
         // the 2FA password from the Mac is what the handoff tries first
         if (account.twoFactor.isNotEmpty()) GgtgTwoFaStore.save(account.userId, account.twoFactor)
-        // both slots go through the account's own proxy: the Mac's session was made from that address too
-        val bits = GgtgProxyBits(proxy.host, proxy.port, proxy.user, proxy.password, proxy.secret)
+        // both slots go through the account's own proxy (if any): the Mac's session was made from that address too
+        val bits = if (proxy != null && proxy.host.isNotEmpty()) {
+            GgtgProxyBits(proxy.host, proxy.port, proxy.user, proxy.password, proxy.secret)
+        } else {
+            GgtgProxyBits("", 0, "", "", "")
+        }
         val result = TdataImportHelper.duplicateAccountViaHandoff(
             app.ggtg.tdata.TdataAccount(account.userId, account.mainDcId, account.keys),
             tempSlot, slot, bits, bits, index, total, progressDialog, account.device)
@@ -263,6 +326,19 @@ object GgtgPackImporter {
             uc.ncgTwoFactor = account.twoFactor
             GgtgTwoFaStore.save(account.userId, account.twoFactor)
         }
+        account.spamStatus?.let { sObj ->
+            val stateStr = sObj.optString("state")
+            val until = sObj.optLong("until", 0L)
+            val checkedAt = sObj.optLong("checkedAt", 0L)
+            val state = when (stateStr) {
+                "temporary" -> GgtgSpamStatus.State.Temporary
+                "permanent" -> GgtgSpamStatus.State.Permanent
+                else -> GgtgSpamStatus.State.Clear
+            }
+            if (checkedAt > 0) {
+                GgtgSpamStatus.merge(account.userId, GgtgSpamStatus.Status(state, until, checkedAt))
+            }
+        }
         uc.saveConfig(false)
     }
 
@@ -273,8 +349,11 @@ object GgtgPackImporter {
         } else {
             ConnectionsManager.setProxySettingsForAccount(slot, false, "", 0, "", "", "")
         }
-        // device identity: the export's own, else a random phone (set before the ConnectionsManager exists)
-        GgtgDevice.assignNew(slot, account.device)
+        // device identity: if the keys come from Telegram Desktop (or tdata fallback), running them as mobile (api_id 6)
+        // causes Telegram server to detect an API_ID mismatch on the session, leading to instant spam block.
+        // Therefore, keys born on Desktop MUST use isDesktop = true so they connect with api_id 2040 (tdesktop).
+        val isDesktop = account.handoff || account.device?.optInt("apiId") == 2040 || account.device?.optString("langPackName") == "tdesktop"
+        GgtgDevice.assignNew(slot, account.device, isDesktop = isDesktop)
         val cm = ConnectionsManager.getInstance(slot)
         if (account.mainDcId != 0 && account.mainDcId != ConnectionsManager.DEFAULT_DATACENTER_ID) {
             cm.setDefaultDatacenterId(account.mainDcId)
@@ -349,7 +428,10 @@ object GgtgPackImporter {
                 twoFactor = json.optString("twoFactor"),
                 proxy = proxy,
                 device = json.optJSONObject("device"),
-                handoff = json.optBoolean("handoff")
+                handoff = json.optBoolean("handoff"),
+                sessionNote = json.optString("sessionNote").ifEmpty { json.optString("note") },
+                sessionRole = json.optString("sessionRole"),
+                spamStatus = json.optJSONObject("spamStatus")
             )
         }
         return result

@@ -16,6 +16,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "core/core_settings.h"
 #include "core/process_manager.h"
 #include "data/data_user.h"
+#include "data/account_spam_status.h"
 #include "main/main_account.h"
 #include "main/main_domain.h"
 #include "main/main_session.h"
@@ -34,6 +35,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "ui/wrap/vertical_layout.h"
 #include "window/ggtg_click.h"
 #include "window/ggtg_widgets.h"
+#include "window/ggtg_home_widgets.h"
 #include "window/window_session_controller.h"
 #include "styles/style_boxes.h"
 #include "styles/style_layers.h"
@@ -47,6 +49,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "base/call_delayed.h"
 
 #include <QtCore/QDataStream>
+#include <QtWidgets/QTextEdit>
 #include <QtCore/QDateTime>
 #include <QtCore/QDir>
 #include <QtCore/QFile>
@@ -77,6 +80,7 @@ struct ExportOptions {
 	// Not a file for the user: put into the main account's "Saved messages"
 	// for GGTG Android (see core/ggtg_sync_transport.h).
 	bool viaSync = false;
+	QString sessionNote;
 };
 
 } // namespace
@@ -208,6 +212,22 @@ namespace {
 			result["proxy"] = proxy;
 		}
 	}
+	if (!options.sessionNote.isEmpty()) {
+		result["sessionNote"] = options.sessionNote;
+		result["note"] = options.sessionNote;
+	}
+	const auto spam = Data::FindAccountSpamStatus(user->id.value);
+	if (spam) {
+		auto spamObj = QJsonObject();
+		spamObj["state"] = Data::StateToString(spam->state);
+		spamObj["until"] = QString::number(spam->until);
+		spamObj["checkedAt"] = QString::number(spam->checkedAt);
+		result["spamStatus"] = spamObj;
+	}
+	if (account->trashed()) {
+		result["trashed"] = true;
+	}
+	result["sessionRole"] = u"android"_q;
 	return result;
 }
 
@@ -383,7 +403,7 @@ void AskTwoFactor(
 	}));
 }
 
-struct ExportRun {
+struct ExportRun : std::enable_shared_from_this<ExportRun> {
 	std::shared_ptr<Ui::Show> show;
 	std::shared_ptr<Core::ProcessHandle> process;
 	std::vector<base::weak_ptr<Main::Account>> accounts;
@@ -393,26 +413,89 @@ struct ExportRun {
 	QString path;
 	QJsonArray exported;
 	QStringList errors;
+
+	bool paused = false;
+	bool stopped = false;
+	bool finished = false;
+	size_t currentIndex = 0;
+	base::Timer nextTimer;
+
+	QStringList logHistoryHtml;
+	Fn<void(const QString &html)> onLog;
+	Fn<void(int current, int total, int success, int errors)> onProgress;
+	Fn<void(bool running, bool paused)> onStateChanged;
+
+	void log(const QString &html) {
+		const auto ts = QDateTime::currentDateTime().toString(u"HH:mm:ss"_q);
+		const auto full = u"<font color=\"#78909C\">[%1]</font> %2"_q.arg(ts).arg(html);
+		logHistoryHtml.push_back(full);
+		if (process) {
+			auto plain = html;
+			plain.remove(QRegularExpression(u"<[^>]*>"_q));
+			process->log(plain);
+		}
+		if (onLog) {
+			onLog(full);
+		}
+	}
 };
 
 void ExportNext(std::shared_ptr<ExportRun> run, size_t index);
+void ShowExportBox(std::shared_ptr<ExportRun> run);
+
+[[nodiscard]] inline const style::InputField &ExportLogFieldStyle() {
+	static const auto result = [] {
+		auto st = st::defaultInputField;
+		st.textBg = st::windowBgOver;
+		st.textBgActive = st::windowBgOver;
+		st.heightMin = style::ConvertScale(180);
+		st.heightMax = style::ConvertScale(320);
+		return st;
+	}();
+	return result;
+}
+
+void PauseExport(const std::shared_ptr<ExportRun> &run) {
+	if (run->stopped || run->finished) return;
+	if (!run->paused) {
+		run->paused = true;
+		if (run->nextTimer.isActive()) {
+			run->nextTimer.cancel();
+		}
+		run->log(u"<font color=\"#FFA726\">[Пауза] Экспорт приостановлен. Нажмите «Продолжить» для возобновления.</font>"_q);
+		if (run->onStateChanged) run->onStateChanged(true, true);
+	} else {
+		run->paused = false;
+		run->log(u"<font color=\"#40C4FF\">[Продолжить] Экспорт возобновлён.</font>"_q);
+		if (run->onStateChanged) run->onStateChanged(true, false);
+		ExportNext(run, run->currentIndex);
+	}
+}
 
 void FinishExport(const std::shared_ptr<ExportRun> &run) {
+	if (run->finished) return;
+	run->finished = true;
+	if (run->nextTimer.isActive()) {
+		run->nextTimer.cancel();
+	}
 	const auto &process = run->process;
 	if (run->errors.join('\n').contains(u"API_ID_PUBLISHED_FLOOD"_q)
 		|| run->errors.join('\n').contains(u"API_ID_INVALID"_q)) {
-		// Telegram refuses the shared api_id: offer to use one of the
-		// user's own (see settings/ggtg_api_override_box.h).
 		const auto show = run->show;
 		base::call_delayed(300, [=] { ShowApiOverrideBox(show); });
 	}
 	if (run->exported.isEmpty()) {
-		process->fail(u"Ни один аккаунт не экспортирован:\n"_q
-			+ run->errors.join('\n'));
+		const auto errMsg = u"Ни один аккаунт не успел экспортироваться:\n"_q + run->errors.join('\n');
+		process->fail(errMsg);
+		run->log(u"<font color=\"#FF5252\">[Ошибка] %1</font>"_q.arg(errMsg));
+		if (run->onStateChanged) run->onStateChanged(false, false);
 		return;
 	}
 	if (!WritePack(run->path, run->exported)) {
-		process->fail(u"Не удалось записать файл "_q + run->path);
+		const auto errMsg = u"Не удалось записать файл "_q + run->path;
+		process->fail(errMsg);
+		run->log(u"<font color=\"#FF5252\">[Ошибка] %1</font>"_q.arg(errMsg));
+		if (run->onStateChanged) run->onStateChanged(false, false);
 		return;
 	}
 	if (run->options.viaSync) {
@@ -426,74 +509,129 @@ void FinishExport(const std::shared_ptr<ExportRun> &run) {
 		const auto count = run->exported.size();
 		const auto total = run->accounts.size();
 		const auto errors = run->errors;
+		const auto wasStopped = run->stopped;
 		Core::GgtgSync::SendAccounts(u"pack"_q, bytes, [=](
 				bool ok,
 				QString text) {
 			auto line = ok
-				? u"Готово: %1 из %2 аккаунтов. %3. На телефоне: "
-					"«Синхронизация» → «Принять аккаунты»."_q
-					.arg(count).arg(total).arg(text)
+				? (wasStopped
+					? u"Экспорт остановлен: передано %1 из %2 аккаунтов. %3. На телефоне: «Синхронизация» → «Принять аккаунты»."_q
+						.arg(count).arg(total).arg(text)
+					: u"Готово: %1 из %2 аккаунтов. %3. На телефоне: «Синхронизация» → «Принять аккаунты»."_q
+						.arg(count).arg(total).arg(text))
 				: u"Не отправилось: "_q + text;
 			if (!errors.isEmpty()) {
 				line += u"\nОшибки:\n"_q + errors.join('\n');
 			}
 			if (ok) {
 				process->succeed(line);
+				run->log(u"<font color=\"#4CAF50\">[Готово] %1</font>"_q.arg(line));
 			} else {
 				process->fail(line);
+				run->log(u"<font color=\"#FF5252\">[Ошибка] %1</font>"_q.arg(line));
 			}
+			if (run->onStateChanged) run->onStateChanged(false, false);
 		});
 		return;
 	}
-	auto line = u"Готово: %1 из %2 аккаунтов в %3"_q
-		.arg(run->exported.size())
-		.arg(run->accounts.size())
-		.arg(QDir::toNativeSeparators(run->path));
+	auto line = run->stopped
+		? u"Экспорт остановлен: успешно сохранено %1 из %2 аккаунтов в %3"_q
+			.arg(run->exported.size())
+			.arg(run->accounts.size())
+			.arg(QDir::toNativeSeparators(run->path))
+		: u"Готово: экспортировано %1 из %2 аккаунтов в %3"_q
+			.arg(run->exported.size())
+			.arg(run->accounts.size())
+			.arg(QDir::toNativeSeparators(run->path));
 	if (!run->errors.isEmpty()) {
 		line += u"\nОшибки:\n"_q + run->errors.join('\n');
 	}
 	process->succeed(line);
+	run->log(u"<font color=\"#4CAF50\">[Готово] %1</font>"_q.arg(line));
+	if (run->onStateChanged) run->onStateChanged(false, false);
+}
+
+void StopExport(const std::shared_ptr<ExportRun> &run) {
+	if (run->stopped || run->finished) return;
+	run->stopped = true;
+	run->paused = false;
+	if (run->nextTimer.isActive()) {
+		run->nextTimer.cancel();
+	}
+	run->log(u"<font color=\"#FFA726\">[Остановить] Экспорт остановлен пользователем. Сохраняем сессии...</font>"_q);
+	FinishExport(run);
 }
 
 void ExportNext(std::shared_ptr<ExportRun> run, size_t index) {
+	if (run->stopped) {
+		FinishExport(run);
+		return;
+	}
+	if (run->paused) {
+		run->currentIndex = index;
+		return;
+	}
 	if (index >= run->accounts.size()) {
 		FinishExport(run);
 		return;
 	}
+	run->currentIndex = index;
 	const auto &process = run->process;
-	const auto label = u"[%1/%2] %3"_q
-		.arg(index + 1)
-		.arg(run->accounts.size())
-		.arg(run->labels[index]);
 	process->progress(int(index) + 1, int(run->accounts.size()));
+	if (run->onProgress) {
+		run->onProgress(int(index) + 1, int(run->accounts.size()), int(run->exported.size()), int(run->errors.size()));
+	}
+
 	const auto next = [=] {
+		run->currentIndex = index + 1;
+		if (run->stopped) {
+			FinishExport(run);
+			return;
+		}
 		if (index + 1 >= run->accounts.size()) {
 			ExportNext(run, index + 1);
 			return;
 		}
+		if (run->paused) {
+			return;
+		}
 		const auto pause = kMinPauseMs
 			+ base::RandomIndex(kMaxPauseMs - kMinPauseMs);
-		QTimer::singleShot(pause, [=] { ExportNext(run, index + 1); });
+		run->log(u"<font color=\"#78909C\">Пауза перед следующим аккаунтом %1с...</font>"_q
+			.arg(double(pause) / 1000.0, 0, 'f', 1));
+		run->nextTimer.setCallback([=] {
+			if (!run->paused && !run->stopped) {
+				ExportNext(run, index + 1);
+			}
+		});
+		run->nextTimer.callOnce(pause);
 	};
+
 	const auto fail = [=](const QString &error) {
-		process->log(label + u": ошибка - "_q + error);
+		run->log(u"<font color=\"#FF5252\"><b>[%1/%2]</b> %3: ошибка - %4</font>"_q
+			.arg(index + 1)
+			.arg(run->accounts.size())
+			.arg(run->labels[index])
+			.arg(error));
 		run->errors.push_back(run->labels[index] + u": "_q + error);
+		if (run->onProgress) {
+			run->onProgress(int(index) + 1, int(run->accounts.size()), int(run->exported.size()), int(run->errors.size()));
+		}
 		next();
 	};
+
 	const auto account = run->accounts[index].get();
 	if (!account || !account->sessionExists()) {
 		fail(u"аккаунт больше не залогинен"_q);
 		return;
 	}
 
-	// If this account already has an active, valid stored Android session in Session Vault,
-	// reuse it directly so we don't spam duplicate sessions or trigger 2FA again.
 	namespace Sessions = Core::GgtgSessions;
 	const auto userId = QString::number(account->session().userId().bare);
 	const auto vault = Sessions::StoredForUser(Sessions::LoadVault(), userId);
 	const auto existingAndroid = [&]() -> const Sessions::StoredSession* {
 		if (run->options.viaSync) {
-			return nullptr; // Always mint a fresh session for sync transfer
+			return nullptr;
 		}
 		for (const auto &item : vault) {
 			if (item.state == u"ok"_q
@@ -556,27 +694,43 @@ void ExportNext(std::shared_ptr<ExportRun> run, size_t index) {
 				run->exported.push_back(entry);
 
 				const auto devName = existingAndroid->device.value(u"deviceModel"_q).toString();
-				process->log(label + u": использована готовая сессия ("_q
-					+ (devName.isEmpty() ? u"Android"_q : devName) + u")"_q);
+				run->log(u"<font color=\"#4CAF50\"><b>[%1/%2]</b> %3: использована готовая сессия (%4)</font>"_q
+					.arg(index + 1)
+					.arg(run->accounts.size())
+					.arg(run->labels[index])
+					.arg(devName.isEmpty() ? u"Android"_q : devName));
+				if (run->onProgress) {
+					run->onProgress(int(index) + 1, int(run->accounts.size()), int(run->exported.size()), int(run->errors.size()));
+				}
 				next();
 				return;
 			}
 		}
 	}
 
-	process->log(label + u": создаём новую сессию..."_q);
+	run->log(u"<font color=\"#40C4FF\"><b>[%1/%2]</b> %3: создаём новую сессию...</font>"_q
+		.arg(index + 1)
+		.arg(run->accounts.size())
+		.arg(run->labels[index]));
 	const auto weakAccount = run->accounts[index];
 	const auto targetDevice = Settings::DeviceOverrideFromJson(run->metas[index].value(u"device"_q).toObject());
 	Main::DuplicateSessionTracked(account, [=](
 			Fn<void(QString password)> submit,
 			Fn<void()> cancel) {
-		process->log(label + u": нужен пароль 2FA, ждём ввода..."_q);
+		run->log(u"<font color=\"#FFA726\"><b>[%1/%2]</b> %3: требуется пароль 2FA, ожидание ввода...</font>"_q
+			.arg(index + 1)
+			.arg(run->accounts.size())
+			.arg(run->labels[index]));
 		if (weakAccount) {
 			AskTwoFactor(run->show, run->labels[index], submit, cancel);
 		} else {
 			cancel();
 		}
 	}, [=](QString error, QByteArray serializedAuth, uint64 hash) {
+		if (run->stopped) {
+			FinishExport(run);
+			return;
+		}
 		if (!error.isEmpty()) {
 			fail(error);
 			return;
@@ -587,9 +741,6 @@ void ExportNext(std::shared_ptr<ExportRun> run, size_t index) {
 			return;
 		}
 		auto entry = run->metas[index];
-		// The 2FA password may have been typed by hand during the
-		// duplication (and stored by it) after the meta was snapshotted -
-		// take the current stored one so it lands in the file.
 		if (run->options.twoFactor && weakAccount) {
 			const auto password = weakAccount.get()->twoFactorPassword();
 			if (!password.isEmpty()) {
@@ -605,42 +756,217 @@ void ExportNext(std::shared_ptr<ExportRun> run, size_t index) {
 			item["key"] = QString::fromLatin1(key.toHex());
 			keys.push_back(item);
 		}
+		const auto isIos = Settings::IsIosSession(targetDevice);
 		entry["keys"] = keys;
-		// The session is already born as an authentic target device (Android/iPhone)
-		// with its own independent authorization keys - no second handoff needed.
-		entry["handoff"] = false;
+		entry["handoff"] = !isIos;
 		run->exported.push_back(entry);
 
-		// Also store the newly generated exported session into Session Vault so it is kept, signed, and switchable
 		if (const auto alive = weakAccount.get()) {
 			auto storeErr = QString();
-			Settings::StoreSessionKey(
+			const auto sNote = !run->options.sessionNote.isEmpty()
+				? run->options.sessionNote
+				: (u"экспорт для "_q + (Settings::IsIosSession(targetDevice) ? u"iOS"_q : u"Android"_q));
+			const auto stored = Settings::StoreSessionKey(
 				alive,
 				u"exported"_q,
-				u"экспорт для "_q + (Settings::IsIosSession(targetDevice) ? u"iOS"_q : u"Android"_q),
+				sNote,
 				serializedAuth,
 				hash,
 				&storeErr,
 				targetDevice);
+			(void)stored;
 		}
 
-		process->log(label + u": готово"_q);
-		// What Telegram actually recorded for the new session (it is written
-		// once, when the session is made): the device, the app and its
-		// version, so a wrong identity is seen at once, not on the phone.
+		run->log(u"<font color=\"#4CAF50\"><b>[%1/%2]</b> %3: сессия успешно создана!</font>"_q
+			.arg(index + 1)
+			.arg(run->accounts.size())
+			.arg(run->labels[index]));
+		if (run->onProgress) {
+			run->onProgress(int(index) + 1, int(run->accounts.size()), int(run->exported.size()), int(run->errors.size()));
+		}
+
 		if (const auto alive = weakAccount.get()) {
 			Main::FetchSessionDescription(alive, hash, [=](QString text) {
 				if (!text.isEmpty()) {
-					process->log(label + u": в Telegram сессия записана как: "_q
-						+ text);
+					run->log(u"<font color=\"#90A4AE\">[%1/%2] %3: Telegram записал сессию как: %4</font>"_q
+						.arg(index + 1)
+						.arg(run->accounts.size())
+						.arg(run->labels[index])
+						.arg(text));
 					Core::GgtgLog::Info(
 						u"Экспорт"_q,
-						label + u": сессия записана как: "_q + text);
+						run->labels[index] + u": сессия записана как: "_q + text);
 				}
 			});
 		}
 		next();
 	}, targetDevice, !Settings::IsIosSession(targetDevice));
+}
+
+void ShowExportBox(std::shared_ptr<ExportRun> run) {
+	if (!run || !run->show) return;
+	run->show->show(Box([=](not_null<Ui::GenericBox*> box) {
+		box->setTitle(rpl::single(u"Экспорт аккаунтов для Android"_q));
+		box->setWidth(st::boxWideWidth + style::ConvertScale(120));
+		box->setMaxHeight(st::boxMaxListHeight);
+
+		const auto content = box->verticalLayout();
+
+		// Top summary card
+		const auto cardInfo = content->add(
+			object_ptr<Ggtg::CardBox>(content, style::margins(14, 10, 14, 6)));
+		const auto inInfo = cardInfo->inner();
+
+		const auto summaryLabel = inInfo->add(
+			object_ptr<Ui::FlatLabel>(
+				inInfo,
+				rpl::single(u"Подготовка к экспорту..."_q),
+				st::boxLabel));
+
+		const auto statusLabel = inInfo->add(
+			object_ptr<Ui::FlatLabel>(
+				inInfo,
+				rpl::single(u"Выполняется экспорт аккаунтов..."_q),
+				st::boxLabel));
+		statusLabel->setTextColorOverride(st::windowSubTextFg->c);
+
+		// Log Card
+		Ui::AddSkip(content, style::ConvertScale(4));
+		const auto cardLog = content->add(
+			object_ptr<Ggtg::CardBox>(content, style::margins(14, 8, 14, 6)));
+		const auto inLog = cardLog->inner();
+
+		const auto logField = inLog->add(
+			object_ptr<Ui::InputField>(
+				inLog,
+				ExportLogFieldStyle(),
+				Ui::InputField::Mode::MultiLine,
+				rpl::single(u"Лог экспорта..."_q),
+				QString()),
+			style::margins(0, 0, 0, 0));
+		if (const auto edit = logField->rawTextEdit()) {
+			edit->setReadOnly(true);
+			edit->setStyleSheet(u"background-color: #12161A; border-radius: 6px; padding: 6px; font-family: monospace;"_q);
+			if (!run->logHistoryHtml.isEmpty()) {
+				edit->setHtml(run->logHistoryHtml.join(u"<br>"_q));
+				auto cursor = edit->textCursor();
+				cursor.movePosition(QTextCursor::End);
+				edit->setTextCursor(cursor);
+			}
+		}
+
+		// Action buttons row (Пауза / Продолжить, Остановить)
+		Ui::AddSkip(content, style::ConvertScale(4));
+		const auto actionRow = content->add(object_ptr<Ui::RpWidget>(content));
+		actionRow->resize(actionRow->width(), style::ConvertScale(42));
+
+		const auto pauseBtn = Ui::CreateChild<Ui::RoundButton>(
+			actionRow,
+			rpl::single(run->paused ? u"Продолжить"_q : u"Пауза"_q),
+			st::defaultBoxButton);
+		pauseBtn->setTextTransform(Ui::RoundButtonTextTransform::NoTransform);
+
+		const auto stopBtn = Ui::CreateChild<Ui::RoundButton>(
+			actionRow,
+			rpl::single(u"Остановить"_q),
+			st::defaultBoxButton);
+		stopBtn->setTextTransform(Ui::RoundButtonTextTransform::NoTransform);
+
+		actionRow->widthValue() | rpl::on_next([=](int w) {
+			if (w <= 0) return;
+			const auto btnW = (w - style::ConvertScale(8)) / 2;
+			pauseBtn->resizeToWidth(btnW);
+			pauseBtn->moveToLeft(0, style::ConvertScale(2));
+			stopBtn->resizeToWidth(btnW);
+			stopBtn->moveToLeft(btnW + style::ConvertScale(8), style::ConvertScale(2));
+		}, actionRow->lifetime());
+
+		const auto weakLogField = QPointer<Ui::InputField>(logField);
+		const auto appendHtml = [weakLogField](const QString &html) {
+			if (const auto field = weakLogField.data()) {
+				if (const auto edit = field->rawTextEdit()) {
+					edit->append(html);
+					auto cursor = edit->textCursor();
+					cursor.movePosition(QTextCursor::End);
+					edit->setTextCursor(cursor);
+				}
+			}
+		};
+
+		const auto weakSummaryLabel = QPointer<Ui::FlatLabel>(summaryLabel);
+		const auto weakStatusLabel = QPointer<Ui::FlatLabel>(statusLabel);
+		const auto weakPauseBtn = QPointer<Ui::RoundButton>(pauseBtn);
+		const auto weakStopBtn = QPointer<Ui::RoundButton>(stopBtn);
+		const auto weakActionRow = QPointer<Ui::RpWidget>(actionRow);
+
+		const auto updateProgress = [weakSummaryLabel](int cur, int total, int success, int errs) {
+			if (const auto lbl = weakSummaryLabel.data()) {
+				lbl->setText(u"Экспорт: %1 из %2 аккаунтов (успешно: %3, ошибок: %4)"_q
+					.arg(cur).arg(total).arg(success).arg(errs));
+			}
+		};
+
+		const auto updateState = [weakStatusLabel, weakPauseBtn, weakStopBtn, weakActionRow, run](bool running, bool paused) {
+			if (const auto row = weakActionRow.data()) {
+				if (!running) {
+					row->hide();
+				}
+			}
+			if (const auto btn = weakPauseBtn.data()) {
+				if (!running) {
+					btn->setEnabled(false);
+					btn->hide();
+				} else {
+					btn->setText(rpl::single(paused ? u"Продолжить"_q : u"Пауза"_q));
+				}
+			}
+			if (const auto btn = weakStopBtn.data()) {
+				if (!running) {
+					btn->setEnabled(false);
+					btn->hide();
+				}
+			}
+			if (const auto lbl = weakStatusLabel.data()) {
+				if (!running) {
+					lbl->setText(run->exported.isEmpty()
+						? u"Экспорт завершён с ошибками"_q
+						: u"Экспорт успешно завершён!"_q);
+					lbl->setTextColorOverride(run->exported.isEmpty()
+						? st::boxTextFgError->c
+						: st::boxTextFgGood->c);
+				} else if (paused) {
+					lbl->setText(u"Экспорт приостановлен (нажмите «Продолжить»)"_q);
+					lbl->setTextColorOverride(QColor(255, 179, 0));
+				} else {
+					lbl->setText(u"Выполняется экспорт аккаунтов..."_q);
+					lbl->setTextColorOverride(st::windowSubTextFg->c);
+				}
+			}
+		};
+
+		// Set initial state
+		updateProgress(int(run->currentIndex) + 1, int(run->accounts.size()), int(run->exported.size()), int(run->errors.size()));
+		updateState(!run->finished, run->paused);
+
+		// Connect callbacks
+		run->onLog = appendHtml;
+		run->onProgress = updateProgress;
+		run->onStateChanged = updateState;
+
+		pauseBtn->setClickedCallback([=] {
+			PauseExport(run);
+		});
+
+		stopBtn->setClickedCallback([=] {
+			StopExport(run);
+		});
+
+		box->addButton(rpl::single(u"Скрыть"_q), [=] {
+			box->closeBox();
+		});
+
+		Ggtg::AddCloseCross(box);
+	}));
 }
 
 void StartExport(
@@ -683,9 +1009,9 @@ void StartExport(
 		: u"Экспорт для Android (%1)"_q.arg(accounts.size());
 	run->process = Core::App().processes().start(
 		title,
-		nullptr,
+		[run] { ShowExportBox(run); },
 		Core::ProcessKind::Export);
-	ShowProcessBox(show, run->process->id());
+	ShowExportBox(run);
 	ExportNext(run, 0);
 }
 
@@ -841,6 +1167,17 @@ object_ptr<Ui::BoxContent> MakeGgtgExportBox(
 			ShowApiOverrideBox(box->uiShow());
 		});
 		Ui::AddSkip(content);
+
+		const auto sessionNoteField = box->addRow(
+			object_ptr<Ui::InputField>(
+				box,
+				st::defaultInputField,
+				rpl::single(u"Подпись сессий (где используется)"_q),
+				QString()),
+			st::boxRowPadding);
+		sessionNoteField->setPlaceholder(rpl::single(u"Например: Телефон мастера, Android Xiaomi, Рассылка #1"_q));
+
+		Ui::AddSkip(content);
 		Ui::AddSubsectionTitle(content, rpl::single(u"Аккаунты"_q));
 		AddAccountPicker(
 			box,
@@ -888,6 +1225,7 @@ object_ptr<Ui::BoxContent> MakeGgtgExportBox(
 				}
 				auto exportOptions = ExportOptions();
 				exportOptions.viaSync = viaSync;
+				exportOptions.sessionNote = sessionNoteField->getLastText().trimmed();
 				StartExport(
 					box->uiShow(),
 					std::move(chosen),
