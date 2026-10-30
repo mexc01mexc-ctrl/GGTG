@@ -120,17 +120,17 @@ class GgtgAccountManagerActivity : BaseFragment() {
         val chipScroll = HorizontalScrollView(context).apply { isHorizontalScrollBarEnabled = false }
         val chipRow = LinearLayout(context).apply {
             orientation = LinearLayout.HORIZONTAL
-            setPadding(dp(12f), dp(12f), dp(12f), dp(6f))
+            setPadding(dp(10f), dp(8f), dp(10f), dp(6f))
         }
         chipScroll.addView(chipRow)
         chips = chipRow
         root.addView(chipScroll, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT))
         // the slim line the chips fold into; a tap unfolds them
         val slim = TextView(context).apply {
-            textSize = 14f
+            textSize = 13.5f
             setTypeface(null, Typeface.BOLD)
             setTextColor(color(Theme.key_windowBackgroundWhiteBlueText4))
-            setPadding(dp(16f), dp(10f), dp(16f), dp(6f))
+            setPadding(dp(14f), dp(8f), dp(14f), dp(6f))
             visibility = View.GONE
             setOnClickListener { chipsPinnedOpen = true; foldChips(false) }
         }
@@ -142,16 +142,25 @@ class GgtgAccountManagerActivity : BaseFragment() {
         val searchCard = LinearLayout(context).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
-            background = rounded(color(Theme.key_windowBackgroundWhite), dp(12f).toFloat())
-            setPadding(dp(14f), dp(2f), dp(14f), dp(2f))
+            background = rounded(color(Theme.key_windowBackgroundWhite), dp(10f).toFloat())
+            setPadding(dp(10f), 0, dp(8f), 0)
         }
+        val searchIcon = TextView(context).apply {
+            GgtgUi.withLeadingIcon(this, R.drawable.msg_search, color(Theme.key_windowBackgroundWhiteGrayIcon), 16f, 0f)
+        }
+        searchCard.addView(searchIcon, LinearLayout.LayoutParams(dp(20f), dp(20f)).apply {
+            gravity = Gravity.CENTER_VERTICAL
+            rightMargin = dp(6f)
+        })
+
         val search = EditText(context).apply {
-            hint = "Поиск: имя, @username, телефон, ID, папка"
+            hint = "Поиск: имя, @username, номер, ID, папка"
             setSingleLine()
             background = null
+            textSize = 13.5f
             setTextColor(color(Theme.key_windowBackgroundWhiteBlackText))
             setHintTextColor(color(Theme.key_windowBackgroundWhiteHintText))
-            setPadding(0, dp(10f), 0, dp(10f))
+            setPadding(0, dp(8f), 0, dp(8f))
             addTextChangedListener(object : TextWatcher {
                 override fun beforeTextChanged(s: CharSequence?, a: Int, b: Int, c: Int) {}
                 override fun onTextChanged(s: CharSequence?, a: Int, b: Int, c: Int) {}
@@ -167,14 +176,14 @@ class GgtgAccountManagerActivity : BaseFragment() {
         }
         sortBtn = sort
         searchCard.addView(sort)
-        root.addView(searchCard, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT, 12f, 0f, 12f, 0f))
+        root.addView(searchCard, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT, 10f, 0f, 10f, 0f))
 
         // selection bar, in a card
         val bar = LinearLayout(context).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
-            background = rounded(color(Theme.key_windowBackgroundWhite), dp(12f).toFloat())
-            setPadding(dp(10f), dp(2f), dp(6f), dp(2f))
+            background = rounded(color(Theme.key_windowBackgroundWhite), dp(10f).toFloat())
+            setPadding(dp(8f), dp(2f), dp(6f), dp(2f))
         }
         selectionBar = bar
         val master = GgtgUi.checkBox(context)
@@ -184,9 +193,11 @@ class GgtgAccountManagerActivity : BaseFragment() {
             if (master.isChecked) selected.addAll(shown) else selected.removeAll(shown.toSet())
             rebuildRows()
         }
-        bar.addView(master)
+        bar.addView(master, LinearLayout.LayoutParams(LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT).apply {
+            rightMargin = dp(4f)
+        })
         val count = TextView(context).apply {
-            textSize = 14f
+            textSize = 13.5f
             setTextColor(color(Theme.key_windowBackgroundWhiteBlackText))
         }
         countView = count
@@ -196,12 +207,12 @@ class GgtgAccountManagerActivity : BaseFragment() {
         bar.addView(moveBtn)
         bar.addView(trashBtn)
         bar.addView(barButton(context, "Действия", color(Theme.key_featuredStickers_addButton)) { bulk.show(selectedInOrder()) })
-        root.addView(bar, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT, 12f, 8f, 12f, 4f))
+        root.addView(bar, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT, 10f, 4f, 10f, 2f))
 
         val list = LinearLayout(context).apply { orientation = LinearLayout.VERTICAL }
         rows = list
         scroll.addView(list, LayoutHelper.createScroll(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT, Gravity.TOP))
-        root.addView(scroll, LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, 0, 1f).apply { topMargin = dp(4f); bottomMargin = dp(8f) })
+        root.addView(scroll, LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, 0, 1f).apply { topMargin = dp(2f); bottomMargin = dp(6f) })
         listScroll = scroll
         // Folded only when enough of the list is left that the room it gives back cannot pull the end of the
         // list under the viewport (that would scroll it back and unfold the chips again: a flicker).
@@ -301,32 +312,60 @@ class GgtgAccountManagerActivity : BaseFragment() {
         val trashCount = allSlots().count { trashedOf(it) }
         if (trashCount == 0) viewTrash = false
         if (filterFolder != null && filterFolder !in counts) filterFolder = null
-        fun chip(title: String, n: Int, active: Boolean, onClick: () -> Unit, onLong: (() -> Unit)? = null, trashIcon: Boolean = false) {
+
+        val currentSlot = UserConfig.selectedAccount
+        val currentFolder = if (currentSlot >= 0 && UserConfig.getInstance(currentSlot).isClientActivated) {
+            folderOf(currentSlot)
+        } else ""
+
+        fun chip(
+            title: String,
+            n: Int,
+            active: Boolean,
+            isCurrentFolder: Boolean = false,
+            onClick: () -> Unit,
+            onLong: (() -> Unit)? = null,
+            trashIcon: Boolean = false
+        ) {
             val v = TextView(context).apply {
                 text = "$title  $n"
-                textSize = 14f
-                setTypeface(null, if (active) Typeface.BOLD else Typeface.NORMAL)
-                setTextColor(if (active) 0xFFFFFFFF.toInt() else color(Theme.key_windowBackgroundWhiteBlackText))
-                setPadding(dp(14f), dp(8f), dp(14f), dp(8f))
+                textSize = 13.5f
+                setTypeface(null, if (active || isCurrentFolder) Typeface.BOLD else Typeface.NORMAL)
+                setTextColor(when {
+                    active -> 0xFFFFFFFF.toInt()
+                    isCurrentFolder -> color(Theme.key_featuredStickers_addButton)
+                    else -> color(Theme.key_windowBackgroundWhiteBlackText)
+                })
+                setPadding(dp(12f), dp(6.5f), dp(12f), dp(6.5f))
                 background = rounded(
-                    if (active) color(Theme.key_featuredStickers_addButton) else color(Theme.key_windowBackgroundWhite),
-                    dp(16f).toFloat())
+                    fill = if (active) color(Theme.key_featuredStickers_addButton) else color(Theme.key_windowBackgroundWhite),
+                    radius = dp(14f).toFloat(),
+                    stroke = if (!active && isCurrentFolder) dp(1.5f) else 0,
+                    strokeColor = color(Theme.key_featuredStickers_addButton)
+                )
                 setOnClickListener { onClick() }
                 if (onLong != null) setOnLongClickListener { onLong(); true }
                 if (trashIcon) {
                     // Telegram's trash icon, in the chip's own text color
-                    GgtgUi.withTrashIcon(this, if (active) 0xFFFFFFFF.toInt() else color(Theme.key_windowBackgroundWhiteBlackText), 16f)
-                    compoundDrawablePadding = dp(6f)
+                    GgtgUi.withTrashIcon(this, if (active) 0xFFFFFFFF.toInt() else color(Theme.key_windowBackgroundWhiteBlackText), 15f)
+                    compoundDrawablePadding = dp(5f)
                 }
             }
-            row.addView(v, LinearLayout.LayoutParams(LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT).apply { rightMargin = dp(8f) })
+            row.addView(v, LinearLayout.LayoutParams(LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT).apply { rightMargin = dp(6f) })
         }
-        chip("ALL", counts.values.sum(), !viewTrash && filterFolder == null, { viewTrash = false; filterFolder = null; selected.clear(); rebuildAll() })
+        chip("ALL", counts.values.sum(), !viewTrash && filterFolder == null, false, { viewTrash = false; filterFolder = null; selected.clear(); rebuildAll() })
         for ((folder, n) in counts) {
-            chip(if (folder.isEmpty()) "Без папки" else folder, n, !viewTrash && filterFolder == folder, { viewTrash = false; filterFolder = folder; rebuildAll() },
-                if (folder.isEmpty()) null else { { GgtgAccountMenus.showFolderMenu(context, folder) { rebuildAll() } } })
+            val isCurr = (folder == currentFolder)
+            chip(
+                title = if (folder.isEmpty()) "Без папки" else folder,
+                n = n,
+                active = !viewTrash && filterFolder == folder,
+                isCurrentFolder = isCurr,
+                onClick = { viewTrash = false; filterFolder = folder; rebuildAll() },
+                onLong = if (folder.isEmpty()) null else { { GgtgAccountMenus.showFolderMenu(context, folder) { rebuildAll() } } }
+            )
         }
-        if (trashCount > 0) chip("Корзина", trashCount, viewTrash, { viewTrash = true; filterFolder = null; selected.clear(); rebuildAll() }, trashIcon = true)
+        if (trashCount > 0) chip("Корзина", trashCount, viewTrash, false, { viewTrash = true; filterFolder = null; selected.clear(); rebuildAll() }, trashIcon = true)
     }
 
     // The chips and the slim line: one of them is on top, the other is hidden.
@@ -452,10 +491,20 @@ class GgtgAccountManagerActivity : BaseFragment() {
     private fun folderHeader(context: Context, folder: String, slots: List<Int>, lostCount: Int = 0, open: Boolean = false) = LinearLayout(context).apply {
         orientation = LinearLayout.HORIZONTAL
         gravity = Gravity.CENTER_VERTICAL
-        background = rounded(color(Theme.key_windowBackgroundWhite), dp(12f).toFloat())
-        setPadding(dp(12f), dp(12f), dp(12f), dp(12f))
+        val currentSlot = UserConfig.selectedAccount
+        val hasActiveAccount = currentSlot >= 0 && slots.contains(currentSlot)
+        val strokeWidth = if (hasActiveAccount) dp(1.5f) else 0
+        val strokeColor = color(Theme.key_featuredStickers_addButton)
+
+        background = rounded(
+            color(Theme.key_windowBackgroundWhite),
+            dp(10f).toFloat(),
+            strokeWidth,
+            strokeColor
+        )
+        setPadding(dp(10f), dp(8f), dp(10f), dp(8f))
         layoutParams = LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT).apply {
-            leftMargin = dp(12f); rightMargin = dp(12f); topMargin = dp(6f)
+            leftMargin = dp(10f); rightMargin = dp(10f); topMargin = dp(4f)
         }
         val picked = slots.count { it in selected }
         val box = GgtgUi.checkBox(context, slots.isNotEmpty() && picked == slots.size).apply {
@@ -464,25 +513,34 @@ class GgtgAccountManagerActivity : BaseFragment() {
                 rebuildRows()
             }
         }
-        addView(box)
+        addView(box, LinearLayout.LayoutParams(LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT).apply {
+            rightMargin = dp(4f)
+        })
+
+        val iconColor = if (hasActiveAccount) color(Theme.key_featuredStickers_addButton) else color(Theme.key_windowBackgroundWhiteGrayIcon)
         addView(LinearLayout(context).apply {
             orientation = LinearLayout.VERTICAL
-            addView(GgtgUi.withLeadingIcon(TextView(context), R.drawable.msg_folders, color(Theme.key_windowBackgroundWhiteGrayIcon), 18f, 8f).apply {
-                text = folder; textSize = 16f
+            addView(GgtgUi.withLeadingIcon(TextView(context), R.drawable.msg_folders, iconColor, 16f, 6f).apply {
+                text = folder; textSize = 14.5f
                 setTypeface(null, Typeface.BOLD)
                 setTextColor(color(Theme.key_windowBackgroundWhiteBlackText))
             })
             val totalCount = slots.size + lostCount
-            val sub = "$totalCount аккаунт(ов)" + (if (picked > 0) " · выбрано $picked" else "") + (if (lostCount > 0) " · разрывов: $lostCount" else "")
+            var sub = "$totalCount аккаунт(ов)" + (if (picked > 0) " · выбрано $picked" else "") + (if (lostCount > 0) " · разрывов: $lostCount" else "")
+            if (hasActiveAccount) {
+                sub += " · активный аккаунт"
+            }
             addView(TextView(context).apply {
                 text = sub
-                textSize = 13f
-                setTextColor(color(Theme.key_windowBackgroundWhiteGrayText))
+                textSize = 12f
+                setTextColor(if (hasActiveAccount) color(Theme.key_featuredStickers_addButton) else color(Theme.key_windowBackgroundWhiteGrayText))
             })
         }, LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f))
+
         addView(TextView(context).apply {
-            text = if (open) "▾" else "▸"; textSize = 18f
-            setTextColor(color(Theme.key_windowBackgroundWhiteGrayIcon))
+            text = if (open) "▾" else "▸"; textSize = 16f
+            setTextColor(if (hasActiveAccount) color(Theme.key_featuredStickers_addButton) else color(Theme.key_windowBackgroundWhiteGrayIcon))
+            setPadding(dp(4f), 0, dp(4f), 0)
         })
         setOnClickListener { if (open) expanded.remove(folder) else expanded.add(folder); rebuildRows() }
         setOnLongClickListener { GgtgAccountMenus.showFolderMenu(context, folder) { rebuildAll() }; true }
@@ -492,95 +550,107 @@ class GgtgAccountManagerActivity : BaseFragment() {
         val hasBackup = GgtgSessions.hasBackup(entry.userId)
         val card = LinearLayout(context).apply {
             orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
             background = rounded(
                 color(Theme.key_windowBackgroundWhite),
-                dp(14f).toFloat(),
+                dp(10f).toFloat(),
                 dp(1.5f),
                 color(Theme.key_text_RedRegular)
             )
-            setPadding(dp(10f), dp(12f), dp(12f), dp(12f))
+            setPadding(dp(8f), dp(8f), dp(10f), dp(8f))
             layoutParams = LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT).apply {
-                leftMargin = dp(12f); rightMargin = dp(12f); topMargin = dp(6f)
+                leftMargin = dp(10f); rightMargin = dp(10f); topMargin = dp(4f)
             }
         }
 
         val avatar = FrameLayout(context).apply {
-            background = rounded(0x26FF3B30.toInt(), dp(23f).toFloat())
+            background = rounded(0x26FF3B30.toInt(), dp(19f).toFloat())
             val icon = TextView(context).apply {
                 text = "!"
-                textSize = 20f
+                textSize = 17f
                 gravity = Gravity.CENTER
                 setTypeface(null, Typeface.BOLD)
                 setTextColor(color(Theme.key_text_RedRegular))
             }
             addView(icon, LayoutHelper.createFrame(LayoutHelper.MATCH_PARENT, LayoutHelper.MATCH_PARENT, Gravity.CENTER))
         }
-        card.addView(avatar, LinearLayout.LayoutParams(dp(46f), dp(46f)).apply {
-            gravity = Gravity.CENTER_VERTICAL; rightMargin = dp(12f)
+        card.addView(avatar, LinearLayout.LayoutParams(dp(38f), dp(38f)).apply {
+            gravity = Gravity.CENTER_VERTICAL; rightMargin = dp(10f); leftMargin = dp(4f)
         })
 
         val texts = LinearLayout(context).apply { orientation = LinearLayout.VERTICAL }
         val name = entry.name.ifEmpty { "Без имени" }
 
-        texts.addView(LinearLayout(context).apply {
+        val headerRow = LinearLayout(context).apply {
             orientation = LinearLayout.HORIZONTAL
-            addView(TextView(context).apply {
-                text = name; textSize = 16f
-                setTypeface(null, Typeface.BOLD)
-                setTextColor(color(Theme.key_windowBackgroundWhiteBlackText))
-            }, LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f))
-            addView(pill(context, "Сессия разорвана", 0xFFFFFFFF.toInt(), color(Theme.key_text_RedRegular)),
-                LinearLayout.LayoutParams(LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT).apply {
-                    leftMargin = dp(6f); gravity = Gravity.CENTER_VERTICAL
-                })
-        }, LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT))
-
-        val handle = if (entry.username.isNotEmpty()) "@${entry.username}" else "без юзернейма"
-        texts.addView(TextView(context).apply {
-            text = handle; textSize = 14f
-            setTextColor(if (entry.username.isEmpty()) color(Theme.key_windowBackgroundWhiteGrayText) else color(Theme.key_windowBackgroundWhiteBlueText4))
-        })
-
-        val phone = if (entry.phone.isNotEmpty()) (if (entry.phone.startsWith("+")) entry.phone else "+${entry.phone}") else "номер скрыт"
-        val folder = entry.folder
-        texts.addView(TextView(context).apply {
-            text = "$phone  ·  ID ${entry.userId}  ·  " + if (folder.isEmpty()) "без папки" else "папка: $folder"
-            textSize = 13f
-            setTextColor(color(Theme.key_windowBackgroundWhiteGrayText))
-            setPadding(0, dp(3f), 0, 0)
-        })
-
-        val reasonTitle = GgtgSessionLog.reasonTitle(entry.reason)
-        texts.addView(GgtgUi.withLeadingIcon(TextView(context), R.drawable.msg_warning, color(Theme.key_text_RedRegular), 14f, 6f).apply {
-            text = reasonTitle
-            textSize = 13f
-            setTextColor(color(Theme.key_text_RedRegular))
-            setPadding(0, dp(2f), 0, 0)
-        })
-
-        if (hasBackup) {
-            texts.addView(GgtgUi.withLeadingIcon(TextView(context), R.drawable.msg_retry, color(Theme.key_featuredStickers_addButton), 14f, 6f).apply {
-                text = "Есть резервная сессия · нажмите для переключения"
-                textSize = 13f
-                setTypeface(null, Typeface.BOLD)
-                setTextColor(color(Theme.key_featuredStickers_addButton))
-                setPadding(0, dp(2f), 0, 0)
-            })
+            gravity = Gravity.CENTER_VERTICAL
         }
+        headerRow.addView(TextView(context).apply {
+            text = name; textSize = 15f
+            setTypeface(null, Typeface.BOLD)
+            setTextColor(color(Theme.key_windowBackgroundWhiteBlackText))
+            setSingleLine(true)
+            ellipsize = android.text.TextUtils.TruncateAt.END
+        }, LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f))
 
-        card.addView(texts, LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f))
+        headerRow.addView(pill(context, "Разорвана", 0xFFFFFFFF.toInt(), color(Theme.key_text_RedRegular)),
+            LinearLayout.LayoutParams(LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT).apply {
+                leftMargin = dp(6f)
+            })
 
-        card.addView(TextView(context).apply {
-            text = "i"; textSize = 15f; gravity = Gravity.CENTER
+        headerRow.addView(TextView(context).apply {
+            text = "i"; textSize = 13.5f; gravity = Gravity.CENTER
             setTypeface(null, Typeface.BOLD)
             setTextColor(color(Theme.key_text_RedRegular))
-            background = rounded(0, dp(13f).toFloat(), dp(1.5f), color(Theme.key_text_RedRegular))
+            background = rounded(0, dp(11f).toFloat(), dp(1.5f), color(Theme.key_text_RedRegular))
             setOnClickListener { showLostAccountDialog(context, entry) }
-        }, LinearLayout.LayoutParams(dp(26f), dp(26f)).apply { gravity = Gravity.CENTER_VERTICAL; leftMargin = dp(8f) })
+        }, LinearLayout.LayoutParams(dp(22f), dp(22f)).apply { gravity = Gravity.CENTER_VERTICAL; leftMargin = dp(6f) })
+        texts.addView(headerRow, LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT))
 
-        card.setOnClickListener {
-            showLostAccountDialog(context, entry)
+        val phone = if (entry.phone.isNotEmpty()) (if (entry.phone.startsWith("+")) entry.phone else "+${entry.phone}") else "номер скрыт"
+        val handle = if (entry.username.isNotEmpty()) "@${entry.username}" else "без юзернейма"
+        val subRow = LinearLayout(context).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            setPadding(0, dp(2f), 0, 0)
         }
+        subRow.addView(TextView(context).apply {
+            text = "$phone  ·  $handle"
+            textSize = 12.5f
+            setTextColor(color(Theme.key_windowBackgroundWhiteGrayText))
+        })
+        texts.addView(subRow, LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT))
+
+        val reasonTitle = GgtgSessionLog.reasonTitle(entry.reason)
+        val techRow = LinearLayout(context).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            setPadding(0, dp(2f), 0, 0)
+        }
+        techRow.addView(GgtgUi.withLeadingIcon(TextView(context), R.drawable.msg_warning, color(Theme.key_text_RedRegular), 12f, 4f).apply {
+            text = reasonTitle
+            textSize = 12f
+            setTextColor(color(Theme.key_text_RedRegular))
+            setSingleLine(true)
+            ellipsize = android.text.TextUtils.TruncateAt.END
+        }, LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f))
+
+        if (hasBackup) {
+            techRow.addView(TextView(context).apply {
+                text = "Резерв ↻"
+                textSize = 11.5f
+                setTypeface(null, Typeface.BOLD)
+                setTextColor(color(Theme.key_featuredStickers_addButton))
+                setPadding(dp(6f), dp(1f), dp(6f), dp(1f))
+                background = rounded(0x200088CC.toInt(), dp(5f).toFloat())
+            }, LinearLayout.LayoutParams(LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT).apply {
+                leftMargin = dp(6f)
+            })
+        }
+        texts.addView(techRow, LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT))
+
+        card.addView(texts, LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f))
+        card.setOnClickListener { showLostAccountDialog(context, entry) }
         return card
     }
 
@@ -740,108 +810,170 @@ class GgtgAccountManagerActivity : BaseFragment() {
 
         val card = LinearLayout(context).apply {
             orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
             background = rounded(
                 color(Theme.key_windowBackgroundWhite),
-                dp(14f).toFloat(),
+                dp(10f).toFloat(),
                 if (isCurrent) dp(1.5f) else 0,
                 color(Theme.key_featuredStickers_addButton))
-            setPadding(dp(10f), dp(12f), dp(12f), dp(12f))
+            setPadding(dp(8f), dp(8f), dp(10f), dp(8f))
             layoutParams = LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT).apply {
-                leftMargin = dp(12f); rightMargin = dp(12f); topMargin = dp(6f)
+                leftMargin = dp(10f); rightMargin = dp(10f); topMargin = dp(4f)
             }
         }
 
         card.addView(GgtgUi.checkBox(context, slot in selected).apply {
             setOnClickListener { if (isChecked) selected.add(slot) else selected.remove(slot); rebuildRows() }
-        }, LinearLayout.LayoutParams(LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT).apply { gravity = Gravity.CENTER_VERTICAL })
+        }, LinearLayout.LayoutParams(LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT).apply {
+            gravity = Gravity.CENTER_VERTICAL
+            rightMargin = dp(4f)
+        })
 
         val avatar = BackupImageView(context).apply {
-            setRoundRadius(dp(23f))
+            setRoundRadius(dp(19f))
             imageReceiver.setCurrentAccount(slot)
             if (user != null) setForUserOrChat(user, AvatarDrawable().also { it.setInfo(user) })
         }
-        card.addView(avatar, LinearLayout.LayoutParams(dp(46f), dp(46f)).apply {
-            gravity = Gravity.CENTER_VERTICAL; rightMargin = dp(12f)
+        card.addView(avatar, LinearLayout.LayoutParams(dp(38f), dp(38f)).apply {
+            gravity = Gravity.CENTER_VERTICAL
+            rightMargin = dp(10f)
         })
 
         val texts = LinearLayout(context).apply { orientation = LinearLayout.VERTICAL }
         val name = listOfNotNull(user?.first_name, user?.last_name).joinToString(" ").trim().ifEmpty { "Аккаунт $number" }
 
-        // name + "текущий" tag; name wraps to 2 lines, never cut
-        texts.addView(LinearLayout(context).apply {
+        // ROW 1: Name + [текущий] (left) ... [StatusBadge] + [(i)] (right)
+        val headerRow = LinearLayout(context).apply {
             orientation = LinearLayout.HORIZONTAL
-            addView(AccountNameView(context).apply {
-                setAccount(slot, name); textSize = 16f
-                setTypeface(null, Typeface.BOLD)
-                setTextColor(color(Theme.key_windowBackgroundWhiteBlackText))
-                setOnClickListener { editProfile(slot) }
-            }, LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f))
-            if (isCurrent) addView(pill(context, "текущий", 0xFFFFFFFF.toInt(), color(Theme.key_featuredStickers_addButton)), LinearLayout.LayoutParams(LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT).apply {
-                leftMargin = dp(6f); gravity = Gravity.CENTER_VERTICAL
-            })
-        }, LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT))
+            gravity = Gravity.CENTER_VERTICAL
+        }
 
+        val nameBox = LinearLayout(context).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+        }
+        nameBox.addView(AccountNameView(context).apply {
+            setAccount(slot, name)
+            textSize = 15f
+            setTypeface(null, Typeface.BOLD)
+            setTextColor(color(Theme.key_windowBackgroundWhiteBlackText))
+            setSingleLine(true)
+            ellipsize = android.text.TextUtils.TruncateAt.END
+            setOnClickListener { editProfile(slot) }
+        }, LinearLayout.LayoutParams(LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT))
+
+        if (isCurrent) {
+            nameBox.addView(pill(context, "текущий", 0xFFFFFFFF.toInt(), color(Theme.key_featuredStickers_addButton)),
+                LinearLayout.LayoutParams(LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT).apply {
+                    leftMargin = dp(6f)
+                })
+        }
+        headerRow.addView(nameBox, LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f))
+
+        headerRow.addView(statusBadge(context, slot), LinearLayout.LayoutParams(LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT).apply {
+            leftMargin = dp(6f)
+            gravity = Gravity.CENTER_VERTICAL
+        })
+
+        headerRow.addView(TextView(context).apply {
+            text = "i"
+            textSize = 13.5f
+            gravity = Gravity.CENTER
+            setTypeface(null, Typeface.BOLD)
+            setTextColor(color(Theme.key_featuredStickers_addButton))
+            background = rounded(0, dp(11f).toFloat(), dp(1.5f), color(Theme.key_featuredStickers_addButton))
+            setOnClickListener { GgtgAccountInfo.show(context, slot) { rebuildAll() } }
+        }, LinearLayout.LayoutParams(dp(22f), dp(22f)).apply {
+            gravity = Gravity.CENTER_VERTICAL
+            leftMargin = dp(6f)
+        })
+
+        texts.addView(headerRow, LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT))
+
+        // ROW 2: Phone · @username
+        val phone = user?.phone?.takeIf { it.isNotEmpty() }?.let { "+$it" } ?: "номер скрыт"
         val handle = user?.username?.takeIf { it.isNotEmpty() }?.let { "@$it" } ?: "без юзернейма"
-        texts.addView(TextView(context).apply {
-            text = handle; textSize = 14f
+        val folder = uc.ncgFolder.orEmpty()
+        val showFolderInMeta = filterFolder == null && query.isNotEmpty() && folder.isNotEmpty()
+
+        val subRow = LinearLayout(context).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            setPadding(0, dp(2f), 0, 0)
+        }
+        subRow.addView(TextView(context).apply {
+            text = phone
+            textSize = 12.5f
+            setTextColor(color(Theme.key_windowBackgroundWhiteGrayText))
+        })
+        subRow.addView(TextView(context).apply {
+            text = " · "
+            textSize = 12.5f
+            setTextColor(color(Theme.key_windowBackgroundWhiteGrayText))
+        })
+        subRow.addView(TextView(context).apply {
+            text = handle
+            textSize = 12.5f
             setTextColor(if (user?.username.isNullOrEmpty()) color(Theme.key_windowBackgroundWhiteGrayText) else color(Theme.key_windowBackgroundWhiteBlueText4))
             setOnClickListener { editProfile(slot) }
         })
+        if (showFolderInMeta) {
+            subRow.addView(TextView(context).apply {
+                text = " · 📁 $folder"
+                textSize = 12.5f
+                setTextColor(color(Theme.key_windowBackgroundWhiteGrayText))
+            })
+        }
+        texts.addView(subRow, LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT))
 
-        // meta line wraps fully, nothing cut
-        val phone = user?.phone?.takeIf { it.isNotEmpty() }?.let { "+$it" } ?: "номер скрыт"
-        val folder = uc.ncgFolder.orEmpty()
-        texts.addView(TextView(context).apply {
-            text = "$phone  ·  ID ${uc.clientUserId}  ·  " + if (folder.isEmpty()) "без папки" else "папка: $folder"
-            textSize = 13f
-            setTextColor(color(Theme.key_windowBackgroundWhiteGrayText))
-            setPadding(0, dp(3f), 0, 0)
-        })
-
-        // proxy as its own coloured line, tap = edit
+        // ROW 3: Proxy (full width) · ID · SMS count (if > 0)
+        val techRow = LinearLayout(context).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            setPadding(0, dp(2f), 0, 0)
+        }
         val proxyColor = color(if (uc.ncgProxyEnabled) Theme.key_windowBackgroundWhiteBlueText4 else Theme.key_text_RedRegular)
-        texts.addView(GgtgUi.withLeadingIcon(TextView(context), if (uc.ncgProxyEnabled) R.drawable.msg_language else R.drawable.msg_warning, proxyColor, 14f, 6f).apply {
-            text = if (uc.ncgProxyEnabled) "${uc.ncgProxyAddress}:${uc.ncgProxyPort}" else "без прокси"
-            textSize = 13f
+        val proxyText = if (uc.ncgProxyEnabled) "${uc.ncgProxyAddress}:${uc.ncgProxyPort}" else "без прокси"
+        techRow.addView(GgtgUi.withLeadingIcon(TextView(context), if (uc.ncgProxyEnabled) R.drawable.msg_language else R.drawable.msg_warning, proxyColor, 12.5f, 4.5f).apply {
+            text = proxyText
+            textSize = 12f
             setTextColor(proxyColor)
-            setPadding(0, dp(2f), 0, 0)
+            setSingleLine(true)
+            ellipsize = android.text.TextUtils.TruncateAt.MIDDLE
             setOnClickListener { GgtgAccountMenus.editProxy(context, slot) { rebuildAll() } }
+        }, LinearLayout.LayoutParams(LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT))
+
+        techRow.addView(TextView(context).apply {
+            text = "  ·  ID ${uc.clientUserId}"
+            textSize = 12f
+            setTextColor(color(Theme.key_windowBackgroundWhiteGrayText))
         })
 
-        // how many SMS this account has sent in the last 24 hours (updates live while a campaign runs)
         val sentToday = GgtgSms.sentToday(slot)
-        val sentColor = color(if (sentToday > 0) Theme.key_featuredStickers_addButton else Theme.key_windowBackgroundWhiteGrayText)
-        texts.addView(GgtgUi.withLeadingIcon(TextView(context), R.drawable.msg_send, sentColor, 14f, 6f).apply {
-            text = "$sentToday"
-            textSize = 13f
-            setTextColor(sentColor)
-            setPadding(0, dp(2f), 0, 0)
-        })
+        if (sentToday > 0) {
+            val sentColor = color(Theme.key_featuredStickers_addButton)
+            techRow.addView(GgtgUi.withLeadingIcon(TextView(context), R.drawable.msg_send, sentColor, 11.5f, 3.5f).apply {
+                text = "$sentToday"
+                textSize = 12f
+                setTextColor(sentColor)
+            }, LinearLayout.LayoutParams(LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT).apply {
+                leftMargin = dp(8f)
+            })
+        }
+
+        texts.addView(techRow, LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT))
 
         card.addView(texts, LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f))
-        card.addView(TextView(context).apply {
-            text = "i"; textSize = 15f; gravity = Gravity.CENTER
-            setTypeface(null, Typeface.BOLD)
-            setTextColor(color(Theme.key_featuredStickers_addButton))
-            background = rounded(0, dp(13f).toFloat(), dp(1.5f), color(Theme.key_featuredStickers_addButton))
-            setOnClickListener { GgtgAccountInfo.show(context, slot) { rebuildAll() } }
-        }, LinearLayout.LayoutParams(dp(26f), dp(26f)).apply { gravity = Gravity.CENTER_VERTICAL; leftMargin = dp(8f) })
-        card.addView(statusBadge(context, slot), LinearLayout.LayoutParams(LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT).apply {
-            gravity = Gravity.CENTER_VERTICAL; leftMargin = dp(8f)
-        })
 
         card.setOnClickListener {
             if (slot != UserConfig.selectedAccount) LaunchActivity.instance?.switchToAccount(slot, true)
             Toast.makeText(context, "Аккаунт: $name", Toast.LENGTH_SHORT).show()
             rebuildAll()
         }
-        // Long press: a bulk action for this one account, even when others are ticked.
         card.setOnLongClickListener { bulk.show(listOf(slot)); true }
         return card
     }
 
-    // SpamBot verdict / "no proxy", a coloured pill that wraps to two lines and shrinks instead of
-    // being cut; tap re-checks this account through @SpamBot.
     private fun statusBadge(context: Context, slot: Int): View {
         val uc = UserConfig.getInstance(slot)
         val userId = uc.clientUserId
@@ -849,14 +981,14 @@ class GgtgAccountManagerActivity : BaseFragment() {
         val text = status.text
         val c = status.color
         return TextView(context).apply {
-            this.text = text.replace("Спам-блок ", "Спам-блок\n")
-            textSize = if (text.length > 12) 10.5f else 12f
+            this.text = text
+            textSize = 11f
             gravity = Gravity.CENTER
             setTextColor(c)
             setTypeface(null, Typeface.BOLD)
-            maxWidth = dp(92f)
-            setPadding(dp(9f), dp(5f), dp(9f), dp(5f))
-            background = rounded((c and 0x00FFFFFF) or 0x22000000, dp(10f).toFloat())
+            setSingleLine(true)
+            setPadding(dp(7f), dp(3f), dp(7f), dp(3f))
+            background = rounded((c and 0x00FFFFFF) or 0x22000000, dp(6f).toFloat())
             setOnClickListener {
                 val isBlocked = GgtgSpamStatus.isBlocked(userId)
                 val items = mutableListOf<CharSequence>("Проверить статус в @SpamBot")
@@ -902,11 +1034,11 @@ class GgtgAccountManagerActivity : BaseFragment() {
     }
 
     private fun barButton(context: Context, title: String, textColor: Int, onClick: () -> Unit) = TextView(context).apply {
-        text = title; textSize = 14f
+        text = title; textSize = 13.5f
         setTypeface(null, Typeface.BOLD)
         setTextColor(textColor)
         maxLines = 1
-        setPadding(dp(12f), dp(10f), dp(12f), dp(10f))
+        setPadding(dp(9f), dp(7f), dp(9f), dp(7f))
         setOnClickListener { onClick() }
     }
 
