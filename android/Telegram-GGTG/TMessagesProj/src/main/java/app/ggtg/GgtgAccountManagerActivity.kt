@@ -84,12 +84,14 @@ class GgtgAccountManagerActivity : BaseFragment() {
     private fun pill(context: Context, text: String, textColor: Int, fill: Int): TextView =
         TextView(context).apply {
             this.text = text
-            textSize = 11.5f
+            textSize = 10.5f
             setTypeface(null, Typeface.BOLD)
             setTextColor(textColor)
             gravity = Gravity.CENTER
-            setPadding(dp(8f), dp(3f), dp(8f), dp(3f))
-            background = rounded(fill, dp(9f).toFloat())
+            setSingleLine(true)
+            maxLines = 1
+            setPadding(dp(7f), dp(2.5f), dp(7f), dp(2.5f))
+            background = rounded(fill, dp(6f).toFloat())
         }
 
     override fun createView(context: Context): View {
@@ -125,18 +127,6 @@ class GgtgAccountManagerActivity : BaseFragment() {
         chipScroll.addView(chipRow)
         chips = chipRow
         root.addView(chipScroll, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT))
-        // the slim line the chips fold into; a tap unfolds them
-        val slim = TextView(context).apply {
-            textSize = 13.5f
-            setTypeface(null, Typeface.BOLD)
-            setTextColor(color(Theme.key_windowBackgroundWhiteBlueText4))
-            setPadding(dp(14f), dp(8f), dp(14f), dp(6f))
-            visibility = View.GONE
-            setOnClickListener { chipsPinnedOpen = true; foldChips(false) }
-        }
-        slimView = slim
-        chipScrollView = chipScroll
-        root.addView(slim, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT))
 
         // search, in a rounded card
         val searchCard = LinearLayout(context).apply {
@@ -214,17 +204,6 @@ class GgtgAccountManagerActivity : BaseFragment() {
         scroll.addView(list, LayoutHelper.createScroll(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT, Gravity.TOP))
         root.addView(scroll, LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, 0, 1f).apply { topMargin = dp(2f); bottomMargin = dp(6f) })
         listScroll = scroll
-        // Folded only when enough of the list is left that the room it gives back cannot pull the end of the
-        // list under the viewport (that would scroll it back and unfold the chips again: a flicker).
-        scroll.setOnScrollChangeListener { _, _, top, _, _ ->
-            val room = chipExpandedHeight.coerceAtLeast(dp(48f))
-            if (top <= dp(2f)) {
-                chipsPinnedOpen = false
-                foldChips(false)
-            } else if (top > dp(70f) && !chipsPinnedOpen && list.height - scroll.height > room + dp(160f)) {
-                foldChips(true)
-            }
-        }
         rebuildAll()
         return frame
     }
@@ -848,27 +827,24 @@ class GgtgAccountManagerActivity : BaseFragment() {
             gravity = Gravity.CENTER_VERTICAL
         }
 
-        val nameBox = LinearLayout(context).apply {
-            orientation = LinearLayout.HORIZONTAL
-            gravity = Gravity.CENTER_VERTICAL
-        }
-        nameBox.addView(AccountNameView(context).apply {
+        headerRow.addView(AccountNameView(context).apply {
             setAccount(slot, name)
             textSize = 15f
             setTypeface(null, Typeface.BOLD)
             setTextColor(color(Theme.key_windowBackgroundWhiteBlackText))
             setSingleLine(true)
+            maxLines = 1
             ellipsize = android.text.TextUtils.TruncateAt.END
             setOnClickListener { editProfile(slot) }
-        }, LinearLayout.LayoutParams(LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT))
+        }, LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f))
 
         if (isCurrent) {
-            nameBox.addView(pill(context, "текущий", 0xFFFFFFFF.toInt(), color(Theme.key_featuredStickers_addButton)),
+            headerRow.addView(pill(context, "текущий", 0xFFFFFFFF.toInt(), color(Theme.key_featuredStickers_addButton)),
                 LinearLayout.LayoutParams(LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT).apply {
                     leftMargin = dp(6f)
+                    gravity = Gravity.CENTER_VERTICAL
                 })
         }
-        headerRow.addView(nameBox, LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f))
 
         headerRow.addView(statusBadge(context, slot), LinearLayout.LayoutParams(LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT).apply {
             leftMargin = dp(6f)
