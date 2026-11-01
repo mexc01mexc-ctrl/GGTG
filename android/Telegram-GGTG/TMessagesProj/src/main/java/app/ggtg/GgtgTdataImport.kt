@@ -369,13 +369,15 @@ object TdataImportHelper {
                     FileLog.e("tdata duplicate failed for userId=${account.userId}", t)
                 }
                 // slot never got setCurrentUser'd - just clear its transient state so it stays free
-                ConnectionsManager.getInstance(targetSlot).cleanup(true)
+                ConnectionsManager.getInstance(targetSlot).setAsleep(true)
+                UserConfig.getInstance(targetSlot).clearConfig()
                 freeSlots.add(0, targetSlot)
             }
         }
 
-        // temp slot never gets activated - wipe Desktop's borrowed key, don't leave it sitting around
-        ConnectionsManager.getInstance(tempSlot).cleanup(true)
+        // temp slot never gets activated - pause network and clear config cleanly
+        ConnectionsManager.getInstance(tempSlot).setAsleep(true)
+        UserConfig.getInstance(tempSlot).clearConfig()
         ConnectionsManager.setProxySettingsForAccount(tempSlot, false, "", 0, "", "", "")
 
         if (imported.isNotEmpty()) {

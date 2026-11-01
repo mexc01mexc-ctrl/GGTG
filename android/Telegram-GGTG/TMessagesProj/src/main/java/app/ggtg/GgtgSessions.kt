@@ -591,7 +591,7 @@ object GgtgSessions {
         } catch (_: Throwable) { }
 
         val cm = ConnectionsManager.getInstance(slot)
-        cm.cleanup(true)
+        cm.setAsleep(true)
 
         if (target.device != null) {
             GgtgDevice.assignNew(slot, target.device)
@@ -681,7 +681,7 @@ object GgtgSessions {
             ?: return Result.failure(Exception("Нет свободного слота аккаунта (максимум ${UserConfig.MAX_ACCOUNT_COUNT})"))
 
         val cm = ConnectionsManager.getInstance(freeSlot)
-        cm.cleanup(true)
+        cm.setAsleep(true)
 
         if (target.device != null) {
             GgtgDevice.assignNew(freeSlot, target.device)

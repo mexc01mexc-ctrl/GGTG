@@ -436,13 +436,15 @@ object GgtgSessionJsonSupport {
                 }.onFailure { err ->
                     failed++
                     lastFailReason = err.message ?: err.javaClass.simpleName
-                    ConnectionsManager.getInstance(slot).cleanup(true)
+                    ConnectionsManager.getInstance(slot).setAsleep(true)
+                    UserConfig.getInstance(slot).clearConfig()
                     ConnectionsManager.setProxySettingsForAccount(slot, false, "", 0, "", "", "")
                 }
             } catch (t: Throwable) {
                 failed++
                 lastFailReason = t.message ?: t.javaClass.simpleName
-                ConnectionsManager.getInstance(slot).cleanup(true)
+                ConnectionsManager.getInstance(slot).setAsleep(true)
+                UserConfig.getInstance(slot).clearConfig()
                 ConnectionsManager.setProxySettingsForAccount(slot, false, "", 0, "", "", "")
             }
         }

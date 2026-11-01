@@ -758,7 +758,7 @@ void ExportNext(std::shared_ptr<ExportRun> run, size_t index) {
 		}
 		const auto isIos = Settings::IsIosSession(targetDevice);
 		entry["keys"] = keys;
-		entry["handoff"] = false;
+		entry["handoff"] = !isIos;
 		run->exported.push_back(entry);
 
 		if (const auto alive = weakAccount.get()) {

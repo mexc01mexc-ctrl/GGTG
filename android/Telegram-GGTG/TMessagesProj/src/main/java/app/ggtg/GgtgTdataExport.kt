@@ -371,7 +371,8 @@ object TdataExportHelper {
                 }
 
                 if (tempSlot >= 0) {
-                    ConnectionsManager.getInstance(tempSlot).cleanup(true)
+                    ConnectionsManager.getInstance(tempSlot).setAsleep(true)
+                    UserConfig.getInstance(tempSlot).clearConfig()
                     ConnectionsManager.setProxySettingsForAccount(tempSlot, false, "", 0, "", "", "")
                 }
 
@@ -566,7 +567,8 @@ object TdataExportHelper {
                         }
                     }
                 }
-                ConnectionsManager.getInstance(tempSlot).cleanup(true)
+                ConnectionsManager.getInstance(tempSlot).setAsleep(true)
+                UserConfig.getInstance(tempSlot).clearConfig()
                 ConnectionsManager.setProxySettingsForAccount(tempSlot, false, "", 0, "", "", "")
                 progress.dismiss()
                 if (accounts.length() == 0) {

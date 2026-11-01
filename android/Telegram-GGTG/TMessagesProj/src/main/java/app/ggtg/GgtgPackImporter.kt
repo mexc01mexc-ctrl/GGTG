@@ -199,8 +199,14 @@ object GgtgPackImporter {
                 && result.exceptionOrNull() !is TdataImportHelper.PasswordSkippedException) {
                 // If handoff failed, fall back to direct install so the account isn't lost
                 FileLog.e("ggtg pack: handoff failed for userId=${account.userId}, falling back to direct install", result.exceptionOrNull())
-                try { ConnectionsManager.getInstance(tempSlot).cleanup(true) } catch (_: Throwable) {}
-                try { ConnectionsManager.getInstance(slot).cleanup(true) } catch (_: Throwable) {}
+                try {
+                    ConnectionsManager.getInstance(tempSlot).setAsleep(true)
+                    UserConfig.getInstance(tempSlot).clearConfig()
+                } catch (_: Throwable) {}
+                try {
+                    ConnectionsManager.getInstance(slot).setAsleep(true)
+                    UserConfig.getInstance(slot).clearConfig()
+                } catch (_: Throwable) {}
                 result = try {
                     install(account, slot, proxy)
                 } catch (t: Throwable) {
@@ -263,14 +269,16 @@ object GgtgPackImporter {
                 failed++
                 lastFailReason = "+${account.phone}: ${t.message}"
                 FileLog.e("ggtg pack: failed userId=${account.userId}", t)
-                ConnectionsManager.getInstance(slot).cleanup(true)
+                ConnectionsManager.getInstance(slot).setAsleep(true)
+                UserConfig.getInstance(slot).clearConfig()
                 ConnectionsManager.setProxySettingsForAccount(slot, false, "", 0, "", "", "")
                 freeSlots.add(0, slot)
             }
         }
 
         if (tempSlot != null) {
-            ConnectionsManager.getInstance(tempSlot).cleanup(true)
+            ConnectionsManager.getInstance(tempSlot).setAsleep(true)
+            UserConfig.getInstance(tempSlot).clearConfig()
             ConnectionsManager.setProxySettingsForAccount(tempSlot, false, "", 0, "", "", "")
         }
         if (imported.isNotEmpty()) {
@@ -314,7 +322,8 @@ object GgtgPackImporter {
             }
             applyMeta(account, slot)
         }
-        ConnectionsManager.getInstance(tempSlot).cleanup(true)
+        ConnectionsManager.getInstance(tempSlot).setAsleep(true)
+        UserConfig.getInstance(tempSlot).clearConfig()
         return result
     }
 
@@ -352,7 +361,7 @@ object GgtgPackImporter {
         // device identity: if the keys come from Telegram Desktop (or tdata fallback), running them as mobile (api_id 6)
         // causes Telegram server to detect an API_ID mismatch on the session, leading to instant spam block.
         // Therefore, keys born on Desktop MUST use isDesktop = true so they connect with api_id 2040 (tdesktop).
-        val isDesktop = account.handoff || account.device?.optInt("apiId") == 2040 || account.device?.optString("langPackName") == "tdesktop"
+        val isDesktop = !account.handoff && (account.device?.optInt("apiId") == 2040 || account.device?.optString("langPackName") == "tdesktop")
         GgtgDevice.assignNew(slot, account.device, isDesktop = isDesktop)
         val cm = ConnectionsManager.getInstance(slot)
         if (account.mainDcId != 0 && account.mainDcId != ConnectionsManager.DEFAULT_DATACENTER_ID) {

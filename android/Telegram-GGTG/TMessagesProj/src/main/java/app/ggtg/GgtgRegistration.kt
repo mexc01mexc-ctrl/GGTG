@@ -2232,7 +2232,7 @@ object GgtgRegistration {
                 }
                 // If not activated, clean up slot
                 if (!UserConfig.getInstance(slot).isClientActivated) {
-                    ConnectionsManager.getInstance(slot).cleanup(true)
+                    ConnectionsManager.getInstance(slot).setAsleep(true)
                     UserConfig.getInstance(slot).clearConfig()
                     reservedSlots.remove(slot)
                 }
@@ -2283,7 +2283,7 @@ object GgtgRegistration {
             }
             val slot = currentSlot
             if (slot != null && !UserConfig.getInstance(slot).isClientActivated) {
-                ConnectionsManager.getInstance(slot).cleanup(true)
+                ConnectionsManager.getInstance(slot).setAsleep(true)
                 UserConfig.getInstance(slot).clearConfig()
                 Engine.reservedSlots.remove(slot)
             }
