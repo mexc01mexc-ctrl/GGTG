@@ -765,8 +765,8 @@ object TdataExportHelper {
             systemVersion = phone.system
             appVersion = "12.10.6 (71129)"
             langPack = "android"
-            apiId = 6
-            apiHash = "db0463428c0576356788e285d3cf5a22"
+            apiId = BuildVars.APP_ID
+            apiHash = BuildVars.APP_HASH
         } else {
             val profile = desktopProfile ?: GgtgDesktopProfiles.random(sourcePhone)
             deviceModel = profile.deviceModel
