@@ -122,10 +122,21 @@ object GgtgImportSupport {
             if (!UserConfig.getInstance(UserConfig.selectedAccount).isClientActivated) {
                 firstImportedSlot?.let { slot ->
                     if (slot in 0 until UserConfig.MAX_ACCOUNT_COUNT) {
-                        UserConfig.selectedAccount = slot
-                        UserConfig.getInstance(0).saveConfig(true)
-                        ApplicationLoader.applicationContext.getSharedPreferences("userconfing", Context.MODE_PRIVATE)
-                            .edit().putInt("selectedAccount", slot).commit()
+                        org.telegram.messenger.AndroidUtilities.runOnUIThread {
+                            try {
+                                val act = org.telegram.ui.LaunchActivity.instance
+                                if (act != null && slot != UserConfig.selectedAccount) {
+                                    act.switchToAccount(slot, true)
+                                } else {
+                                    UserConfig.selectedAccount = slot
+                                    UserConfig.getInstance(0).saveConfig(true)
+                                    ApplicationLoader.applicationContext.getSharedPreferences("userconfing", Context.MODE_PRIVATE)
+                                        .edit().putInt("selectedAccount", slot).commit()
+                                }
+                            } catch (t: Throwable) {
+                                org.telegram.messenger.FileLog.e(t)
+                            }
+                        }
                     }
                 }
             }

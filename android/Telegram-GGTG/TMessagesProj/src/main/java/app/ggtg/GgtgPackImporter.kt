@@ -308,22 +308,16 @@ object GgtgPackImporter {
         }
         val result = TdataImportHelper.duplicateAccountViaHandoff(
             app.ggtg.tdata.TdataAccount(account.userId, account.mainDcId, account.keys),
-            tempSlot, slot, bits, bits, index, total, progressDialog, account.device)
+            tempSlot, slot, bits, bits, index, total, progressDialog, account.device,
+            knownPhone = account.phone
+        )
         if (result.isSuccess) {
-            if (!keepTransitSession) {
-                // the transit session was only the way here and user didn't request a backup session: end it
-                val (_, error) = with(TdataImportHelper) {
-                    ConnectionsManager.getInstance(tempSlot).sendSuspend(TLRPC.TL_auth_logOut(), 0,
-                        ConnectionsManager.DEFAULT_DATACENTER_ID, "logOut(transit)")
-                } ?: (null to null)
-                FileLog.d("ggtg pack: transit session of userId=${account.userId} ended, error=${error?.text}")
-            } else {
-                FileLog.d("ggtg pack: keeping transit session of userId=${account.userId} as backup session in vault")
-            }
             applyMeta(account, slot)
         }
-        ConnectionsManager.getInstance(tempSlot).setAsleep(true)
-        UserConfig.getInstance(tempSlot).clearConfig()
+        try {
+            ConnectionsManager.getInstance(tempSlot).setAsleep(true)
+            UserConfig.getInstance(tempSlot).clearConfig()
+        } catch (_: Throwable) {}
         return result
     }
 
@@ -361,7 +355,9 @@ object GgtgPackImporter {
         // device identity: if the keys come from Telegram Desktop (or tdata fallback), running them as mobile (api_id 6)
         // causes Telegram server to detect an API_ID mismatch on the session, leading to instant spam block.
         // Therefore, keys born on Desktop MUST use isDesktop = true so they connect with api_id 2040 (tdesktop).
-        val isDesktop = !account.handoff && (account.device?.optInt("apiId") == 2040 || account.device?.optString("langPackName") == "tdesktop")
+        val isDesktop = account.device?.optInt("apiId") == 2040 ||
+            account.device?.optString("langPackName") == "tdesktop" ||
+            account.keys.isNotEmpty()
         GgtgDevice.assignNew(slot, account.device, isDesktop = isDesktop)
         val cm = ConnectionsManager.getInstance(slot)
         if (account.mainDcId != 0 && account.mainDcId != ConnectionsManager.DEFAULT_DATACENTER_ID) {
@@ -412,7 +408,9 @@ object GgtgPackImporter {
                 val bytes = hexToBytes(item.optString("key"))
                 if (bytes?.size == AUTH_KEY_SIZE) item.getInt("dcId") to bytes else null
             }
-            val userId = json.optString("userId").toLongOrNull() ?: continue
+            val userId = json.optString("userId").toLongOrNull()
+                ?: json.optLong("userId", 0L).takeIf { it != 0L }
+                ?: continue
             if (keys.isEmpty() || userId == 0L) continue
             val proxy = json.optJSONObject("proxy")?.let { p ->
                 PackProxy(
@@ -424,11 +422,15 @@ object GgtgPackImporter {
                     p.optString("secret")
                 ).takeIf { it.host.isNotEmpty() && it.port > 0 }
             }
+            val rawPhone = json.optString("phone").ifEmpty {
+                val pLong = json.optLong("phone", 0L)
+                if (pLong != 0L) pLong.toString() else ""
+            }
             result += PackAccount(
                 userId = userId,
                 mainDcId = json.optInt("mainDcId", keys.first().first),
                 keys = keys,
-                phone = json.optString("phone"),
+                phone = rawPhone,
                 firstName = json.optString("firstName"),
                 lastName = json.optString("lastName"),
                 username = json.optString("username"),

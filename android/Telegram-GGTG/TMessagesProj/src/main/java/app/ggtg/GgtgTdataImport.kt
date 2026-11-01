@@ -406,7 +406,8 @@ object TdataImportHelper {
         total: Int,
         progressDialog: TdataImportProgressDialog,
         // the device the new session is born with (a .ggtg pack carries one); null = a random phone
-        device: org.json.JSONObject? = null
+        device: org.json.JSONObject? = null,
+        knownPhone: String? = null
     ): Result<Long> {
         // proxy both slots BEFORE either one's ConnectionsManager is ever touched (construction
         // applies whatever proxy state UserConfig already holds at that moment)
@@ -433,13 +434,20 @@ object TdataImportHelper {
         }
         tempCm.setUserId(account.userId)
 
+        val targetCm = ConnectionsManager.getInstance(targetSlot)
+        if (account.mainDcId != 0 && account.mainDcId != ConnectionsManager.DEFAULT_DATACENTER_ID) {
+            targetCm.setDefaultDatacenterId(account.mainDcId)
+        }
+
+        // Give tgnet a brief moment to register the imported auth key before making requests
+        kotlinx.coroutines.delay(500)
+
         // ng: tempSlot already holds Desktop's real, authorized session at this point, so its own
         // phone number is available immediately - fetch it now purely so the progress dialog (and
         // any later 2FA prompt) can say which account this is, before the target login even starts.
-        val phone = fetchSelfPhone(tempCm)
+        val phone = knownPhone?.takeIf { it.isNotEmpty() }?.let { if (it.startsWith("+")) it else "+$it" }
+            ?: fetchSelfPhone(tempCm, account.mainDcId)
         progressDialog.setWorking(phone, index, total)
-
-        val targetCm = ConnectionsManager.getInstance(targetSlot)
 
         // 0) the way Telegram Android itself signs in: by the number, with the code Telegram sends to the
         // account's other sessions - read here from the temp session, which is one of them. The new session is
@@ -454,10 +462,10 @@ object TdataImportHelper {
         // exists just leaves the request queued forever with nothing driving a handshake for it.
         // The server redirects us via loginTokenMigrateTo if the token actually needs to be issued
         // elsewhere - this is also what real clients do.
-        var dcId = ConnectionsManager.DEFAULT_DATACENTER_ID
+        var dcId = if (account.mainDcId != 0) account.mainDcId else ConnectionsManager.DEFAULT_DATACENTER_ID
         val exportReq = TLRPC.TL_auth_exportLoginToken().apply {
-            api_id = GgtgApiOverride.id()
-            api_hash = GgtgApiOverride.hash()
+            api_id = GgtgDesktopProfiles.APP_ID
+            api_hash = GgtgDesktopProfiles.APP_HASH
         }
         FileLog.d("tdata handoff: exportLoginToken on slot=$targetSlot dc=$dcId")
         tr("export dc=$dcId")
@@ -697,33 +705,41 @@ object TdataImportHelper {
         if (digits.isEmpty()) return null
         val flags = ConnectionsManager.RequestFlagWithoutLogin or ConnectionsManager.RequestFlagFailOnServerErrors or
             ConnectionsManager.RequestFlagTryDifferentDc or ConnectionsManager.RequestFlagEnableUnauthorized
-        val since = tempCm.currentTime - 30
+        val serverTime = if (tempCm.currentTime > 100000) tempCm.currentTime else (System.currentTimeMillis() / 1000).toInt()
+        val since = minOf(serverTime, (System.currentTimeMillis() / 1000).toInt()) - 180
         tr("code: sendCode")
+        val uc = UserConfig.getInstance(targetSlot)
+        val targetAppId = if (uc.ncgAppId != 0) uc.ncgAppId else BuildVars.APP_ID
+        val targetAppHash = uc.ncgAppHash.takeIf { !it.isNullOrEmpty() } ?: BuildVars.APP_HASH
+        val targetDc = if (account.mainDcId != 0) account.mainDcId else ConnectionsManager.DEFAULT_DATACENTER_ID
         val (sent, sendError) = targetCm.sendSuspend(TLRPC.TL_auth_sendCode().apply {
             phone_number = digits
-            api_id = BuildVars.APP_ID
-            api_hash = BuildVars.APP_HASH
+            api_id = targetAppId
+            api_hash = targetAppHash
             settings = TLRPC.TL_codeSettings()
-        }, flags, ConnectionsManager.DEFAULT_DATACENTER_ID, "sendCode") ?: return null
+        }, flags, targetDc, "sendCode") ?: return null
         val sentCode = sent as? TLRPC.TL_auth_sentCode
         if (sendError != null || sentCode == null) {
             tr("code: sendCode failed ${sendError?.text}")
+            FileLog.e("tdata handoff: sendCode failed error=${sendError?.text}")
             return null
         }
         val cancel: suspend () -> Unit = {
             targetCm.sendSuspend(TLRPC.TL_auth_cancelCode().apply {
                 phone_number = digits
                 phone_code_hash = sentCode.phone_code_hash
-            }, flags, ConnectionsManager.DEFAULT_DATACENTER_ID, "cancelCode")
+            }, flags, targetDc, "cancelCode")
         }
         if (sentCode.type !is TLRPC.TL_auth_sentCodeTypeApp) {
             tr("code: not to the app (${sentCode.type?.javaClass?.simpleName})")
+            FileLog.d("tdata handoff: sentCode type is ${sentCode.type?.javaClass?.simpleName}, not App")
             cancel()
             return null
         }
-        val code = waitForLoginCode(tempCm, since)
+        val code = waitForLoginCode(tempCm, since, account.mainDcId)
         if (code == null) {
             tr("code: didn't come")
+            FileLog.e("tdata handoff: login code didn't arrive in tempCm within timeout")
             cancel()
             return null
         }
@@ -733,14 +749,21 @@ object TdataImportHelper {
             phone_number = digits
             phone_code_hash = sentCode.phone_code_hash
             phone_code = code
-        }, flags, ConnectionsManager.DEFAULT_DATACENTER_ID, "signIn") ?: return null
+        }, flags, targetDc, "signIn") ?: return null
         // tgnet moved its own datacenter on PHONE_MIGRATE_X: the login lives there
-        val dcId = targetCm.currentDatacenterId
+        val dcId = if (targetCm.currentDatacenterId != 0 && targetCm.currentDatacenterId != ConnectionsManager.DEFAULT_DATACENTER_ID) {
+            targetCm.currentDatacenterId
+        } else if (account.mainDcId != 0) {
+            account.mainDcId
+        } else {
+            ConnectionsManager.DEFAULT_DATACENTER_ID
+        }
         if (signError != null) {
             if (signError.text == "SESSION_PASSWORD_NEEDED") {
                 return resolvePasswordAndFinalize(targetCm, targetSlot, dcId, account, phone, progressDialog)
             }
             tr("code: signIn failed ${signError.text}")
+            FileLog.e("tdata handoff: signIn failed ${signError.text}")
             return null
         }
         val authorization = signed as? TLRPC.auth_Authorization ?: return null
@@ -748,33 +771,42 @@ object TdataImportHelper {
     }
 
     /** The login code from Telegram's service notifications, as the temp session (the same account) sees them. */
-    private suspend fun waitForLoginCode(tempCm: ConnectionsManager, since: Int): String? {
+    private suspend fun waitForLoginCode(tempCm: ConnectionsManager, since: Int, dcId: Int = 0): String? {
         val pattern = Regex("(?<!\\d)(\\d{5,6})(?!\\d)")
         val deadline = System.currentTimeMillis() + CODE_WAIT_MS
+        val targetDc = if (dcId != 0) dcId else ConnectionsManager.DEFAULT_DATACENTER_ID
         while (System.currentTimeMillis() < deadline) {
-            kotlinx.coroutines.delay(2_000)
+            kotlinx.coroutines.delay(1_500)
             val (resp, err) = tempCm.sendSuspend(TLRPC.TL_messages_getDialogs().apply {
                 offset_peer = TLRPC.TL_inputPeerEmpty()
                 limit = 10
-            }, 0, ConnectionsManager.DEFAULT_DATACENTER_ID, "getDialogs(code)") ?: continue
-            if (err != null) continue
+            }, 0, targetDc, "getDialogs(code)") ?: continue
+            if (err != null) {
+                FileLog.d("tdata handoff: getDialogs(code) error: ${err.text}")
+                continue
+            }
             val messages = (resp as? TLRPC.messages_Dialogs)?.messages ?: continue
             for (m in messages) {
-                if (m.peer_id?.user_id != SERVICE_USER_ID || m.date < since) continue
-                pattern.find(m.message ?: "")?.let { return it.groupValues[1] }
+                val isService = (m.peer_id?.user_id == SERVICE_USER_ID) ||
+                    ((m.from_id as? TLRPC.TL_peerUser)?.user_id == SERVICE_USER_ID)
+                if (!isService || m.date < since) continue
+                val text = m.message.orEmpty()
+                FileLog.d("tdata handoff: found service message from 777000: $text (date=${m.date}, since=$since)")
+                pattern.find(text)?.let { return it.groupValues[1] }
             }
         }
         return null
     }
 
-    private suspend fun fetchSelfPhone(cm: ConnectionsManager): String? {
+    private suspend fun fetchSelfPhone(cm: ConnectionsManager, mainDcId: Int = 0): String? {
+        val dc = if (mainDcId != 0) mainDcId else ConnectionsManager.DEFAULT_DATACENTER_ID
         val (resp, err) = cm.sendSuspend(
             TLRPC.TL_users_getUsers().apply { id.add(TLRPC.TL_inputUserSelf()) },
-            0, ConnectionsManager.DEFAULT_DATACENTER_ID, "getUsers(self,temp)"
+            0, dc, "getUsers(self,temp)"
         ) ?: return null
         if (err != null) return null
         val user = (resp as? Vector<*>)?.objects?.firstOrNull { it is TLRPC.User } as? TLRPC.User
-        return user?.phone?.takeIf { it.isNotEmpty() }?.let { "+$it" }
+        return user?.phone?.takeIf { it.isNotEmpty() }?.let { if (it.startsWith("+")) it else "+$it" }
     }
 
     private suspend fun finalizeTargetAccount(targetSlot: Int, dcId: Int, authorization: TLRPC.auth_Authorization): Result<Long> {
