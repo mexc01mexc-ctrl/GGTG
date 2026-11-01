@@ -185,10 +185,10 @@ object GgtgPackImporter {
             // If handoff is requested (export from Desktop for Android), execute handoff to mint authentic Android session.
             // Otherwise, install auth keys directly into slot.
             var result = try {
-                if (account.handoff && tempSlot != null) {
-                    handoff(account, slot, tempSlot, proxy, i + 1, total, progressDialog, keepTransitSession = createBackup)
-                } else if (account.keys.isNotEmpty()) {
+                if (account.keys.isNotEmpty() && !account.handoff) {
                     install(account, slot, proxy)
+                } else if (account.handoff && tempSlot != null) {
+                    handoff(account, slot, tempSlot, proxy, i + 1, total, progressDialog, keepTransitSession = createBackup)
                 } else {
                     install(account, slot, proxy)
                 }
@@ -200,11 +200,11 @@ object GgtgPackImporter {
                 // If handoff failed, fall back to direct install so the account isn't lost
                 FileLog.e("ggtg pack: handoff failed for userId=${account.userId}, falling back to direct install", result.exceptionOrNull())
                 try {
-                    ConnectionsManager.getInstance(tempSlot).setAsleep(true)
+                    ConnectionsManager.getInstance(tempSlot).cleanup(true)
                     UserConfig.getInstance(tempSlot).clearConfig()
                 } catch (_: Throwable) {}
                 try {
-                    ConnectionsManager.getInstance(slot).setAsleep(true)
+                    ConnectionsManager.getInstance(slot).cleanup(true)
                     UserConfig.getInstance(slot).clearConfig()
                 } catch (_: Throwable) {}
                 result = try {
@@ -355,9 +355,12 @@ object GgtgPackImporter {
         // device identity: if the keys come from Telegram Desktop (or tdata fallback), running them as mobile (api_id 6)
         // causes Telegram server to detect an API_ID mismatch on the session, leading to instant spam block.
         // Therefore, keys born on Desktop MUST use isDesktop = true so they connect with api_id 2040 (tdesktop).
-        val isDesktop = account.device?.optInt("apiId") == 2040 ||
+        val isDesktop = account.handoff ||
+            account.device?.optInt("apiId") == 2040 ||
             account.device?.optString("langPackName") == "tdesktop" ||
-            account.keys.isNotEmpty()
+            account.device?.optString("systemVersion")?.contains("Windows") == true ||
+            account.device?.optString("systemVersion")?.contains("macOS") == true ||
+            account.device == null
         GgtgDevice.assignNew(slot, account.device, isDesktop = isDesktop)
         val cm = ConnectionsManager.getInstance(slot)
         if (account.mainDcId != 0 && account.mainDcId != ConnectionsManager.DEFAULT_DATACENTER_ID) {

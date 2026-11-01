@@ -464,8 +464,8 @@ object TdataImportHelper {
         // elsewhere - this is also what real clients do.
         var dcId = if (account.mainDcId != 0) account.mainDcId else ConnectionsManager.DEFAULT_DATACENTER_ID
         val exportReq = TLRPC.TL_auth_exportLoginToken().apply {
-            api_id = GgtgDesktopProfiles.APP_ID
-            api_hash = GgtgDesktopProfiles.APP_HASH
+            api_id = GgtgApiOverride.id()
+            api_hash = GgtgApiOverride.hash()
         }
         FileLog.d("tdata handoff: exportLoginToken on slot=$targetSlot dc=$dcId")
         tr("export dc=$dcId")

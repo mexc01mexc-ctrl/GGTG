@@ -10,6 +10,7 @@ import android.widget.TextView
 import android.widget.Toast
 import org.telegram.messenger.AndroidUtilities
 import org.telegram.messenger.R
+import org.telegram.messenger.UserConfig
 import org.telegram.ui.ActionBar.ActionBar.ActionBarMenuOnItemClick
 import org.telegram.ui.ActionBar.AlertDialog
 import org.telegram.ui.ActionBar.BaseFragment
@@ -70,10 +71,20 @@ class GgtgTdataImportActivity : BaseFragment() {
             toast("Ошибка импорта: ${error?.message ?: error?.javaClass?.simpleName ?: "?"}")
             return
         }
+        val onDone = {
+            if (result.imported.isNotEmpty()) {
+                finishFragment()
+                val act = org.telegram.ui.LaunchActivity.instance
+                if (act != null && !UserConfig.getInstance(UserConfig.selectedAccount).isClientActivated) {
+                    act.switchToAccount(UserConfig.selectedAccount, true)
+                }
+            }
+        }
         AlertDialog.Builder(context).setTitle("Импорт tdata")
             .setMessage(GgtgImportSupport.buildResultMessage(result))
-            .setPositiveButton("Закрыть", null).show()
-        if (result.imported.isNotEmpty()) finishFragment()
+            .setPositiveButton("Закрыть") { _, _ -> onDone() }
+            .setOnDismissListener { onDone() }
+            .show()
     }
 
     private fun toast(text: String) { context?.let { Toast.makeText(it, text, Toast.LENGTH_LONG).show() } }

@@ -116,27 +116,16 @@ object GgtgImportSupport {
         return Result.success(user.id)
     }
 
-    /** The slot the login screen is bound to stays empty after an import - move to the imported account instead. */
+    /** The slot the login screen is bound to stays empty after an import - record the imported account as selected. */
     fun selectImportedSlotIfIdle(firstImportedSlot: Int?) {
         try {
-            if (!UserConfig.getInstance(UserConfig.selectedAccount).isClientActivated) {
-                firstImportedSlot?.let { slot ->
-                    if (slot in 0 until UserConfig.MAX_ACCOUNT_COUNT) {
-                        org.telegram.messenger.AndroidUtilities.runOnUIThread {
-                            try {
-                                val act = org.telegram.ui.LaunchActivity.instance
-                                if (act != null && slot != UserConfig.selectedAccount) {
-                                    act.switchToAccount(slot, true)
-                                } else {
-                                    UserConfig.selectedAccount = slot
-                                    UserConfig.getInstance(0).saveConfig(true)
-                                    ApplicationLoader.applicationContext.getSharedPreferences("userconfing", Context.MODE_PRIVATE)
-                                        .edit().putInt("selectedAccount", slot).commit()
-                                }
-                            } catch (t: Throwable) {
-                                org.telegram.messenger.FileLog.e(t)
-                            }
-                        }
+            firstImportedSlot?.let { slot ->
+                if (slot in 0 until UserConfig.MAX_ACCOUNT_COUNT) {
+                    if (!UserConfig.getInstance(UserConfig.selectedAccount).isClientActivated) {
+                        UserConfig.selectedAccount = slot
+                        UserConfig.getInstance(0).saveConfig(true)
+                        ApplicationLoader.applicationContext.getSharedPreferences("userconfing", Context.MODE_PRIVATE)
+                            .edit().putInt("selectedAccount", slot).apply()
                     }
                 }
             }

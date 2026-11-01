@@ -19,6 +19,7 @@ import kotlinx.coroutines.withContext
 import org.telegram.messenger.AndroidUtilities
 import org.telegram.messenger.ApplicationLoader
 import org.telegram.messenger.R
+import org.telegram.messenger.UserConfig
 import org.telegram.ui.ActionBar.ActionBar.ActionBarMenuOnItemClick
 import org.telegram.ui.ActionBar.AlertDialog
 import org.telegram.ui.ActionBar.BaseFragment
@@ -107,10 +108,20 @@ class GgtgImportActivity : BaseFragment() {
             try {
                 val result = withContext(Dispatchers.IO) { GgtgPackImporter.import(file, source, progress, createBackup) }
                 progress.dismiss()
+                val onDone = {
+                    if (result.imported.isNotEmpty()) {
+                        finishFragment()
+                        val act = org.telegram.ui.LaunchActivity.instance
+                        if (act != null && !UserConfig.getInstance(UserConfig.selectedAccount).isClientActivated) {
+                            act.switchToAccount(UserConfig.selectedAccount, true)
+                        }
+                    }
+                }
                 AlertDialog.Builder(activity).setTitle("Импорт .ggtg")
                     .setMessage(GgtgImportSupport.buildResultMessage(result))
-                    .setPositiveButton("Закрыть", null).show()
-                if (result.imported.isNotEmpty()) finishFragment()
+                    .setPositiveButton("Закрыть") { _, _ -> onDone() }
+                    .setOnDismissListener { onDone() }
+                    .show()
             } catch (t: Throwable) {
                 progress.dismiss()
                 toast("Ошибка импорта: ${t.message ?: t.javaClass.simpleName}")

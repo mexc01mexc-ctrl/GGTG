@@ -938,6 +938,10 @@ public class ConnectionsManager extends BaseController {
     public static void onLogout(final int currentAccount) {
         AndroidUtilities.runOnUIThread(() -> {
             AccountInstance accountInstance = AccountInstance.getInstance(currentAccount);
+            if (!accountInstance.getUserConfig().isClientActivated()) {
+                accountInstance.getConnectionsManager().cleanup(true);
+                return;
+            }
             if (accountInstance.getUserConfig().getClientUserId() != 0) {
                 app.ggtg.GgtgSessionLog.record(currentAccount); // ggtg: note who lost the session before it is wiped
                 accountInstance.getUserConfig().clearConfig();
