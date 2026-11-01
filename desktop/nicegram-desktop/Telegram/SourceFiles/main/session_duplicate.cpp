@@ -26,9 +26,17 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "settings/ggtg_ios_profiles.h"
 #include "core/ggtg_sessions.h"
 #include "core/ggtg_geo.h"
+#include "base/unixtime.h"
 #include "config.h"
 
+#include "data/data_session.h"
+#include "data/data_peer.h"
+#include "history/history.h"
+#include "history/history_item.h"
+#include "rpl/filter.h"
+
 #include <QtCore/QTimer>
+#include <QtCore/QRegularExpression>
 
 namespace Main {
 namespace {
@@ -76,12 +84,30 @@ struct DuplicateContext {
 	bool finished = false;
 	int exportApiId = 0;
 	QString exportApiHash;
+
+	// For Android code-based duplication:
+	bool asAndroid = false;
+	QString phoneDigits;
+	QString phoneCodeHash;
+	QString pendingCode;
+	bool codeCaptured = false;
+	int64 codeStartTime = 0;
+	rpl::lifetime codeLifetime;
 };
 
 void ExportToken(const std::shared_ptr<DuplicateContext> &ctx);
 void HandleExportResult(
 	const std::shared_ptr<DuplicateContext> &ctx,
 	const MTPauth_LoginToken &result);
+void StartAndroidCodeDuplication(const std::shared_ptr<DuplicateContext> &ctx);
+void PollCode(const std::weak_ptr<DuplicateContext> &weakCtx, int attempt);
+void OnCodeReceived(const std::shared_ptr<DuplicateContext> &ctx, const QString &code);
+void SignInWithCode(const std::shared_ptr<DuplicateContext> &ctx, const QString &code);
+
+[[nodiscard]] QString DigitsOnly(QString value) {
+	static const auto RegExp = QRegularExpression(u"[^0-9]"_q);
+	return value.replace(RegExp, QString());
+}
 
 void Finish(
 		const std::shared_ptr<DuplicateContext> &ctx,
@@ -91,6 +117,7 @@ void Finish(
 		return;
 	}
 	ctx->finished = true;
+	ctx->codeLifetime.destroy();
 	// Direct reset, not deferred - Account::destroyMtpKeys() in
 	// main_account.cpp already tears down its own second, parallel
 	// MTP::Instance this same way (`_mtpForKeysDestroy = nullptr;`) from
@@ -150,7 +177,7 @@ void AttemptPassword(
 			}
 			ctx->throwawaySender->request(MTPauth_CheckPassword(
 				check.result
-			)).done([=](const MTPauth_Authorization &) {
+			)).done([=](const MTPauth_Authorization &result) {
 				// The password just proved correct - keep it with the
 				// source account, however it got here (typed by hand
 				// included), so it lands in the export's 2fa.txt and any
@@ -160,6 +187,11 @@ void AttemptPassword(
 						source->setTwoFactorPassword(password);
 					}
 				}
+				result.match([&](const MTPDauth_authorization &auth) {
+					auth.vuser().match([&](const MTPDuser &user) {
+						ctx->userId = UserId(user.vid().v);
+					}, [](const auto &) {});
+				}, [](const auto &) {});
 				FinishWithAuthorization(ctx);
 			}).fail([=](const MTP::Error &error) {
 				// PASSWORD_HASH_INVALID and similar - the password itself
@@ -325,6 +357,214 @@ void ExportToken(const std::shared_ptr<DuplicateContext> &ctx) {
 	}).send();
 }
 
+void SignInWithCode(const std::shared_ptr<DuplicateContext> &ctx, const QString &code) {
+	if (ctx->finished) {
+		return;
+	}
+	ctx->throwawaySender->request(MTPauth_SignIn(
+		MTP_flags(MTPauth_SignIn::Flag::f_phone_code),
+		MTP_string(ctx->phoneDigits),
+		MTP_string(ctx->phoneCodeHash),
+		MTP_string(code),
+		MTP_emailVerificationCode(MTPstring())
+	)).done([ctx](const MTPauth_Authorization &result) {
+		result.match([&](const MTPDauth_authorization &auth) {
+			auth.vuser().match([&](const MTPDuser &user) {
+				ctx->userId = UserId(user.vid().v);
+			}, [](const auto &) {});
+		}, [](const auto &) {});
+		FinishWithAuthorization(ctx);
+	}).fail([ctx](const MTP::Error &error) {
+		if (error.type() == u"SESSION_PASSWORD_NEEDED"_q) {
+			StartPasswordCheck(ctx);
+			return;
+		}
+		Finish(ctx, u"signIn: "_q + error.type(), {});
+	}).send();
+}
+
+void OnCodeReceived(const std::shared_ptr<DuplicateContext> &ctx, const QString &code) {
+	if (ctx->finished || ctx->codeCaptured) {
+		return;
+	}
+	ctx->codeCaptured = true;
+	ctx->codeLifetime.destroy();
+
+	if (ctx->phoneCodeHash.isEmpty()) {
+		ctx->pendingCode = code;
+		return;
+	}
+	SignInWithCode(ctx, code);
+}
+
+void PollCode(const std::weak_ptr<DuplicateContext> &weakCtx, int attempt) {
+	const auto ctx = weakCtx.lock();
+	if (!ctx || ctx->finished || ctx->codeCaptured) {
+		return;
+	}
+	if (attempt >= 40) { // ~60 seconds timeout
+		if (!ctx->phoneCodeHash.isEmpty()) {
+			ctx->throwawaySender->request(MTPauth_CancelCode(
+				MTP_string(ctx->phoneDigits),
+				MTP_string(ctx->phoneCodeHash)
+			)).send();
+		}
+		Finish(ctx, u"Таймаут ожидания кода подтверждения в Telegram (60 сек)."_q, {});
+		return;
+	}
+	const auto account = ctx->account.get();
+	if (!account || !account->sessionExists()) {
+		Finish(ctx, u"Исходный аккаунт больше не доступен."_q, {});
+		return;
+	}
+
+	const auto peer = account->session().data().peer(PeerData::kServiceNotificationsId);
+	const auto inputPeer = peer ? peer->input() : MTP_inputPeerUser(MTP_long(777000), MTP_long(0));
+
+	account->session().api().request(MTPmessages_GetHistory(
+		inputPeer,
+		MTP_int(0), // offset_id
+		MTP_int(0), // offset_date
+		MTP_int(0), // add_offset
+		MTP_int(10), // limit
+		MTP_int(0), // max_id
+		MTP_int(0), // min_id
+		MTP_long(0) // hash
+	)).done([weakCtx, attempt](const MTPmessages_Messages &result) {
+		const auto ctx = weakCtx.lock();
+		if (!ctx || ctx->finished || ctx->codeCaptured) {
+			return;
+		}
+		static const auto CodePattern = QRegularExpression(u"(?<!\\d)(\\d{5,6})(?!\\d)"_q);
+		auto foundCode = QString();
+		result.match([&](const MTPDmessages_messagesNotModified &) {
+		}, [&](const auto &data) {
+			for (const auto &message : data.vmessages().v) {
+				message.match([&](const MTPDmessage &msg) {
+					if (msg.vdate().v >= ctx->codeStartTime - 5 && !msg.is_out()) {
+						const auto text = qs(msg.vmessage());
+						const auto match = CodePattern.match(text);
+						if (match.hasMatch()) {
+							foundCode = match.captured(1);
+						}
+					}
+				}, [](const auto &) {});
+				if (!foundCode.isEmpty()) break;
+			}
+		});
+		if (!foundCode.isEmpty()) {
+			OnCodeReceived(ctx, foundCode);
+		} else {
+			QTimer::singleShot(1500, [weakCtx, attempt] {
+				PollCode(weakCtx, attempt + 1);
+			});
+		}
+	}).fail([weakCtx, attempt](const MTP::Error &) {
+		const auto ctx = weakCtx.lock();
+		if (ctx && !ctx->finished && !ctx->codeCaptured) {
+			QTimer::singleShot(1500, [weakCtx, attempt] {
+				PollCode(weakCtx, attempt + 1);
+			});
+		}
+	}).send();
+}
+
+void StartAndroidCodeDuplication(const std::shared_ptr<DuplicateContext> &ctx) {
+	const auto account = ctx->account.get();
+	if (!account || !account->sessionExists()) {
+		Finish(ctx, u"Исходный аккаунт не в сети."_q, {});
+		return;
+	}
+	if (ctx->phoneDigits.isEmpty()) {
+		Finish(ctx, u"У аккаунта отсутствует номер телефона."_q, {});
+		return;
+	}
+
+	ctx->codeStartTime = base::unixtime::now();
+
+	// 1. Hook incoming messages on the active account in real-time
+	static const auto CodePattern = QRegularExpression(u"(?<!\\d)(\\d{5,6})(?!\\d)"_q);
+
+	const auto weakCtx = std::weak_ptr<DuplicateContext>(ctx);
+	account->session().data().newItemAdded(
+	) | rpl::filter([weakCtx](not_null<HistoryItem*> item) {
+		const auto ctx = weakCtx.lock();
+		if (!ctx || ctx->finished || ctx->codeCaptured) {
+			return false;
+		}
+		return (item->history()->peer->id == PeerData::kServiceNotificationsId)
+			&& (item->date() >= ctx->codeStartTime - 5)
+			&& !item->out();
+	}) | rpl::on_next([weakCtx](not_null<HistoryItem*> item) {
+		const auto ctx = weakCtx.lock();
+		if (!ctx || ctx->finished || ctx->codeCaptured) {
+			return;
+		}
+		static const auto CodePattern = QRegularExpression(u"(?<!\\d)(\\d{5,6})(?!\\d)"_q);
+		const auto text = item->originalText().text;
+		const auto match = CodePattern.match(text);
+		if (match.hasMatch()) {
+			OnCodeReceived(ctx, match.captured(1));
+		}
+	}, ctx->codeLifetime);
+
+	// 2. Also check if the history already has a matching message (just in case)
+	if (const auto history = account->session().data().history(PeerData::kServiceNotificationsId)) {
+		if (const auto last = history->lastMessage()) {
+			if (!last->out() && last->date() >= ctx->codeStartTime - 2) {
+				const auto match = CodePattern.match(last->originalText().text);
+				if (match.hasMatch()) {
+					OnCodeReceived(ctx, match.captured(1));
+				}
+			}
+		}
+	}
+
+	// 3. Send MTPauth_SendCode
+	ctx->throwawaySender->request(MTPauth_SendCode(
+		MTP_string(ctx->phoneDigits),
+		MTP_int(ctx->exportApiId),
+		MTP_string(ctx->exportApiHash),
+		MTP_codeSettings(
+			MTP_flags(0),
+			MTPVector<MTPbytes>(),
+			MTPstring(),
+			MTPBool())
+	)).done([weakCtx](const MTPauth_SentCode &result) {
+		const auto ctx = weakCtx.lock();
+		if (!ctx || ctx->finished) {
+			return;
+		}
+		result.match([&](const MTPDauth_sentCode &data) {
+			const auto isApp = (data.vtype().type() == mtpc_auth_sentCodeTypeApp);
+			if (!isApp) {
+				ctx->throwawaySender->request(MTPauth_CancelCode(
+					MTP_string(ctx->phoneDigits),
+					data.vphone_code_hash()
+				)).send();
+				Finish(ctx, u"Telegram отправил код не в приложение (SMS). Для создания Android-сессии требуется подтверждение в приложении."_q, {});
+				return;
+			}
+			ctx->phoneCodeHash = qs(data.vphone_code_hash());
+			if (!ctx->pendingCode.isEmpty()) {
+				const auto code = std::exchange(ctx->pendingCode, QString());
+				SignInWithCode(ctx, code);
+			} else {
+				PollCode(weakCtx, 1);
+			}
+		}, [&](const MTPDauth_sentCodeSuccess &) {
+			FinishWithAuthorization(ctx);
+		}, [&](const auto &) {
+			Finish(ctx, u"Не удалось запросить код подтверждения для Android."_q, {});
+		});
+	}).fail([weakCtx](const MTP::Error &error) {
+		const auto ctx = weakCtx.lock();
+		if (ctx && !ctx->finished) {
+			Finish(ctx, u"sendCode: "_q + error.type(), {});
+		}
+	}).send();
+}
+
 } // namespace
 
 void DuplicateSession(
@@ -371,24 +611,22 @@ void DuplicateSession(
 	const auto isIos = Settings::IsIosSession(fields.deviceOverride);
 	const auto isAndroid = asAndroid || Settings::IsAndroidSession(fields.deviceOverride);
 	const auto own = Core::GgtgApiOverride::Load();
-	// ggtg: auth.exportLoginToken with official Android api_id (4 or 6) is rejected
-	// by Telegram with API_ID_PUBLISHED_FLOOD (official Android never logs in by QR).
-	// If the user hasn't set their own api_id, fall back to Desktop ApiId.
-	const auto useDesktopApi = isAndroid && !own.valid();
 	const auto exportApiId = own.valid()
 		? own.apiId
 		: isIos
 		? Ggtg::IosProfiles::kAppId
+		: isAndroid
+		? Ggtg::AndroidProfiles::kAppId
 		: ApiId;
 	const auto exportApiHash = own.valid()
 		? own.apiHash
 		: isIos
 		? QString::fromLatin1(Ggtg::IosProfiles::kAppHash)
+		: isAndroid
+		? QString::fromLatin1(Ggtg::AndroidProfiles::kAppHash)
 		: QString::fromLatin1(ApiHash);
 	const auto exportLangPack = isIos
 		? QString::fromLatin1(Ggtg::IosProfiles::kLangPack)
-		: useDesktopApi
-		? QString::fromLatin1(Ggtg::DesktopProfiles::kLangPack)
 		: isAndroid
 		? QString::fromLatin1(Ggtg::AndroidProfiles::kLangPack)
 		: QString::fromLatin1(Ggtg::DesktopProfiles::kLangPack);
@@ -399,7 +637,7 @@ void DuplicateSession(
 		fields.appVersion = !fields.deviceOverride.appVersion.isEmpty()
 			? fields.deviceOverride.appVersion
 			: Ggtg::IosProfiles::RandomVersion();
-	} else if (isAndroid && !useDesktopApi) {
+	} else if (isAndroid) {
 		fields.deviceModel = fields.deviceOverride.deviceModel;
 		fields.systemVersion = fields.deviceOverride.systemVersion;
 		fields.appVersion = !fields.deviceOverride.appVersion.isEmpty()
@@ -415,6 +653,9 @@ void DuplicateSession(
 	fields.deviceOverride.apiId = exportApiId;
 	fields.deviceOverride.apiHash = exportApiHash;
 	fields.deviceOverride.langPackName = exportLangPack;
+	if (account->sessionExists()) {
+		fields.mainDcId = account->session().mainDcId();
+	}
 	// The throwaway instance's own connection, not just the blob it ends
 	// up producing - this account should never suddenly make even one
 	// request from this machine's raw IP mid-duplication (see this
@@ -431,13 +672,19 @@ void DuplicateSession(
 	ctx->done = std::move(done);
 	ctx->exportApiId = exportApiId;
 	ctx->exportApiHash = exportApiHash;
+	ctx->asAndroid = isAndroid;
+	ctx->phoneDigits = DigitsOnly(phone);
 	ctx->instance = std::make_unique<MTP::Instance>(
 		MTP::Instance::Mode::Normal,
 		std::move(fields));
 	ctx->throwawaySender = std::make_unique<MTP::Sender>(ctx->instance.get());
 	ctx->realSender = std::make_unique<MTP::Sender>(&account->mtp());
 
-	ExportToken(ctx);
+	if (isAndroid) {
+		StartAndroidCodeDuplication(ctx);
+	} else {
+		ExportToken(ctx);
+	}
 }
 
 void FetchSessionHashes(
