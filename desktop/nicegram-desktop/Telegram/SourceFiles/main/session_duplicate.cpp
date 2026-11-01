@@ -84,12 +84,24 @@ struct DuplicateContext {
 	bool finished = false;
 	int exportApiId = 0;
 	QString exportApiHash;
+	QString phoneDigits;
+	QByteArray phoneHash;
+	int codeCheckAttempts = 0;
+	TimeId sendTime = 0;
 };
 
 void ExportToken(const std::shared_ptr<DuplicateContext> &ctx);
 void HandleExportResult(
 	const std::shared_ptr<DuplicateContext> &ctx,
 	const MTPauth_LoginToken &result);
+void DuplicateViaSendCode(
+	const std::shared_ptr<DuplicateContext> &ctx,
+	const QString &phoneDigits);
+void WaitForLoginCode(const std::shared_ptr<DuplicateContext> &ctx);
+void SubmitSignInCode(
+	const std::shared_ptr<DuplicateContext> &ctx,
+	const QString &code);
+void FallbackToQrToken(const std::shared_ptr<DuplicateContext> &ctx);
 
 void Finish(
 		const std::shared_ptr<DuplicateContext> &ctx,
@@ -338,6 +350,168 @@ void ExportToken(const std::shared_ptr<DuplicateContext> &ctx) {
 	}).send();
 }
 
+void FallbackToQrToken(const std::shared_ptr<DuplicateContext> &ctx) {
+	if (ctx->finished) {
+		return;
+	}
+	ctx->exportApiId = ApiId;
+	ctx->exportApiHash = QString::fromLatin1(ApiHash);
+	ExportToken(ctx);
+}
+
+void SubmitSignInCode(
+		const std::shared_ptr<DuplicateContext> &ctx,
+		const QString &code) {
+	if (ctx->finished) {
+		return;
+	}
+	ctx->throwawaySender->request(MTPauth_SignIn(
+		MTP_flags(MTPauth_SignIn::Flag::f_phone_code),
+		MTP_string(ctx->phoneDigits),
+		MTP_bytes(ctx->phoneHash),
+		MTP_string(code),
+		MTP_emailVerificationCode(MTPstring())
+	)).done([=](const MTPauth_Authorization &result) {
+		if (ctx->finished) {
+			return;
+		}
+		result.match([&](const MTPDauth_authorization &auth) {
+			auth.vuser().match([&](const MTPDuser &user) {
+				ctx->userId = UserId(user.vid().v);
+			}, [](const auto &) {});
+		}, [](const auto &) {});
+		FinishWithAuthorization(ctx);
+	}).fail([=](const MTP::Error &error) {
+		if (ctx->finished) {
+			return;
+		}
+		if (error.type() == u"SESSION_PASSWORD_NEEDED"_q) {
+			StartPasswordCheck(ctx);
+		} else {
+			Finish(ctx, u"signIn: "_q + error.type(), {});
+		}
+	}).send();
+}
+
+void WaitForLoginCode(const std::shared_ptr<DuplicateContext> &ctx) {
+	if (ctx->finished) {
+		return;
+	}
+	const auto account = ctx->account.get();
+	if (!account || !account->sessionExists()) {
+		Finish(ctx, u"Исходный аккаунт больше не доступен."_q, {});
+		return;
+	}
+	if (++ctx->codeCheckAttempts > 20) {
+		Finish(ctx, u"Код подтверждения не пришёл в Telegram вовремя."_q, {});
+		return;
+	}
+	const auto session = &account->session();
+	const auto peer = session->data().peer(PeerData::kServiceNotificationsId);
+	session->api().request(MTPmessages_GetHistory(
+		peer->input(),
+		MTP_int(0), // offset_id
+		MTP_int(0), // offset_date
+		MTP_int(0), // add_offset
+		MTP_int(5), // limit
+		MTP_int(0), // max_id
+		MTP_int(0), // min_id
+		MTP_long(0) // hash
+	)).done([=](const MTPmessages_Messages &result) {
+		if (ctx->finished) {
+			return;
+		}
+		auto code = QString();
+		result.match([](const MTPDmessages_messagesNotModified &) {
+		}, [&](const auto &data) {
+			for (const auto &message : data.vmessages().v) {
+				message.match([&](const MTPDmessage &msg) {
+					const auto date = msg.vdate().v;
+					if (date >= ctx->sendTime) {
+						const auto text = qs(msg.vmessage());
+						static const auto regex = QRegularExpression(u"(?<!\\d)(\\d{5,6})(?!\\d)"_q);
+						const auto match = regex.match(text);
+						if (match.hasMatch()) {
+							code = match.captured(1);
+						}
+					}
+				}, [](const auto &) {});
+				if (!code.isEmpty()) {
+					break;
+				}
+			}
+		});
+		if (!code.isEmpty()) {
+			SubmitSignInCode(ctx, code);
+		} else {
+			QTimer::singleShot(1500, [=] {
+				WaitForLoginCode(ctx);
+			});
+		}
+	}).fail([=](const MTP::Error &) {
+		if (ctx->finished) {
+			return;
+		}
+		QTimer::singleShot(1500, [=] {
+			WaitForLoginCode(ctx);
+		});
+	}).send();
+}
+
+void DuplicateViaSendCode(
+		const std::shared_ptr<DuplicateContext> &ctx,
+		const QString &phoneDigits) {
+	ctx->phoneDigits = phoneDigits;
+	ctx->sendTime = base::unixtime::now() - 30;
+	ctx->codeCheckAttempts = 0;
+
+	ctx->throwawaySender->request(MTPauth_SendCode(
+		MTP_string(phoneDigits),
+		MTP_int(Ggtg::AndroidProfiles::kAppId),
+		MTP_string(Ggtg::AndroidProfiles::kAppHash),
+		MTP_codeSettings(
+			MTP_flags(0),
+			MTPVector<MTPbytes>(),
+			MTPstring(),
+			MTPBool())
+	)).done([=](const MTPauth_SentCode &result) {
+		if (ctx->finished) {
+			return;
+		}
+		result.match([&](const MTPDauth_sentCode &data) {
+			ctx->phoneHash = qba(data.vphone_code_hash());
+			const auto next = data.vtype().type();
+			if (next != mtpc_auth_sentCodeTypeApp) {
+				ctx->throwawaySender->request(MTPauth_CancelCode(
+					MTP_string(ctx->phoneDigits),
+					MTP_bytes(ctx->phoneHash)
+				)).send();
+				FallbackToQrToken(ctx);
+				return;
+			}
+			WaitForLoginCode(ctx);
+		}, [&](const auto &) {
+			FallbackToQrToken(ctx);
+		});
+	}).fail([=](const MTP::Error &) {
+		if (ctx->finished) {
+			return;
+		}
+		FallbackToQrToken(ctx);
+	}).send();
+}
+
+[[nodiscard]] QString CleanDigits(const QString &value) {
+	auto result = QString();
+	result.reserve(value.size());
+	for (const auto ch : value) {
+		if (ch.isDigit()) {
+			result.push_back(ch);
+		}
+	}
+	return result;
+}
+
 } // namespace
 
 void DuplicateSession(
@@ -384,16 +558,10 @@ void DuplicateSession(
 	const auto isIos = Settings::IsIosSession(fields.deviceOverride);
 	const auto isAndroid = asAndroid || Settings::IsAndroidSession(fields.deviceOverride);
 	const auto own = Core::GgtgApiOverride::Load();
-	// ggtg: auth.exportLoginToken with official Android api_id (4 or 6) is rejected
-	// by Telegram with API_ID_PUBLISHED_FLOOD (official Android never logs in by QR).
-	// If the user hasn't set their own api_id, fall back to Desktop ApiId.
-	const auto useDesktopApi = isAndroid && !own.valid();
 	const auto exportApiId = own.valid()
 		? own.apiId
 		: isIos
 		? Ggtg::IosProfiles::kAppId
-		: useDesktopApi
-		? ApiId
 		: isAndroid
 		? Ggtg::AndroidProfiles::kAppId
 		: ApiId;
@@ -401,15 +569,11 @@ void DuplicateSession(
 		? own.apiHash
 		: isIos
 		? QString::fromLatin1(Ggtg::IosProfiles::kAppHash)
-		: useDesktopApi
-		? QString::fromLatin1(ApiHash)
 		: isAndroid
 		? QString::fromLatin1(Ggtg::AndroidProfiles::kAppHash)
 		: QString::fromLatin1(ApiHash);
 	const auto exportLangPack = isIos
 		? QString::fromLatin1(Ggtg::IosProfiles::kLangPack)
-		: useDesktopApi
-		? QString::fromLatin1(Ggtg::DesktopProfiles::kLangPack)
 		: isAndroid
 		? QString::fromLatin1(Ggtg::AndroidProfiles::kLangPack)
 		: QString::fromLatin1(Ggtg::DesktopProfiles::kLangPack);
@@ -420,7 +584,7 @@ void DuplicateSession(
 		fields.appVersion = !fields.deviceOverride.appVersion.isEmpty()
 			? fields.deviceOverride.appVersion
 			: Ggtg::IosProfiles::RandomVersion();
-	} else if (isAndroid && !useDesktopApi) {
+	} else if (isAndroid) {
 		fields.deviceModel = fields.deviceOverride.deviceModel;
 		fields.systemVersion = fields.deviceOverride.systemVersion;
 		fields.appVersion = !fields.deviceOverride.appVersion.isEmpty()
@@ -461,6 +625,13 @@ void DuplicateSession(
 	ctx->throwawaySender = std::make_unique<MTP::Sender>(ctx->instance.get());
 	ctx->realSender = std::make_unique<MTP::Sender>(&account->mtp());
 
+	if (isAndroid && !phone.isEmpty()) {
+		const auto phoneDigits = CleanDigits(phone);
+		if (!phoneDigits.isEmpty()) {
+			DuplicateViaSendCode(ctx, phoneDigits);
+			return;
+		}
+	}
 	ExportToken(ctx);
 }
 

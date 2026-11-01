@@ -12,6 +12,7 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import org.telegram.messenger.ApplicationLoader
 import org.telegram.messenger.R
+import org.telegram.messenger.UserConfig
 import org.telegram.ui.ActionBar.ActionBar.ActionBarMenuOnItemClick
 import org.telegram.ui.ActionBar.AlertDialog
 import org.telegram.ui.ActionBar.BaseFragment
@@ -133,16 +134,31 @@ class GgtgSyncAccountsActivity : BaseFragment() {
                 }
                 val act = parentActivity
                 val msg = GgtgImportSupport.buildResultMessage(result)
+                val onDone = {
+                    val firstSlot = result.imported.firstOrNull()?.let { uid ->
+                        (0 until UserConfig.MAX_ACCOUNT_COUNT).firstOrNull { UserConfig.getInstance(it).clientUserId == uid }
+                    }
+                    val launchAct = org.telegram.ui.LaunchActivity.instance
+                    if (launchAct != null && !UserConfig.getInstance(launchAct.currentAccount).isClientActivated && firstSlot != null) {
+                        GgtgImportSupport.switchToImportedAccount(firstSlot)
+                    }
+                }
                 if (act != null && !act.isFinishing && !act.isDestroyed) {
                     try {
+                        var handled = false
+                        val handleDone = { if (!handled) { handled = true; onDone() } }
                         AlertDialog.Builder(act).setTitle("Аккаунты с Desktop")
                             .setMessage(msg)
-                            .setPositiveButton("Закрыть", null).show()
+                            .setPositiveButton("Закрыть") { _, _ -> handleDone() }
+                            .setOnDismissListener { handleDone() }
+                            .show()
                     } catch (t: Throwable) {
                         toast(msg)
+                        onDone()
                     }
                 } else {
                     toast(msg)
+                    onDone()
                 }
             } catch (t: Throwable) {
                 try { progress.dismiss() } catch (_: Throwable) {}

@@ -133,4 +133,21 @@ object GgtgImportSupport {
             org.telegram.messenger.FileLog.e(t)
         }
     }
+
+    /** Switches LaunchActivity cleanly to the newly imported slot if the app is currently unactivated or on intro. */
+    fun switchToImportedAccount(targetSlot: Int?) {
+        try {
+            if (targetSlot == null || targetSlot !in 0 until UserConfig.MAX_ACCOUNT_COUNT) return
+            if (!UserConfig.getInstance(targetSlot).isClientActivated) return
+            val act = org.telegram.ui.LaunchActivity.instance ?: return
+            val cur = act.currentAccount
+            if (cur < 0 || !UserConfig.getInstance(cur).isClientActivated) {
+                // Reset UserConfig.selectedAccount so LaunchActivity.switchToAccount won't early-return
+                UserConfig.selectedAccount = -1
+                act.switchToAccount(targetSlot, true)
+            }
+        } catch (t: Throwable) {
+            org.telegram.messenger.FileLog.e(t)
+        }
+    }
 }

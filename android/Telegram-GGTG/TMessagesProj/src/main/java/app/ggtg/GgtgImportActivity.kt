@@ -108,12 +108,22 @@ class GgtgImportActivity : BaseFragment() {
             try {
                 val result = withContext(Dispatchers.IO) { GgtgPackImporter.import(file, source, progress, createBackup) }
                 progress.dismiss()
+                var doneHandled = false
                 val onDone = {
-                    if (result.imported.isNotEmpty()) {
-                        finishFragment()
-                        val act = org.telegram.ui.LaunchActivity.instance
-                        if (act != null && !UserConfig.getInstance(UserConfig.selectedAccount).isClientActivated) {
-                            act.switchToAccount(UserConfig.selectedAccount, true)
+                    if (!doneHandled) {
+                        doneHandled = true
+                        if (result.imported.isNotEmpty()) {
+                            val firstSlot = result.imported.firstOrNull()?.let { uid ->
+                                (0 until UserConfig.MAX_ACCOUNT_COUNT).firstOrNull { UserConfig.getInstance(it).clientUserId == uid }
+                            }
+                            val act = org.telegram.ui.LaunchActivity.instance
+                            if (act != null && !UserConfig.getInstance(act.currentAccount).isClientActivated && firstSlot != null) {
+                                GgtgImportSupport.switchToImportedAccount(firstSlot)
+                            } else {
+                                finishFragment()
+                            }
+                        } else {
+                            finishFragment()
                         }
                     }
                 }
