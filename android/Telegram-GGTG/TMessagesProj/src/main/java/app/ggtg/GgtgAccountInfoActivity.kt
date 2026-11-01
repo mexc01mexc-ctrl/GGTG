@@ -508,17 +508,32 @@ class GgtgAccountInfoActivity(private val slot: Int, private val onChanged: () -
                             }
                         }
                         chosen.startsWith("Создать") -> {
-                            val progress = app.ggtg.ui.TdataImportProgressDialog(act, "Резервная сессия")
-                            progress.setWorkingText("Создание резервной сессии…")
-                            GgtgSessions.createBackupSession(act, slot, progress) { res ->
-                                progress.dismiss()
-                                res.onSuccess {
-                                    Toast.makeText(context, "Резервная сессия создана!", Toast.LENGTH_LONG).show()
-                                    onChanged(); rebuild()
-                                }.onFailure {
-                                    Toast.makeText(context, "Ошибка: ${it.message}", Toast.LENGTH_LONG).show()
+                            val isDesktop = GgtgSessions.isDesktopSession(slot)
+                            val sessionOptions = arrayOf(
+                                "Android-сессия (для смартфона · код в чат 777000)",
+                                if (isDesktop)
+                                    "Desktop-сессия (для ПК · код в чат 777000)"
+                                else
+                                    "Desktop-сессия (для ПК · сканирование QR с телефона)"
+                            )
+                            androidx.appcompat.app.AlertDialog.Builder(context)
+                                .setTitle("Создать резервную сессию")
+                                .setItems(sessionOptions) { _, optIdx ->
+                                    val asAndroid = (optIdx == 0)
+                                    val progress = app.ggtg.ui.TdataImportProgressDialog(act, if (asAndroid) "Резервная Android-сессия" else "Резервная Desktop-сессия")
+                                    progress.setWorkingText("Подготовка к созданию сессии…")
+                                    GgtgSessions.createBackupSession(act, slot, asAndroid = asAndroid, progress = progress) { res ->
+                                        progress.dismiss()
+                                        res.onSuccess {
+                                            Toast.makeText(context, if (asAndroid) "Резервная Android-сессия создана!" else "Резервная Desktop-сессия создана!", Toast.LENGTH_LONG).show()
+                                            onChanged(); rebuild()
+                                        }.onFailure {
+                                            Toast.makeText(context, "Ошибка: ${it.message}", Toast.LENGTH_LONG).show()
+                                        }
+                                    }
                                 }
-                            }
+                                .setNegativeButton("Отмена", null)
+                                .show()
                         }
                         chosen == "Защита от угона (Анти-угон)" -> {
                             val backupSessions = GgtgSessions.getSwitchableSessions(uc.clientUserId)

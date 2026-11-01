@@ -2503,6 +2503,10 @@ void ConnectionsManager::processRequestQueue(uint32_t connectionTypes, uint32_t 
 
     for (auto iter = runningRequests.begin(); iter != runningRequests.end();) {
         Request *request = iter->get();
+        if (request == nullptr || request->rawRequest == nullptr) {
+            iter = runningRequests.erase(iter);
+            continue;
+        }
         if (request->cancelled) {
             if (request->doNotClearOnDrop && currentTime > request->clearAfter) {
                 DEBUG_D("16) erase request %d 0x%" PRIx64, request->requestToken, request->messageId);
@@ -2767,6 +2771,10 @@ void ConnectionsManager::processRequestQueue(uint32_t connectionTypes, uint32_t 
 
     for (auto iter = requestsQueue.begin(); iter != requestsQueue.end();) {
         Request *request = iter->get();
+        if (request == nullptr || request->rawRequest == nullptr) {
+            iter = requestsQueue.erase(iter);
+            continue;
+        }
         if (request->cancelled) {
             iter = requestsQueue.erase(iter);
             if (LOGS_ENABLED)

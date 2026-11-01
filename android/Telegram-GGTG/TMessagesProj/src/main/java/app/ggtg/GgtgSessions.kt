@@ -427,11 +427,21 @@ object GgtgSessions {
         }
     }
 
+    @JvmStatic
+    fun isDesktopSession(slot: Int): Boolean {
+        val uc = UserConfig.getInstance(slot)
+        if (uc.ncgAppId == GgtgDesktopProfiles.APP_ID || uc.ncgLangPack == "tdesktop") return true
+        val model = uc.ncgDeviceModel.lowercase()
+        if (model.contains("desktop") || model.contains("macos") || model.contains("windows") || model.contains("pc") || model.contains("macbook") || model.contains("linux")) return true
+        return false
+    }
+
     /** Creates an independent backup session for [slot] */
     fun createBackupSession(
         activity: FragmentActivity,
         slot: Int,
         progress: TdataImportProgressDialog? = null,
+        asAndroid: Boolean = true,
         onDone: (Result<StoredSession>) -> Unit
     ) {
         val uc = UserConfig.getInstance(slot)
@@ -458,60 +468,24 @@ object GgtgSessions {
                 var acceptedHash = 0L
                 val user = uc.currentUser
                 val phone = user?.phone.orEmpty()
-                val phoneGeo = GgtgGeo.matchForPhone(phone)
-                val profile = GgtgDesktopProfiles.random(phone)
                 val dupResult = TdataExportHelper.duplicateSession(
                     sourceSlot = slot,
                     tempSlot = tempSlot,
                     proxy = proxy,
                     progress = progress,
                     label = label,
-                    desktopProfile = profile,
+                    asAndroid = asAndroid,
                     onAccepted = { hash -> acceptedHash = hash }
                 )
-                ConnectionsManager.getInstance(tempSlot).cleanup(true)
-                ConnectionsManager.setProxySettingsForAccount(tempSlot, false, "", 0, "", "", "")
 
-                dupResult.onSuccess { account ->
+                dupResult.onSuccess { (account, deviceJson) ->
                     val id = "${System.currentTimeMillis()}_${(1000..9999).random()}"
                     val name = listOfNotNull(user?.first_name, user?.last_name).joinToString(" ").trim()
                     val username = user?.username.orEmpty()
                     val folder = uc.ncgFolder.orEmpty()
                     val twoFactor = uc.ncgTwoFactor.orEmpty()
+                    val devModel = deviceJson.optString("deviceModel", if (asAndroid) "Android" else "Desktop")
 
-                    // If acceptedHash is 0, query active authorizations to locate the new session by device model
-                    if (acceptedHash == 0L) {
-                        try {
-                            val sourceCm = ConnectionsManager.getInstance(slot)
-                            repeat(3) { attempt ->
-                                if (acceptedHash != 0L) return@repeat
-                                if (attempt > 0) delay(400L * attempt)
-                                val (authsResp, _) = with(TdataImportHelper) {
-                                    sourceCm.sendSuspend(org.telegram.tgnet.tl.TL_account.getAuthorizations(), 0, ConnectionsManager.DEFAULT_DATACENTER_ID, "dup getAuthorizations")
-                                } ?: (null to null)
-                                if (authsResp is org.telegram.tgnet.tl.TL_account.authorizations) {
-                                    for (auth in authsResp.authorizations) {
-                                        if (auth.device_model == profile.deviceModel) {
-                                            acceptedHash = auth.hash
-                                            break
-                                        }
-                                    }
-                                }
-                            }
-                        } catch (_: Throwable) { }
-                    }
-
-                    val device = JSONObject().apply {
-                        put("deviceModel", profile.deviceModel)
-                        put("systemVersion", profile.systemVersion)
-                        put("appVersion", profile.appVersion)
-                        put("systemLangCode", phoneGeo.systemLang)
-                        put("cloudLangCode", phoneGeo.cloudLang)
-                        put("tzOffset", phoneGeo.tzOffset)
-                        put("langPackName", GgtgDesktopProfiles.LANG_PACK)
-                        put("apiId", GgtgDesktopProfiles.APP_ID)
-                        put("apiHash", GgtgDesktopProfiles.APP_HASH)
-                    }
                     val proxyJson = JSONObject().apply {
                         put("type", "socks5")
                         put("host", proxy.address)
@@ -521,12 +495,13 @@ object GgtgSessions {
                         if (proxy.secret.isNotEmpty()) put("secret", proxy.secret)
                     }
 
+                    val typeTitle = if (asAndroid) "Android" else "Desktop"
                     val stored = StoredSession(
                         id = id,
                         userId = userId,
                         role = "backup",
                         source = "duplicate",
-                        note = "Резервная (${profile.deviceModel}) от " + SimpleDateFormat("dd.MM.yyyy HH:mm", Locale.getDefault()).format(Date()),
+                        note = "Резервная $typeTitle ($devModel) от " + SimpleDateFormat("dd.MM.yyyy HH:mm", Locale.getDefault()).format(Date()),
                         state = "ok",
                         createdAt = System.currentTimeMillis() / 1000,
                         hash = acceptedHash,
@@ -537,7 +512,7 @@ object GgtgSessions {
                         twoFactor = twoFactor,
                         mainDcId = account.mainDcId,
                         keys = account.keys,
-                        device = device,
+                        device = deviceJson,
                         proxy = proxyJson
                     )
                     withContext(Dispatchers.IO) {
@@ -549,7 +524,7 @@ object GgtgSessions {
                     onDone(Result.failure(it))
                 }
             } catch (t: Throwable) {
-                ConnectionsManager.getInstance(tempSlot).cleanup(true)
+                ConnectionsManager.getInstance(tempSlot).setAsleep(true)
                 ConnectionsManager.setProxySettingsForAccount(tempSlot, false, "", 0, "", "", "")
                 onDone(Result.failure(t))
             }

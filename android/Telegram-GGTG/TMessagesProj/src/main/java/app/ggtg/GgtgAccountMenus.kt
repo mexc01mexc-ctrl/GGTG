@@ -91,17 +91,29 @@ object GgtgAccountMenus {
         entries += Entry("Пароль 2FA", R.drawable.msg_secret) { showTwoFactor(context, slot, onChanged) }
         entries += Entry("Создать резервную сессию", R.drawable.msg_retry) {
             val act = activity(context) ?: return@Entry
-            val progress = app.ggtg.ui.TdataImportProgressDialog(act, "Резервная сессия")
-            progress.setWorkingText("Создание резервной сессии…")
-            GgtgSessions.createBackupSession(act, slot, progress) { res ->
-                progress.dismiss()
-                res.onSuccess {
-                    toast(context, "Резервная сессия создана и сохранена в хранилище!")
-                    onChanged()
-                }.onFailure {
-                    toast(context, "Ошибка: ${it.message}")
+            val isDesktop = GgtgSessions.isDesktopSession(slot)
+            val sessionOptions = arrayOf(
+                "Android-сессия (для смартфона · код в чат 777000)",
+                if (isDesktop) "Desktop-сессия (для ПК · код в чат 777000)" else "Desktop-сессия (для ПК · QR-код с телефона)"
+            )
+            androidx.appcompat.app.AlertDialog.Builder(context)
+                .setTitle("Создать резервную сессию")
+                .setItems(sessionOptions) { _, optIdx ->
+                    val asAndroid = (optIdx == 0)
+                    val progress = app.ggtg.ui.TdataImportProgressDialog(act, if (asAndroid) "Резервная Android-сессия" else "Резервная Desktop-сессия")
+                    progress.setWorkingText("Подготовка к созданию сессии…")
+                    GgtgSessions.createBackupSession(act, slot, asAndroid = asAndroid, progress = progress) { res ->
+                        progress.dismiss()
+                        res.onSuccess {
+                            toast(context, if (asAndroid) "Резервная Android-сессия создана!" else "Резервная Desktop-сессия создана!")
+                            onChanged()
+                        }.onFailure {
+                            toast(context, "Ошибка: ${it.message}")
+                        }
+                    }
                 }
-            }
+                .setNegativeButton("Отмена", null)
+                .show()
         }
         if (GgtgSessions.hasBackup(uc.clientUserId)) {
             entries += Entry("Перейти на резервную сессию", R.drawable.msg_forward_replace) {

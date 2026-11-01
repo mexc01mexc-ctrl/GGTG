@@ -135,7 +135,7 @@ object TdataExportHelper {
                             SessionSource.NewDuplicate -> {
                                 val proxy = ownProxy(slot)
                                 if (proxy == null) Result.failure(NO_PROXY)
-                                else duplicateSession(slot, tempSlot, proxy, progress, label)
+                                else duplicateSession(slot, tempSlot, proxy, progress, label).map { it.first }
                             }
                             SessionSource.Backup -> {
                                 val backups = GgtgSessions.getBackups(userId)
@@ -146,7 +146,7 @@ object TdataExportHelper {
                                 } else if (options.newWhenNoBackup) {
                                     val proxy = ownProxy(slot)
                                     if (proxy == null) Result.failure(NO_PROXY)
-                                    else duplicateSession(slot, tempSlot, proxy, progress, label)
+                                    else duplicateSession(slot, tempSlot, proxy, progress, label).map { it.first }
                                 } else {
                                     Result.failure(Exception("нет резервной сессии"))
                                 }
@@ -473,7 +473,7 @@ object TdataExportHelper {
                         val proxy = ownProxy(slot)
                         if (proxy == null) Result.failure(NO_PROXY) else duplicateSession(slot, tempSlot, proxy, progress, label)
                     } catch (t: Throwable) { Result.failure(t) }
-                    result.onSuccess { account ->
+                    result.onSuccess { (account, deviceJson) ->
                         val uc = UserConfig.getInstance(slot)
                         val entry = org.json.JSONObject()
                         entry.put("userId", account.userId.toString())
@@ -483,6 +483,8 @@ object TdataExportHelper {
                             keys.put(org.json.JSONObject().put("dcId", dcId).put("key", key.joinToString("") { "%02x".format(it) }))
                         }
                         entry.put("keys", keys)
+                        entry.put("device", deviceJson)
+                        entry.put("handoff", false)
                         entry.put("phone", uc.currentUser?.phone.orEmpty())
                         uc.ncgFolder?.let { entry.put("folder", it) }
                         entry.put("pinned", uc.ncgPinned)
@@ -679,33 +681,278 @@ object TdataExportHelper {
         proxy: GgtgProxyBits,
         progress: TdataImportProgressDialog?,
         label: String,
+        asAndroid: Boolean = false,
+        desktopProfile: GgtgDesktopProfiles.Profile? = null,
+        androidPhone: GgtgDevice.Phone? = null,
+        onAccepted: (Long) -> Unit = {}
+    ): Result<Pair<TdataAccount, JSONObject>> {
+        val sourceIsDesktop = GgtgSessions.isDesktopSession(sourceSlot)
+        return if (asAndroid || sourceIsDesktop) {
+            // 1. Android sessions cannot be created via QR (Telegram protocol restriction).
+            // 2. Desktop source sessions cannot scan QR codes.
+            // Both cases strictly use the in-app confirmation code (chat 777000).
+            duplicateSessionByCode(
+                sourceSlot = sourceSlot,
+                tempSlot = tempSlot,
+                proxy = proxy,
+                progress = progress,
+                label = label,
+                asAndroid = asAndroid,
+                androidDevice = androidPhone,
+                desktopProfile = desktopProfile,
+                onAccepted = onAccepted
+            )
+        } else {
+            // Source is Mobile AND target is Desktop: simulated QR code scanning.
+            val qrResult = duplicateSessionByQr(
+                sourceSlot = sourceSlot,
+                tempSlot = tempSlot,
+                proxy = proxy,
+                progress = progress,
+                label = label,
+                desktopProfile = desktopProfile,
+                onAccepted = onAccepted
+            )
+            if (qrResult.isSuccess) {
+                qrResult
+            } else {
+                FileLog.d("duplicateSession: QR failed (${qrResult.exceptionOrNull()?.message}), falling back to code")
+                duplicateSessionByCode(
+                    sourceSlot = sourceSlot,
+                    tempSlot = tempSlot,
+                    proxy = proxy,
+                    progress = progress,
+                    label = label,
+                    asAndroid = false,
+                    androidDevice = null,
+                    desktopProfile = desktopProfile,
+                    onAccepted = onAccepted
+                )
+            }
+        }
+    }
+
+    internal suspend fun duplicateSessionByCode(
+        sourceSlot: Int,
+        tempSlot: Int,
+        proxy: GgtgProxyBits,
+        progress: TdataImportProgressDialog?,
+        label: String,
+        asAndroid: Boolean,
+        androidDevice: GgtgDevice.Phone? = null,
         desktopProfile: GgtgDesktopProfiles.Profile? = null,
         onAccepted: (Long) -> Unit = {}
-    ): Result<TdataAccount> {
+    ): Result<Pair<TdataAccount, JSONObject>> {
+        val sourceUser = UserConfig.getInstance(sourceSlot).currentUser
+        val sourcePhone = sourceUser?.phone.orEmpty()
+        val digits = sourcePhone.filter(Char::isDigit)
+        if (digits.isEmpty()) {
+            return Result.failure(Exception("У аккаунта нет номера телефона"))
+        }
+        val phoneGeo = GgtgGeo.matchForPhone(sourcePhone)
+
+        val deviceJson = JSONObject()
+        val apiId: Int
+        val apiHash: String
+        val appVersion: String
+        val langPack: String
+        val deviceModel: String
+        val systemVersion: String
+
+        if (asAndroid) {
+            val phone = androidDevice ?: GgtgDevice.phones.random()
+            deviceModel = phone.model
+            systemVersion = phone.system
+            appVersion = "12.10.6 (71129)"
+            langPack = "android"
+            apiId = 6
+            apiHash = "db0463428c0576356788e285d3cf5a22"
+        } else {
+            val profile = desktopProfile ?: GgtgDesktopProfiles.random(sourcePhone)
+            deviceModel = profile.deviceModel
+            systemVersion = profile.systemVersion
+            appVersion = profile.appVersion
+            langPack = GgtgDesktopProfiles.LANG_PACK
+            apiId = GgtgDesktopProfiles.APP_ID
+            apiHash = GgtgDesktopProfiles.APP_HASH
+        }
+
+        deviceJson.put("deviceModel", deviceModel)
+        deviceJson.put("systemVersion", systemVersion)
+        deviceJson.put("appVersion", appVersion)
+        deviceJson.put("systemLangCode", phoneGeo.systemLang)
+        deviceJson.put("cloudLangCode", phoneGeo.cloudLang)
+        deviceJson.put("tzOffset", phoneGeo.tzOffset)
+        deviceJson.put("langPackName", langPack)
+        deviceJson.put("apiId", apiId)
+        deviceJson.put("apiHash", apiHash)
+
+        ConnectionsManager.setProxySettingsForAccount(tempSlot, true, proxy.address, proxy.port, proxy.username, proxy.password, proxy.secret)
+        GgtgDevice.save(
+            tempSlot, deviceModel, systemVersion,
+            phoneGeo.systemLang.lowercase(), phoneGeo.cloudLang, phoneGeo.tzOffset,
+            appVersion, langPack, apiId, apiHash
+        )
+
+        val tempCm = ConnectionsManager.getInstance(tempSlot)
+        tempCm.setAsleep(false)
+        val sourceCm = ConnectionsManager.getInstance(sourceSlot)
+        val sourceUserId = UserConfig.getInstance(sourceSlot).clientUserId
+
+        val flags = ConnectionsManager.RequestFlagWithoutLogin or
+            ConnectionsManager.RequestFlagFailOnServerErrors or
+            ConnectionsManager.RequestFlagTryDifferentDc or
+            ConnectionsManager.RequestFlagEnableUnauthorized
+        val since = (System.currentTimeMillis() / 1000).toInt() - 15
+
+        try {
+            progress?.setWorkingText("Отправка запроса кода авторизации в Telegram…")
+            val sendReq = TLRPC.TL_auth_sendCode().apply {
+                phone_number = digits
+                this.api_id = apiId
+                this.api_hash = apiHash
+                settings = TLRPC.TL_codeSettings()
+            }
+            val (sentResp, sendErr) = tempCm.sendSuspend(sendReq, flags, ConnectionsManager.DEFAULT_DATACENTER_ID, "dup sendCode")
+                ?: return Result.failure(Exception("Таймаут отправки кода (sendCode)"))
+            if (sendErr != null) {
+                return Result.failure(Exception("Ошибка sendCode: ${sendErr.text}"))
+            }
+            val sentCode = sentResp as? TLRPC.TL_auth_sentCode
+                ?: return Result.failure(Exception("Неожиданный ответ sendCode: $sentResp"))
+            val phoneCodeHash = sentCode.phone_code_hash
+
+            progress?.setWorkingText("Ожидание кода в Telegram (чат 777000)…")
+            val pattern = Regex("(?<!\\d)(\\d{5,6})(?!\\d)")
+            val deadline = System.currentTimeMillis() + 60_000L
+            var code: String? = null
+            while (System.currentTimeMillis() < deadline) {
+                delay(1_500)
+                val (resp, _) = sourceCm.sendSuspend(TLRPC.TL_messages_getDialogs().apply {
+                    offset_peer = TLRPC.TL_inputPeerEmpty()
+                    limit = 10
+                }, 0, ConnectionsManager.DEFAULT_DATACENTER_ID, "dup getDialogs") ?: continue
+                val messages = (resp as? TLRPC.messages_Dialogs)?.messages
+                if (messages != null) {
+                    for (m in messages) {
+                        if (m.peer_id?.user_id == 777000L && m.date >= since && !m.message.isNullOrEmpty()) {
+                            val match = pattern.find(m.message)
+                            if (match != null) {
+                                code = match.groupValues[1]
+                                break
+                            }
+                        }
+                    }
+                }
+                if (code != null) break
+            }
+
+            if (code == null) {
+                tempCm.sendSuspend(TLRPC.TL_auth_cancelCode().apply {
+                    phone_number = digits
+                    phone_code_hash = phoneCodeHash
+                }, flags, ConnectionsManager.DEFAULT_DATACENTER_ID, "dup cancelCode")
+                return Result.failure(Exception("Код авторизации не поступил в сервисный чат 777000"))
+            }
+
+            progress?.setWorkingText("Авторизация по коду…")
+            val signInReq = TLRPC.TL_auth_signIn().apply {
+                this.flags = this.flags or 1
+                phone_number = digits
+                phone_code_hash = phoneCodeHash
+                phone_code = code
+            }
+            val (signed, signErr) = tempCm.sendSuspend(signInReq, flags, ConnectionsManager.DEFAULT_DATACENTER_ID, "dup signIn")
+                ?: return Result.failure(Exception("Таймаут signIn"))
+
+            val dcId = tempCm.currentDatacenterId
+            var auth: TLRPC.auth_Authorization? = signed as? TLRPC.auth_Authorization
+            if (signErr != null) {
+                if (signErr.text == "SESSION_PASSWORD_NEEDED") {
+                    progress?.setWorkingText("Ввод пароля двухфакторной аутентификации (2FA)…")
+                    val progressResult = resolvePasswordAndAuthorize(tempCm, dcId, sourceUserId, label, progress)
+                    auth = progressResult.getOrElse { return Result.failure(it) }
+                } else {
+                    return Result.failure(Exception("Ошибка signIn: ${signErr.text}"))
+                }
+            }
+            if (auth !is TLRPC.TL_auth_authorization) {
+                return Result.failure(Exception("Неожиданный ответ авторизации: $auth"))
+            }
+
+            val blob = tempCm.exportAuthKeys()
+            val account = parseKeys(blob, auth.user.id, dcId)
+
+            try {
+                repeat(3) { attempt ->
+                    if (attempt > 0) delay(400L * attempt)
+                    val (authsResp, _) = sourceCm.sendSuspend(org.telegram.tgnet.tl.TL_account.getAuthorizations(), 0, ConnectionsManager.DEFAULT_DATACENTER_ID, "dup getAuthorizations") ?: (null to null)
+                    if (authsResp is org.telegram.tgnet.tl.TL_account.authorizations) {
+                        for (a in authsResp.authorizations) {
+                            if (a.device_model == deviceModel) {
+                                onAccepted(a.hash)
+                                break
+                            }
+                        }
+                    }
+                }
+            } catch (_: Throwable) { }
+
+            return Result.success(account to deviceJson)
+        } finally {
+            tempCm.setAsleep(true)
+            ConnectionsManager.setProxySettingsForAccount(tempSlot, false, "", 0, "", "", "")
+        }
+    }
+
+    internal suspend fun duplicateSessionByQr(
+        sourceSlot: Int,
+        tempSlot: Int,
+        proxy: GgtgProxyBits,
+        progress: TdataImportProgressDialog?,
+        label: String,
+        desktopProfile: GgtgDesktopProfiles.Profile? = null,
+        onAccepted: (Long) -> Unit = {}
+    ): Result<Pair<TdataAccount, JSONObject>> {
         val sourceUser = UserConfig.getInstance(sourceSlot).currentUser
         val sourcePhone = sourceUser?.phone.orEmpty()
         val phoneGeo = GgtgGeo.matchForPhone(sourcePhone)
         val profile = desktopProfile ?: GgtgDesktopProfiles.random(sourcePhone)
+        val appVersion = profile.appVersion
+        val langPack = GgtgDesktopProfiles.LANG_PACK
+        val apiId = GgtgDesktopProfiles.APP_ID
+        val apiHash = GgtgDesktopProfiles.APP_HASH
+
+        val deviceJson = JSONObject().apply {
+            put("deviceModel", profile.deviceModel)
+            put("systemVersion", profile.systemVersion)
+            put("appVersion", appVersion)
+            put("systemLangCode", phoneGeo.systemLang)
+            put("cloudLangCode", phoneGeo.cloudLang)
+            put("tzOffset", phoneGeo.tzOffset)
+            put("langPackName", langPack)
+            put("apiId", apiId)
+            put("apiHash", apiHash)
+        }
+
         ConnectionsManager.setProxySettingsForAccount(tempSlot, true, proxy.address, proxy.port, proxy.username, proxy.password, proxy.secret)
         GgtgDevice.save(
             tempSlot, profile.deviceModel, profile.systemVersion,
             phoneGeo.systemLang.lowercase(), phoneGeo.cloudLang, phoneGeo.tzOffset,
-            profile.appVersion, GgtgDesktopProfiles.LANG_PACK,
-            GgtgDesktopProfiles.APP_ID, GgtgDesktopProfiles.APP_HASH
+            appVersion, langPack, apiId, apiHash
         )
+
         val tempCm = ConnectionsManager.getInstance(tempSlot)
-        tempCm.cleanup(true)
+        tempCm.setAsleep(false)
         val sourceCm = ConnectionsManager.getInstance(sourceSlot)
         val sourceUserId = UserConfig.getInstance(sourceSlot).clientUserId
 
-        // 2FA on the SOURCE account surfaces here, on tempCm (the throwaway "new device" asking to log
-        // in) - resolves it, then reads the just-authorized session key straight back off tempCm.
-        suspend fun onPasswordNeeded(dcId: Int): Result<TdataAccount> {
+        suspend fun onPasswordNeeded(dcId: Int): Result<Pair<TdataAccount, JSONObject>> {
             val progressResult = resolvePasswordAndAuthorize(tempCm, dcId, sourceUserId, label, progress)
             val auth = progressResult.getOrElse { return Result.failure(it) }
             if (auth !is TLRPC.TL_auth_authorization) return Result.failure(Exception("account requires sign-up - can't happen for an existing session"))
             val blob = tempCm.exportAuthKeys()
-            return try { Result.success(parseKeys(blob, auth.user.id, dcId)) } catch (t: Throwable) { Result.failure(t) }
+            return try { Result.success(parseKeys(blob, auth.user.id, dcId) to deviceJson) } catch (t: Throwable) { Result.failure(t) }
         }
 
         fun exportReq() = TLRPC.TL_auth_exportLoginToken().apply { api_id = GgtgApiOverride.id(); api_hash = GgtgApiOverride.hash() }
@@ -713,63 +960,70 @@ object TdataExportHelper {
         val noLoginUnauth = noLogin or ConnectionsManager.RequestFlagEnableUnauthorized
 
         var dcId = ConnectionsManager.DEFAULT_DATACENTER_ID
-        var (resp, err) = tempCm.sendSuspend(exportReq(), noLogin, dcId, "dup exportLoginToken") ?: return Result.failure(Exception("exportLoginToken: таймаут"))
-        if (err != null) {
-            if (err.text == "SESSION_PASSWORD_NEEDED") return onPasswordNeeded(dcId)
-            return Result.failure(Exception("exportLoginToken: ${err.text}"))
-        }
-
-        val token: ByteArray = when (resp) {
-            is TLRPC.TL_auth_loginTokenMigrateTo -> {
-                dcId = resp.dc_id
-                val (r2, e2) = tempCm.sendSuspend(TLRPC.TL_auth_importLoginToken().apply { token = resp.token }, noLoginUnauth, dcId, "dup importLoginToken")
-                    ?: return Result.failure(Exception("importLoginToken: таймаут"))
-                if (e2 != null) {
-                    if (e2.text == "SESSION_PASSWORD_NEEDED") return onPasswordNeeded(dcId)
-                    return Result.failure(Exception("importLoginToken: ${e2.text}"))
-                }
-                (r2 as? TLRPC.TL_auth_loginToken)?.token ?: return Result.failure(Exception("неожиданный ответ: $r2"))
+        try {
+            progress?.setWorkingText("Генерация токена авторизации…")
+            var (resp, err) = tempCm.sendSuspend(exportReq(), noLogin, dcId, "dup exportLoginToken")
+                ?: return Result.failure(Exception("exportLoginToken: таймаут"))
+            if (err != null) {
+                if (err.text == "SESSION_PASSWORD_NEEDED") return onPasswordNeeded(dcId)
+                return Result.failure(Exception("exportLoginToken: ${err.text}"))
             }
-            is TLRPC.TL_auth_loginToken -> { dcId = 2; resp.token }
-            else -> return Result.failure(Exception("неожиданный ответ: $resp"))
-        }
 
-        // the source account approves on ITS home DC (the server resolves the token across DCs itself)
-        val (acc, accErr) = sourceCm.sendSuspend(TLRPC.TL_auth_acceptLoginToken().apply { this.token = token }, 0, ConnectionsManager.DEFAULT_DATACENTER_ID, "dup acceptLoginToken")
-            ?: return Result.failure(Exception("acceptLoginToken: таймаут"))
-        if (accErr != null) return Result.failure(Exception("acceptLoginToken: ${accErr.text}"))
-        if (acc !is TLRPC.TL_authorization) return Result.failure(Exception("неожиданный ответ accept: $acc"))
-        onAccepted(acc.hash)
-
-        repeat(5) { attempt ->
-            val (p, pe) = tempCm.sendSuspend(exportReq(), noLogin, dcId, "dup poll") ?: return Result.failure(Exception("poll: таймаут"))
-            if (pe != null) {
-                if (pe.text == "SESSION_PASSWORD_NEEDED") return onPasswordNeeded(dcId)
-                return Result.failure(Exception("poll: ${pe.text}"))
-            }
-            var success: TLRPC.auth_Authorization? = null
-            when (p) {
-                is TLRPC.TL_auth_loginTokenSuccess -> success = p.authorization
+            val token: ByteArray = when (resp) {
                 is TLRPC.TL_auth_loginTokenMigrateTo -> {
-                    dcId = p.dc_id
-                    val (r2, e2) = tempCm.sendSuspend(TLRPC.TL_auth_importLoginToken().apply { this.token = p.token }, noLoginUnauth, dcId, "dup importLoginToken2")
+                    dcId = resp.dc_id
+                    val (r2, e2) = tempCm.sendSuspend(TLRPC.TL_auth_importLoginToken().apply { token = resp.token }, noLoginUnauth, dcId, "dup importLoginToken")
                         ?: return Result.failure(Exception("importLoginToken: таймаут"))
                     if (e2 != null) {
                         if (e2.text == "SESSION_PASSWORD_NEEDED") return onPasswordNeeded(dcId)
                         return Result.failure(Exception("importLoginToken: ${e2.text}"))
                     }
-                    if (r2 is TLRPC.TL_auth_loginTokenSuccess) success = r2.authorization
+                    (r2 as? TLRPC.TL_auth_loginToken)?.token ?: return Result.failure(Exception("неожиданный ответ: $r2"))
                 }
-                is TLRPC.TL_auth_loginToken -> {}
-                else -> return Result.failure(Exception("неожиданный ответ poll: $p"))
+                is TLRPC.TL_auth_loginToken -> { dcId = 2; resp.token }
+                else -> return Result.failure(Exception("неожиданный ответ: $resp"))
             }
-            if (success is TLRPC.TL_auth_authorization) {
-                // the new session's key lives on the DC the login finished on
-                val blob = tempCm.exportAuthKeys()
-                return try { Result.success(parseKeys(blob, success.user.id, dcId)) } catch (t: Throwable) { Result.failure(t) }
+
+            progress?.setWorkingText("Подтверждение QR-авторизации…")
+            val (acc, accErr) = sourceCm.sendSuspend(TLRPC.TL_auth_acceptLoginToken().apply { this.token = token }, 0, ConnectionsManager.DEFAULT_DATACENTER_ID, "dup acceptLoginToken")
+                ?: return Result.failure(Exception("acceptLoginToken: таймаут"))
+            if (accErr != null) return Result.failure(Exception("acceptLoginToken: ${accErr.text}"))
+            if (acc !is TLRPC.TL_authorization) return Result.failure(Exception("неожиданный ответ accept: $acc"))
+            onAccepted(acc.hash)
+
+            progress?.setWorkingText("Ожидание завершения авторизации…")
+            repeat(5) { attempt ->
+                val (p, pe) = tempCm.sendSuspend(exportReq(), noLogin, dcId, "dup poll") ?: return Result.failure(Exception("poll: таймаут"))
+                if (pe != null) {
+                    if (pe.text == "SESSION_PASSWORD_NEEDED") return onPasswordNeeded(dcId)
+                    return Result.failure(Exception("poll: ${pe.text}"))
+                }
+                var success: TLRPC.auth_Authorization? = null
+                when (p) {
+                    is TLRPC.TL_auth_loginTokenSuccess -> success = p.authorization
+                    is TLRPC.TL_auth_loginTokenMigrateTo -> {
+                        dcId = p.dc_id
+                        val (r2, e2) = tempCm.sendSuspend(TLRPC.TL_auth_importLoginToken().apply { this.token = p.token }, noLoginUnauth, dcId, "dup importLoginToken2")
+                            ?: return Result.failure(Exception("importLoginToken: таймаут"))
+                        if (e2 != null) {
+                            if (e2.text == "SESSION_PASSWORD_NEEDED") return onPasswordNeeded(dcId)
+                            return Result.failure(Exception("importLoginToken: ${e2.text}"))
+                        }
+                        if (r2 is TLRPC.TL_auth_loginTokenSuccess) success = r2.authorization
+                    }
+                    is TLRPC.TL_auth_loginToken -> {}
+                    else -> return Result.failure(Exception("неожиданный ответ poll: $p"))
+                }
+                if (success is TLRPC.TL_auth_authorization) {
+                    val blob = tempCm.exportAuthKeys()
+                    return try { Result.success(parseKeys(blob, success.user.id, dcId) to deviceJson) } catch (t: Throwable) { Result.failure(t) }
+                }
+                if (attempt < 4) delay(400)
             }
-            if (attempt < 4) delay(400)
+            return Result.failure(Exception("вход подтверждён, но сессия не завершилась"))
+        } finally {
+            tempCm.setAsleep(true)
+            ConnectionsManager.setProxySettingsForAccount(tempSlot, false, "", 0, "", "", "")
         }
-        return Result.failure(Exception("вход подтверждён, но сессия не завершилась"))
     }
 }
