@@ -1,26 +1,33 @@
 package app.ggtg
 
+import android.app.Activity
 import android.content.Context
-import java.io.File
-import org.telegram.messenger.ApplicationLoader
+import android.content.Intent
+import android.graphics.PorterDuff
 import android.graphics.Typeface
 import android.view.Gravity
 import android.view.View
 import android.widget.EditText
 import android.widget.FrameLayout
+import android.widget.ImageView
 import android.widget.LinearLayout
 import android.widget.TextView
 import android.widget.Toast
+import java.io.File
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.launch
 import org.telegram.messenger.AndroidUtilities
+import org.telegram.messenger.ApplicationLoader
 import org.telegram.messenger.R
 import org.telegram.messenger.UserConfig
 import org.telegram.messenger.UserObject
+import org.telegram.tgnet.TLRPC
 import org.telegram.ui.ActionBar.BaseFragment
 import org.telegram.ui.ActionBar.Theme
+import org.telegram.ui.Components.AvatarDrawable
+import org.telegram.ui.Components.BackupImageView
 import org.telegram.ui.SessionsActivity
 import app.ggtg.ai.GgtgAiUi
 
@@ -29,6 +36,10 @@ import app.ggtg.ai.GgtgAiUi
 // theme): who it is, the connection (proxy, status, SpamBot), the device, the session. Like the
 // desktop's ShowAccountInfoBox. A tap on a value copies it; the proxy and SpamBot rows act.
 class GgtgAccountInfoActivity(private val slot: Int, private val onChanged: () -> Unit) : BaseFragment() {
+
+    companion object {
+        private const val REQUEST_CODE_PICK_AVATAR = 1042
+    }
 
     private var column: LinearLayout? = null
 
@@ -41,6 +52,204 @@ class GgtgAccountInfoActivity(private val slot: Int, private val onChanged: () -
 
     override fun onResume() { super.onResume(); rebuild() }
 
+    override fun onActivityResultFragment(requestCode: Int, resultCode: Int, data: Intent?) {
+        super.onActivityResultFragment(requestCode, resultCode, data)
+        if (requestCode == REQUEST_CODE_PICK_AVATAR && resultCode == Activity.RESULT_OK && data?.data != null) {
+            val uri = data.data ?: return
+            val ctx = context ?: ApplicationLoader.applicationContext
+            val act = ctx as? androidx.fragment.app.FragmentActivity
+            val progress = if (act != null) app.ggtg.ui.TdataImportProgressDialog(act, "Смена фото").apply {
+                setWorkingText("Загрузка и установка фото…")
+            } else null
+            CoroutineScope(Dispatchers.IO + SupervisorJob()).launch {
+                val tempFile = File(ctx.cacheDir, "picked_avatar_${System.currentTimeMillis()}.jpg")
+                try {
+                    ctx.contentResolver.openInputStream(uri)?.use { input ->
+                        tempFile.outputStream().use { output ->
+                            input.copyTo(output)
+                        }
+                    }
+                    val (ok, err) = GgtgBulk.changePhoto(slot, tempFile.absolutePath, true)
+                    AndroidUtilities.runOnUIThread {
+                        progress?.dismiss()
+                        if (ok) {
+                            Toast.makeText(ctx, "Фото профиля обновлено", Toast.LENGTH_SHORT).show()
+                            onChanged()
+                            rebuild()
+                        } else {
+                            Toast.makeText(ctx, "Ошибка: $err", Toast.LENGTH_LONG).show()
+                        }
+                    }
+                } catch (t: Throwable) {
+                    AndroidUtilities.runOnUIThread {
+                        progress?.dismiss()
+                        Toast.makeText(ctx, "Ошибка: ${t.message}", Toast.LENGTH_SHORT).show()
+                    }
+                } finally {
+                    tempFile.delete()
+                }
+            }
+        }
+    }
+
+    private fun promptChangePhoto(user: TLRPC.User) {
+        val ctx = context ?: return
+        val hasPhoto = user.photo != null && user.photo !is TLRPC.TL_userProfilePhotoEmpty
+        val items = mutableListOf<GgtgUi.MenuItem>()
+        items.add(GgtgUi.MenuItem("Выбрать из галереи", R.drawable.msg_camera) {
+            try {
+                val intent = Intent(Intent.ACTION_GET_CONTENT).apply { type = "image/*" }
+                startActivityForResult(intent, REQUEST_CODE_PICK_AVATAR)
+            } catch (e: Exception) {
+                Toast.makeText(ctx, "Не удалось открыть галерею", Toast.LENGTH_SHORT).show()
+            }
+        })
+        if (hasPhoto) {
+            items.add(GgtgUi.MenuItem("Удалить фото", R.drawable.msg_delete) {
+                androidx.appcompat.app.AlertDialog.Builder(ctx)
+                    .setTitle("Удалить фото профиля?")
+                    .setMessage("Текущее фото профиля будет удалено с аккаунта.")
+                    .setPositiveButton("Удалить") { _, _ ->
+                        val act = ctx as? androidx.fragment.app.FragmentActivity
+                        val progress = if (act != null) app.ggtg.ui.TdataImportProgressDialog(act, "Удаление фото").apply {
+                            setWorkingText("Удаление фото профиля…")
+                        } else null
+                        CoroutineScope(Dispatchers.IO + SupervisorJob()).launch {
+                            val (ok, err) = GgtgBulk.deletePhoto(slot)
+                            AndroidUtilities.runOnUIThread {
+                                progress?.dismiss()
+                                if (ok) {
+                                    Toast.makeText(ctx, "Фото профиля удалено", Toast.LENGTH_SHORT).show()
+                                    onChanged()
+                                    rebuild()
+                                } else {
+                                    Toast.makeText(ctx, "Ошибка: $err", Toast.LENGTH_LONG).show()
+                                }
+                            }
+                        }
+                    }
+                    .setNegativeButton("Отмена", null)
+                    .show()
+            })
+        }
+        GgtgUi.menu(ctx, "Фото профиля", items)
+    }
+
+    private fun promptEditName(user: TLRPC.User) {
+        val ctx = context ?: return
+        val act = ctx as? androidx.fragment.app.FragmentActivity
+        val layout = LinearLayout(ctx).apply {
+            orientation = LinearLayout.VERTICAL
+            val padH = dp(24f)
+            val padV = dp(12f)
+            setPadding(padH, padV, padH, padV)
+        }
+        val firstInput = EditText(ctx).apply {
+            hint = "Имя"
+            setText(user.first_name.orEmpty())
+            setSelection(text.length)
+            setTextColor(Theme.getColor(Theme.key_windowBackgroundWhiteBlackText))
+            setHintTextColor(Theme.getColor(Theme.key_windowBackgroundWhiteHintText))
+            textSize = 16f
+        }
+        val lastInput = EditText(ctx).apply {
+            hint = "Фамилия (необязательно)"
+            setText(user.last_name.orEmpty())
+            setSelection(text.length)
+            setTextColor(Theme.getColor(Theme.key_windowBackgroundWhiteBlackText))
+            setHintTextColor(Theme.getColor(Theme.key_windowBackgroundWhiteHintText))
+            textSize = 16f
+        }
+        layout.addView(firstInput)
+        layout.addView(lastInput, LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT).apply {
+            topMargin = dp(10f)
+        })
+
+        androidx.appcompat.app.AlertDialog.Builder(ctx)
+            .setTitle("Изменить имя")
+            .setView(layout)
+            .setPositiveButton("Сохранить") { _, _ ->
+                val newFirst = firstInput.text.toString().trim()
+                val newLast = lastInput.text.toString().trim()
+                if (newFirst.isEmpty()) {
+                    Toast.makeText(ctx, "Имя не может быть пустым", Toast.LENGTH_SHORT).show()
+                    return@setPositiveButton
+                }
+                val progress = if (act != null) app.ggtg.ui.TdataImportProgressDialog(act, "Изменение имени").apply {
+                    setWorkingText("Сохранение имени…")
+                } else null
+                CoroutineScope(Dispatchers.IO + SupervisorJob()).launch {
+                    val (ok, err) = GgtgBulk.updateProfile(slot, newFirst, newLast, null)
+                    AndroidUtilities.runOnUIThread {
+                        progress?.dismiss()
+                        if (ok) {
+                            Toast.makeText(ctx, "Имя обновлено", Toast.LENGTH_SHORT).show()
+                            onChanged()
+                            rebuild()
+                        } else {
+                            Toast.makeText(ctx, "Ошибка: $err", Toast.LENGTH_LONG).show()
+                        }
+                    }
+                }
+            }
+            .setNegativeButton("Отмена", null)
+            .show()
+    }
+
+    private fun promptEditUsername(user: TLRPC.User) {
+        val ctx = context ?: return
+        val act = ctx as? androidx.fragment.app.FragmentActivity
+        val layout = LinearLayout(ctx).apply {
+            orientation = LinearLayout.VERTICAL
+            val padH = dp(24f)
+            val padV = dp(12f)
+            setPadding(padH, padV, padH, padV)
+        }
+        val currentUsername = user.username.orEmpty()
+        val usernameInput = EditText(ctx).apply {
+            hint = "юзернейм (или пусто для удаления)"
+            setText(currentUsername)
+            setSelection(text.length)
+            setTextColor(Theme.getColor(Theme.key_windowBackgroundWhiteBlackText))
+            setHintTextColor(Theme.getColor(Theme.key_windowBackgroundWhiteHintText))
+            textSize = 16f
+        }
+        val tip = TextView(ctx).apply {
+            text = "Можно использовать a-z, 0-9 и подчёркивания. Минимум 5 символов. Оставьте пустым, чтобы удалить юзернейм."
+            textSize = 12f
+            setTextColor(Theme.getColor(Theme.key_windowBackgroundWhiteGrayText))
+        }
+        layout.addView(usernameInput)
+        layout.addView(tip, LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT).apply {
+            topMargin = dp(8f)
+        })
+
+        androidx.appcompat.app.AlertDialog.Builder(ctx)
+            .setTitle("Юзернейм")
+            .setView(layout)
+            .setPositiveButton("Сохранить") { _, _ ->
+                val newUsername = usernameInput.text.toString().trim().removePrefix("@")
+                val progress = if (act != null) app.ggtg.ui.TdataImportProgressDialog(act, "Смена юзернейма").apply {
+                    setWorkingText("Сохранение юзернейма…")
+                } else null
+                CoroutineScope(Dispatchers.IO + SupervisorJob()).launch {
+                    val (ok, err) = GgtgBulk.updateUsername(slot, newUsername)
+                    AndroidUtilities.runOnUIThread {
+                        progress?.dismiss()
+                        if (ok) {
+                            Toast.makeText(ctx, if (newUsername.isEmpty()) "Юзернейм удален" else "Юзернейм сохранен: @$newUsername", Toast.LENGTH_SHORT).show()
+                            onChanged()
+                            rebuild()
+                        } else {
+                            Toast.makeText(ctx, "Ошибка: $err", Toast.LENGTH_LONG).show()
+                        }
+                    }
+                }
+            }
+            .setNegativeButton("Отмена", null)
+            .show()
+    }
+
     private fun dp(v: Float) = AndroidUtilities.dp(v)
 
     private fun copy(context: Context, value: String) {
@@ -49,16 +258,26 @@ class GgtgAccountInfoActivity(private val slot: Int, private val onChanged: () -
     }
 
     /** One line of a group: a gray caption over the value, an optional gray explanation; a tap acts. */
-    private fun line(context: Context, group: LinearLayout, caption: String, value: String, hint: String? = null, accent: Boolean = false, onClick: (() -> Unit)? = null) {
+    private fun line(
+        context: Context,
+        group: LinearLayout,
+        caption: String,
+        value: String,
+        hint: String? = null,
+        accent: Boolean = false,
+        onLongClick: (() -> Unit)? = null,
+        onClick: (() -> Unit)? = null
+    ) {
         if (group.childCount > 0) group.addView(View(context).apply {
             setBackgroundColor((Theme.getColor(Theme.key_windowBackgroundWhiteGrayText) and 0x00FFFFFF) or 0x22000000)
         }, LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, 1))
         val row = LinearLayout(context).apply {
             orientation = LinearLayout.VERTICAL
             setPadding(dp(14f), dp(10f), dp(14f), dp(10f))
-            if (onClick != null) {
+            if (onClick != null || onLongClick != null) {
                 background = Theme.createSelectorDrawable(Theme.getColor(Theme.key_listSelector), 2)
-                setOnClickListener { onClick() }
+                if (onClick != null) setOnClickListener { onClick() }
+                if (onLongClick != null) setOnLongClickListener { onLongClick(); true }
             }
         }
         row.addView(TextView(context).apply {
@@ -103,14 +322,51 @@ class GgtgAccountInfoActivity(private val slot: Int, private val onChanged: () -
         // who it is
         val head = GgtgUi.card(context)
         val top = LinearLayout(context).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL }
-        top.addView(TextView(context).apply {
-            text = (name.firstOrNull() ?: '?').toString().uppercase()
-            textSize = 22f; setTypeface(null, Typeface.BOLD); gravity = Gravity.CENTER
-            setTextColor(0xFFFFFFFF.toInt())
-            background = GgtgUi.rounded(GgtgUi.accent, dp(28f).toFloat())
-        }, LinearLayout.LayoutParams(dp(56f), dp(56f)).apply { rightMargin = dp(14f) })
-        val texts = LinearLayout(context).apply { orientation = LinearLayout.VERTICAL }
-        texts.addView(GgtgUi.title(context, name.ifEmpty { "Без имени" }, 18f))
+        
+        val avatarSize = dp(60f)
+        val avatarContainer = FrameLayout(context).apply {
+            background = Theme.createSelectorDrawable(Theme.getColor(Theme.key_listSelector), 2)
+            setOnClickListener { promptChangePhoto(user) }
+        }
+        val avatarView = BackupImageView(context).apply {
+            setRoundRadius(dp(30f))
+            imageReceiver.setCurrentAccount(slot)
+            val avatarDrawable = AvatarDrawable().apply { setInfo(slot, user) }
+            setForUserOrChat(user, avatarDrawable)
+        }
+        avatarContainer.addView(avatarView, FrameLayout.LayoutParams(avatarSize, avatarSize))
+        
+        val badgeSize = dp(22f)
+        val badge = FrameLayout(context).apply {
+            background = GgtgUi.rounded(
+                Theme.getColor(Theme.key_featuredStickers_addButton),
+                dp(11f).toFloat(),
+                dp(2f),
+                Theme.getColor(Theme.key_windowBackgroundWhite)
+            )
+            val camIcon = ImageView(context).apply {
+                setImageResource(R.drawable.msg_camera)
+                setColorFilter(0xFFFFFFFF.toInt(), PorterDuff.Mode.SRC_IN)
+            }
+            addView(camIcon, FrameLayout.LayoutParams(dp(13f), dp(13f), Gravity.CENTER))
+        }
+        avatarContainer.addView(badge, FrameLayout.LayoutParams(badgeSize, badgeSize, Gravity.BOTTOM or Gravity.END))
+        top.addView(avatarContainer, LinearLayout.LayoutParams(avatarSize, avatarSize).apply { rightMargin = dp(14f) })
+
+        val texts = LinearLayout(context).apply {
+            orientation = LinearLayout.VERTICAL
+            background = Theme.createSelectorDrawable(Theme.getColor(Theme.key_listSelector), 2)
+            setOnClickListener { promptEditName(user) }
+        }
+        val nameRow = LinearLayout(context).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL }
+        nameRow.addView(GgtgUi.title(context, name.ifEmpty { "Без имени" }, 18f))
+        val editPencil = ImageView(context).apply {
+            setImageResource(R.drawable.msg_edit)
+            setColorFilter(Theme.getColor(Theme.key_windowBackgroundWhiteGrayText), PorterDuff.Mode.SRC_IN)
+        }
+        nameRow.addView(editPencil, LinearLayout.LayoutParams(dp(16f), dp(16f)).apply { leftMargin = dp(6f) })
+        texts.addView(nameRow)
+
         val sub = listOf(username, phone).filter { it.isNotEmpty() }.joinToString("  ·  ")
         if (sub.isNotEmpty()) texts.addView(GgtgUi.body(context, sub, 14f), LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT).apply { topMargin = dp(2f) })
         top.addView(texts, LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f))
@@ -123,8 +379,19 @@ class GgtgAccountInfoActivity(private val slot: Int, private val onChanged: () -
 
         // the account
         val account = group(context, col, "Аккаунт")
-        if (name.isNotEmpty()) line(context, account, "Имя", name, onClick = { copy(context, name) })
-        if (username.isNotEmpty()) line(context, account, "Username", username, onClick = { copy(context, username) })
+        val displayName = if (name.isNotEmpty()) name else "Без имени"
+        line(context, account, "Имя и фамилия", displayName, hint = "Нажмите для редактирования · удерживайте для копирования", onLongClick = { copy(context, displayName) }) {
+            promptEditName(user)
+        }
+        val displayUsername = if (username.isNotEmpty()) username else "Не установлен (нажмите, чтобы задать)"
+        line(context, account, "Юзернейм", displayUsername, hint = "Нажмите для редактирования · удерживайте для копирования", accent = username.isEmpty(), onLongClick = { if (username.isNotEmpty()) copy(context, username) }) {
+            promptEditUsername(user)
+        }
+        val hasPhoto = user.photo != null && user.photo !is TLRPC.TL_userProfilePhotoEmpty
+        val photoStatus = if (hasPhoto) "Установлено (нажмите, чтобы изменить)" else "Не установлено (нажмите, чтобы добавить)"
+        line(context, account, "Фото профиля", photoStatus, accent = !hasPhoto) {
+            promptChangePhoto(user)
+        }
         if (phone.isNotEmpty()) line(context, account, "Телефон", phone, onClick = { copy(context, phone) })
         val idDate = GgtgIdDate.estimate(uc.clientUserId)
         line(context, account, "ID", "${uc.clientUserId}", onClick = { copy(context, uc.clientUserId.toString()) })
