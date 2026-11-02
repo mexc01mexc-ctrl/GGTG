@@ -166,6 +166,8 @@ class TdataImportProgressDialog(context: Context, title: String = LocaleControll
                 ensureShown()
                 workingLayout.visibility = View.GONE
                 passwordLayout.visibility = View.VISIBLE
+                passwordInput.inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_PASSWORD
+                passwordInput.hint = ""
                 phoneLabel.text = LocaleController.formatString(
                     "NicegramTdataPasswordNeededText", R.string.NicegramTdataPasswordNeededText, phone ?: "?"
                 )
@@ -182,6 +184,35 @@ class TdataImportProgressDialog(context: Context, title: String = LocaleControll
         askPassword(
             phone, wrongPassword, hint,
             onSubmit = { pwd -> if (cont.isActive) cont.resume(pwd.takeIf { it.isNotBlank() }) },
+            onSkip = { if (cont.isActive) cont.resume(null) }
+        )
+    }
+
+    fun askCode(phone: String?, title: String? = null, hint: String? = null, onSubmit: (String) -> Unit, onSkip: () -> Unit) {
+        this.onSubmit = onSubmit
+        this.onSkip = onSkip
+        AndroidUtilities.runOnUIThread {
+            try {
+                ensureShown()
+                workingLayout.visibility = View.GONE
+                passwordLayout.visibility = View.VISIBLE
+                val formattedPhone = phone ?: "?"
+                phoneLabel.text = title ?: "Код подтверждения отправлен в Telegram на Desktop для $formattedPhone\nВведите код:"
+                errorLabel.text = hint ?: ""
+                errorLabel.visibility = if (hint != null) View.VISIBLE else View.GONE
+                passwordInput.inputType = InputType.TYPE_CLASS_NUMBER
+                passwordInput.hint = "12345"
+                passwordInput.setText("")
+                updateButtonVisibility()
+            } catch (_: Throwable) {}
+        }
+    }
+
+    /** Suspends until the user enters login verification code from peer session or taps Skip (null). */
+    suspend fun askCodeSuspend(phone: String?, title: String? = null, hint: String? = null): String? = suspendCancellableCoroutine { cont ->
+        askCode(
+            phone, title, hint,
+            onSubmit = { code -> if (cont.isActive) cont.resume(code.trim().takeIf { it.isNotBlank() }) },
             onSkip = { if (cont.isActive) cont.resume(null) }
         )
     }

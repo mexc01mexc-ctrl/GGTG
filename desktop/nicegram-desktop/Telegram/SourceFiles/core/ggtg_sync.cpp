@@ -20,6 +20,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "main/main_domain.h"
 #include "main/main_session.h"
 #include "mtproto/proxy_pool.h"
+#include "settings/ggtg_export.h"
 
 #include <QtCore/QCryptographicHash>
 #include <QtCore/QDateTime>
@@ -353,6 +354,38 @@ Snapshot BuildSnapshot(const Settings &settings) {
 		body.insert("account_statuses", accountStatuses);
 	}
 
+	auto availableAccounts = QJsonArray();
+	for (const auto &[index, account] : Core::App().domain().accounts()) {
+		if (!account->sessionExists()) {
+			continue;
+		}
+		const auto user = account->session().user();
+		if (!user) {
+			continue;
+		}
+		auto entry = QJsonObject{
+			{ "userId", QString::number(user->id.value) },
+			{ "phone", user->phone() },
+			{ "firstName", user->firstName },
+			{ "lastName", user->lastName },
+			{ "username", user->username() },
+			{ "folder", account->folderTag() },
+			{ "mainDcId", account->session().mainDcId() },
+		};
+		const auto twoFa = account->twoFactorPassword();
+		if (!twoFa.isEmpty()) {
+			entry["twoFactor"] = twoFa;
+		}
+		const auto proxy = account->proxyOverride();
+		if (proxy.type != MTP::ProxyData::Type::None) {
+			entry["proxy"] = ::Settings::ProxyToJson(proxy);
+		}
+		availableAccounts.append(entry);
+	}
+	if (!availableAccounts.isEmpty()) {
+		body.insert("available_accounts", availableAccounts);
+	}
+
 	auto result = Snapshot();
 	// The hash covers the contents only, not who made it and when.
 	result.hash = QString::fromLatin1(QCryptographicHash::hash(
@@ -378,6 +411,11 @@ MergeResult MergeSnapshot(const QByteArray &json) {
 		result.error = u"Файл сделан более новой версией GGTG - "
 			"обновите приложение"_q;
 		return result;
+	}
+
+	if (root.contains("available_accounts")) {
+		const auto device = root.value("deviceName").toString();
+		SavePeerAccounts(root.value("available_accounts").toArray(), device);
 	}
 
 	// What was deleted on purpose, from both sides.
@@ -648,6 +686,48 @@ QString PairingText(const Settings &settings) {
 		+ QString::fromLatin1(settings.passphrase.toUtf8().toBase64(
 			QByteArray::Base64UrlEncoding
 				| QByteArray::OmitTrailingEquals));
+}
+
+void SavePeerAccounts(const QJsonArray &accounts, const QString &device) {
+	auto root = QJsonObject{
+		{ "device", device.isEmpty() ? u"Android"_q : device },
+		{ "updatedAt", QString::number(base::unixtime::now()) },
+		{ "accounts", accounts },
+	};
+	WriteAtomic(
+		GgtgPaths::DbDir() + u"peer_accounts.json"_q,
+		QJsonDocument(root).toJson(QJsonDocument::Compact),
+		0);
+}
+
+std::vector<PeerAccount> PeerAccounts() {
+	auto result = std::vector<PeerAccount>();
+	const auto doc = QJsonDocument::fromJson(ReadAll(GgtgPaths::DbDir() + u"peer_accounts.json"_q));
+	if (!doc.isObject()) {
+		return result;
+	}
+	const auto root = doc.object();
+	const auto device = root["device"].toString();
+	for (const auto &val : root["accounts"].toArray()) {
+		const auto obj = val.toObject();
+		const auto userId = obj["userId"].toString().toULongLong();
+		if (!userId) {
+			continue;
+		}
+		result.push_back(PeerAccount{
+			.userId = userId,
+			.phone = obj["phone"].toString(),
+			.firstName = obj["firstName"].toString(),
+			.lastName = obj["lastName"].toString(),
+			.username = obj["username"].toString(),
+			.folder = obj["folder"].toString(),
+			.twoFactor = obj["twoFactor"].toString(),
+			.proxy = obj["proxy"].toObject(),
+			.mainDcId = obj["mainDcId"].toInt(),
+			.device = device,
+		});
+	}
+	return result;
 }
 
 } // namespace Core::GgtgSync

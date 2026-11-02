@@ -35,6 +35,7 @@ For license and exceptions, see https://github.com/telegramdesktop/tdesktop/blob
 #include "base/timer.h"
 #include "base/unixtime.h"
 #include "window/ggtg_widgets.h"
+#include "window/window_controller.h"
 #include "window/window_session_controller.h"
 #include "styles/style_boxes.h"
 #include "styles/style_layers.h"
@@ -365,6 +366,124 @@ private:
 	QColor _accent = QColor(10, 132, 255);
 };
 
+inline MTP::ProxyData ProxyFromJsonObject(const QJsonObject &p) {
+	if (p.isEmpty()) return MTP::ProxyData();
+	const auto type = p["type"].toString();
+	auto result = MTP::ProxyData();
+	result.host = p["host"].toString();
+	result.port = p["port"].toInt();
+	result.user = p["user"].toString();
+	result.password = p["password"].toString();
+	if (type == u"mtproto"_q) {
+		result.type = MTP::ProxyData::Type::Mtproto;
+		result.password = p["secret"].toString();
+	} else if (type == u"socks5"_q) {
+		result.type = MTP::ProxyData::Type::Socks5;
+	} else if (type == u"http"_q) {
+		result.type = MTP::ProxyData::Type::Http;
+	}
+	if (!result.host.isEmpty() && result.port > 0) {
+		return result;
+	}
+	return MTP::ProxyData();
+}
+
+inline void ShowPeerAccountsFromAndroidBox(
+		not_null<Window::SessionController*> controller,
+		std::shared_ptr<Ui::Show> show) {
+	show->showBox(Box([=](not_null<Ui::GenericBox*> box) {
+		box->setTitle(rpl::single(u"Аккаунты с телефона Android"_q));
+		const auto accounts = Core::GgtgSync::PeerAccounts();
+		if (accounts.empty()) {
+			box->addRow(
+				object_ptr<Ui::FlatLabel>(
+					box,
+					u"С телефона Android пока не получено аккаунтов. Убедитесь, что синхронизация включена на телефоне и нажмите «Синхронизировать сейчас»."_q,
+					st::boxDividerLabel),
+				st::boxRowPadding);
+			box->addButton(tr::lng_close(), [=] { box->closeBox(); });
+			return;
+		}
+
+		box->addRow(
+			object_ptr<Ui::FlatLabel>(
+				box,
+				u"Аккаунты, активные на подключённом телефоне. Выберите аккаунт для добавления на этот Mac."_q,
+				st::boxDividerLabel),
+			st::boxRowPadding);
+
+		for (const auto &acc : accounts) {
+			auto alreadyOnMac = false;
+			for (const auto &[index, account] : Core::App().domain().accounts()) {
+				if (account->sessionExists()) {
+					const auto user = account->session().user();
+					if (user && (user->id.value == acc.userId || (!acc.phone.isEmpty() && user->phone() == acc.phone))) {
+						alreadyOnMac = true;
+						break;
+					}
+				}
+			}
+
+			auto title = QString();
+			if (!acc.firstName.isEmpty() || !acc.lastName.isEmpty()) {
+				title = (acc.firstName + u" "_q + acc.lastName).trimmed();
+			} else if (!acc.phone.isEmpty()) {
+				title = u"+"_q + acc.phone;
+			} else {
+				title = u"Аккаунт "_q + QString::number(acc.userId);
+			}
+
+			auto details = QStringList();
+			if (!acc.phone.isEmpty()) details.append(u"+"_q + acc.phone);
+			if (!acc.username.isEmpty()) details.append(u"@"_q + acc.username);
+			if (!acc.folder.isEmpty()) details.append(acc.folder);
+			const auto proxy = ProxyFromJsonObject(acc.proxy);
+			if (proxy.type != MTP::ProxyData::Type::None) {
+				details.append(u"прокси: "_q + proxy.host);
+			}
+			if (alreadyOnMac) {
+				details.append(u"[Уже на Mac]"_q);
+			}
+
+			const auto rowText = title + (details.isEmpty() ? QString() : (u"\n"_q + details.join(u" · "_q)));
+			const auto row = box->addRow(
+				object_ptr<Ggtg::ActionRow>(
+					box,
+					rpl::single(rowText),
+					alreadyOnMac ? QString() : u"Войти"_q),
+				st::boxRowPadding);
+
+			if (!alreadyOnMac) {
+				row->setClickedCallback([=] {
+					box->closeBox();
+					auto &domain = Core::App().domain();
+					if (domain.accounts().size() >= domain.maxAccounts()) {
+						Ggtg::Notice(show, u"Достигнут лимит аккаунтов на компьютере"_q);
+						return;
+					}
+					if (const auto window = Core::App().activePrimaryWindow()) {
+						window->preventOrInvoke([=] {
+							auto &d = Core::App().domain();
+							d.addActivated(MTP::Environment::Production, proxy);
+							if (!acc.folder.isEmpty() && !d.active().sessionExists()) {
+								d.active().setFolderTag(acc.folder);
+							}
+						});
+					} else {
+						domain.addActivated(MTP::Environment::Production, proxy);
+						if (!acc.folder.isEmpty() && !domain.active().sessionExists()) {
+							domain.active().setFolderTag(acc.folder);
+						}
+					}
+					Ggtg::Notice(show, u"Аккаунт "_q + title + u" добавлен на этот Mac. Введите код подтверждения, который пришёл на телефон."_q);
+				});
+			}
+		}
+
+		box->addButton(tr::lng_close(), [=] { box->closeBox(); });
+	}));
+}
+
 inline void FillGgtgSyncBox(
 		not_null<Ui::GenericBox*> box,
 		not_null<Window::SessionController*> controller) {
@@ -678,6 +797,16 @@ inline void FillGgtgSyncBox(
 			}
 			AcceptAccountsFromAndroid(box, list.front());
 		});
+	});
+
+	const auto peerAccs = box->addRow(
+		object_ptr<Ggtg::ActionRow>(
+			box,
+			rpl::single(u"Аккаунты с телефона Android…"_q),
+			u"→"_q),
+		st::boxRowPadding);
+	peerAccs->setClickedCallback([=] {
+		ShowPeerAccountsFromAndroidBox(controller, box->uiShow());
 	});
 
 	const auto own = box->addRow(

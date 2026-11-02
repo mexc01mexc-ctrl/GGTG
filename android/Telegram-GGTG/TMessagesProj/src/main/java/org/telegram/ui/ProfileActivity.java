@@ -12118,6 +12118,11 @@ public class ProfileActivity extends BaseFragment implements NotificationCenter.
             return;
         }
         final String name = username;
+        if (viaSquidward) {
+            // ggtg: the Squidward window opens over the profile, as on desktop (hide = collection continues)
+            presentFragment(new app.ggtg.GgtgSquidwardActivity("@" + name));
+            return;
+        }
         android.widget.Toast.makeText(getParentActivity(), "Запущено - смотрите «Процессы»", android.widget.Toast.LENGTH_LONG).show();
         app.ggtg.GgtgCollectBridge.start(name, viaSquidward);
     }

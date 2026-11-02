@@ -537,18 +537,11 @@ class GgtgBaseListActivity(private val baseId: Long, private val isGroups: Boole
         }
     }
 
+    // Opens the Squidward window over the list (as the desktop box does): it looks the group up,
+    // collects it and shows the bot's answers live; "Скрыть" leaves the collection running.
     private fun viaSquidward(row: Row) {
         val q = if (row.username.isNotEmpty()) "@" + row.username else row.fallbackUrl
-        toast("Запрос к Сквидварду…")
-        CoroutineScope(SupervisorJob() + Dispatchers.IO).launch {
-            val r = runCatching { GgtgSquidward.lookup(q, prefer = "group") }.getOrNull()
-            if (r == null || !r.canCollect) {
-                AndroidUtilities.runOnUIThread { toast(if (r == null) "Бот не ответил" else if (r.rawText == "Выбор отменён") r.rawText else "Сквидвард не даёт собрать участников") }
-                return@launch
-            }
-            AndroidUtilities.runOnUIThread { toast("Запущено - смотрите «Процессы»") }
-            runCatching { GgtgSquidward.collect(q, r.kind == "user", r.baseTitle) }
-        }
+        presentFragment(GgtgSquidwardActivity(q))
     }
 
     private fun toast(text: String) { context?.let { Toast.makeText(it, text, Toast.LENGTH_LONG).show() } }

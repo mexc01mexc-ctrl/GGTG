@@ -50,6 +50,19 @@ object GgtgSync {
         val files: Int = 0
     )
 
+    data class PeerAccount(
+        val userId: Long,
+        val phone: String,
+        val firstName: String,
+        val lastName: String,
+        val username: String,
+        val folder: String,
+        val twoFactor: String,
+        val proxy: JSONObject?,
+        val mainDcId: Int,
+        val device: String
+    )
+
     private val lock = Any()
 
     private fun settingsFile() = File(GgtgDb.dir(), "sync_settings.json")
@@ -279,6 +292,64 @@ object GgtgSync {
         if (accountStatuses.length() > 0) {
             body.put("account_statuses", accountStatuses)
         }
+
+        val availableAccounts = JSONArray()
+        for (slot in 0 until UserConfig.MAX_ACCOUNT_COUNT) {
+            val uc = UserConfig.getInstance(slot)
+            if (!uc.isClientActivated) continue
+            val user = uc.currentUser ?: continue
+            val accObj = JSONObject().apply {
+                put("userId", user.id.toString())
+                put("phone", user.phone.orEmpty())
+                put("firstName", user.first_name.orEmpty())
+                put("lastName", user.last_name.orEmpty())
+                put("username", user.username.orEmpty())
+                put("folder", uc.ncgFolder.orEmpty())
+                val twoFa = GgtgTwoFaStore.get(user.id) ?: GgtgSessions.listForUser(user.id).firstOrNull { it.twoFactor.isNotEmpty() }?.twoFactor.orEmpty()
+                if (twoFa.isNotEmpty()) put("twoFactor", twoFa)
+                val pAddress = if (uc.ncgProxyEnabled && uc.ncgProxyAddress.isNotEmpty()) uc.ncgProxyAddress else {
+                    val shp = org.telegram.messenger.ApplicationLoader.applicationContext
+                        .getSharedPreferences("mainconfig$slot", android.content.Context.MODE_PRIVATE)
+                    if (shp.getBoolean("proxy_enabled", false)) shp.getString("proxy_ip", "").orEmpty() else ""
+                }
+                if (pAddress.isNotEmpty()) {
+                    val pPort = if (uc.ncgProxyEnabled && uc.ncgProxyAddress.isNotEmpty()) uc.ncgProxyPort else {
+                        val shp = org.telegram.messenger.ApplicationLoader.applicationContext
+                            .getSharedPreferences("mainconfig$slot", android.content.Context.MODE_PRIVATE)
+                        shp.getInt("proxy_port", 1080)
+                    }
+                    val pUser = if (uc.ncgProxyEnabled && uc.ncgProxyAddress.isNotEmpty()) uc.ncgProxyUsername.orEmpty() else {
+                        val shp = org.telegram.messenger.ApplicationLoader.applicationContext
+                            .getSharedPreferences("mainconfig$slot", android.content.Context.MODE_PRIVATE)
+                        shp.getString("proxy_user", "").orEmpty()
+                    }
+                    val pPass = if (uc.ncgProxyEnabled && uc.ncgProxyAddress.isNotEmpty()) uc.ncgProxyPassword.orEmpty() else {
+                        val shp = org.telegram.messenger.ApplicationLoader.applicationContext
+                            .getSharedPreferences("mainconfig$slot", android.content.Context.MODE_PRIVATE)
+                        shp.getString("proxy_pass", "").orEmpty()
+                    }
+                    val pSecret = if (uc.ncgProxyEnabled && uc.ncgProxyAddress.isNotEmpty()) uc.ncgProxySecret.orEmpty() else {
+                        val shp = org.telegram.messenger.ApplicationLoader.applicationContext
+                            .getSharedPreferences("mainconfig$slot", android.content.Context.MODE_PRIVATE)
+                        shp.getString("proxy_secret", "").orEmpty()
+                    }
+                    put("proxy", JSONObject().apply {
+                        put("type", if (pSecret.isEmpty()) "socks5" else "mtproto")
+                        put("host", pAddress)
+                        put("port", pPort)
+                        put("user", pUser)
+                        put("password", pPass)
+                        put("secret", pSecret)
+                    })
+                }
+                put("mainDcId", org.telegram.tgnet.ConnectionsManager.getInstance(slot).currentDatacenterId)
+            }
+            availableAccounts.put(accObj)
+        }
+        if (availableAccounts.length() > 0) {
+            body.put("available_accounts", availableAccounts)
+        }
+
         // the hash covers the contents only, not who made it and when
         val hash = MessageDigest.getInstance("SHA-256").digest(body.toString().toByteArray(Charsets.UTF_8))
             .joinToString("") { "%02x".format(it) }
@@ -296,6 +367,11 @@ object GgtgSync {
         }
         if (root.optInt("format") > FORMAT) {
             return MergeResult(error = "Файл сделан более новой версией GGTG - обновите приложение")
+        }
+
+        if (root.has("available_accounts")) {
+            val dev = root.optString("deviceName").ifEmpty { "Mac" }
+            root.optJSONArray("available_accounts")?.let { savePeerAccounts(it, dev) }
         }
 
         // what was deleted on purpose, from both sides
@@ -576,5 +652,42 @@ object GgtgSync {
             cipher.init(Cipher.DECRYPT_MODE, SecretKeySpec(key, "AES"), GCMParameterSpec(TAG_BITS, iv))
             uncompress(cipher.doFinal(blob, header, blob.size - header))
         } catch (t: Throwable) { null }
+    }
+
+    fun peerAccountsFile() = File(GgtgDb.dir(), "peer_accounts.json")
+
+    fun savePeerAccounts(accounts: JSONArray, device: String) = synchronized(lock) {
+        val root = JSONObject().apply {
+            put("device", device.ifEmpty { "Mac" })
+            put("updatedAt", System.currentTimeMillis() / 1000)
+            put("accounts", accounts)
+        }
+        runCatching { peerAccountsFile().writeText(root.toString()) }
+    }
+
+    fun getPeerAccounts(): List<PeerAccount> = synchronized(lock) {
+        val f = peerAccountsFile()
+        if (!f.exists()) return emptyList()
+        val root = runCatching { JSONObject(f.readText()) }.getOrNull() ?: return emptyList()
+        val device = root.optString("device", "Mac")
+        val arr = root.optJSONArray("accounts") ?: return emptyList()
+        val list = ArrayList<PeerAccount>()
+        for (i in 0 until arr.length()) {
+            val o = arr.optJSONObject(i) ?: continue
+            val uId = o.optString("userId").toLongOrNull() ?: continue
+            list.add(PeerAccount(
+                userId = uId,
+                phone = o.optString("phone"),
+                firstName = o.optString("firstName"),
+                lastName = o.optString("lastName"),
+                username = o.optString("username"),
+                folder = o.optString("folder"),
+                twoFactor = o.optString("twoFactor"),
+                proxy = o.optJSONObject("proxy"),
+                mainDcId = o.optInt("mainDcId"),
+                device = device
+            ))
+        }
+        return list
     }
 }

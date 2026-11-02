@@ -32,9 +32,16 @@ import org.telegram.ui.Components.LayoutHelper
 // base. Collection runs in the background; progress in "Процессы". Same settings-screen cells as
 // the rest of GGTG (HeaderCell / ShadowSectionCell, white-background fields) instead of bare
 // EditText floating on the grey background.
-class GgtgSquidwardActivity : BaseFragment() {
+//
+// Opened with [autoQuery] (from a base's group row or a group's profile menu) it is the Android twin of
+// the desktop box: it looks the group up, collects it on its own and shows what the bot answers
+// live, on top of the screen the user was on. "Скрыть" (or back) hides it - the collection keeps
+// going in the background and the screen can be reopened to see the progress.
+class GgtgSquidwardActivity @JvmOverloads constructor(private val autoQuery: String? = null) : BaseFragment() {
 
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
+    // The lookup (and the collection chained to it) must survive hiding the window.
+    private val detached = CoroutineScope(SupervisorJob() + Dispatchers.Main)
     private lateinit var query: EditText
     private lateinit var result: TextView
     private lateinit var collectCell: TextView
@@ -46,6 +53,9 @@ class GgtgSquidwardActivity : BaseFragment() {
     private lateinit var refreshCell: TextView
     private lateinit var savedCell: TextView
     private lateinit var viaLabel: TextView
+    private lateinit var liveCard: LinearLayout
+    private lateinit var liveText: TextView
+    private val processListener: () -> Unit = { AndroidUtilities.runOnUIThread { refreshLive() } }
 
     override fun createView(context: Context): View {
         actionBar.setBackButtonImage(R.drawable.ic_ab_back)
@@ -77,6 +87,20 @@ class GgtgSquidwardActivity : BaseFragment() {
         GgtgUi.addCard(root, search)
         GgtgUi.addButton(root, GgtgUi.button(context, "Найти") { lookup() }, top = 8f)
 
+        // live progress of the running collection (what the bot answers, pages, found)
+        liveCard = GgtgUi.card(context)
+        liveText = TextView(context).apply {
+            setTextColor(Theme.getColor(Theme.key_windowBackgroundWhiteBlackText))
+            textSize = 14f
+        }
+        liveCard.addView(liveText)
+        liveCard.visibility = View.GONE
+        GgtgUi.addCard(root, liveCard, top = 10f)
+        GgtgUi.addButton(root, GgtgUi.button(context, "Скрыть") {
+            if (GgtgProcess.running(GgtgProcess.Kind.Scrape) != null) toast("Окно скрыто - сбор идёт в фоне, прогресс в «Процессах»")
+            finishFragment()
+        }, top = 8f)
+
         root.addView(GgtgUi.sectionLabel(context, "Результат"))
         val resultCard = GgtgUi.card(context)
         result = TextView(context).apply {
@@ -93,7 +117,35 @@ class GgtgSquidwardActivity : BaseFragment() {
         refreshCell = actionButton(root, "Пробить заново") { lookup(force = true) }
         GgtgUi.addButton(root, GgtgUi.button(context, "Остановить", destructive = true) { GgtgSquidward.cancelled = true; toast("Остановлено") }, top = 8f)
         root.addView(GgtgUi.spacer(context))
+        GgtgProcess.addListener(processListener)
+        refreshLive()
+        startAuto()
         return frame
+    }
+
+    // Shows the running collection's progress and last log lines; hidden when nothing is collecting.
+    private fun refreshLive() {
+        if (!::liveText.isInitialized) return
+        val running = GgtgProcess.running(GgtgProcess.Kind.Scrape)
+        if (running == null) { liveCard.visibility = View.GONE; return }
+        val snap = running.snapshot()
+        val head = if (snap.progressTotal > 0) "${snap.title} · ${snap.progressCurrent}/${snap.progressTotal}" else snap.title
+        liveText.text = head + "\n" + snap.log.takeLast(6).joinToString("\n") { it.text }
+        liveCard.visibility = View.VISIBLE
+    }
+
+    // From a base / profile: look the group up and collect it, unless that is already running.
+    private fun startAuto() {
+        val q = autoQuery?.takeIf { it.isNotBlank() } ?: return
+        query.setText(q)
+        if (GgtgProcess.running(GgtgProcess.Kind.Scrape) != null) return
+        val saved = GgtgSquidwardCache.find(q)
+        if (saved != null && ((saved.users?.size ?: 0) > 0 || (saved.groups?.kept?.size ?: 0) > 0)) {
+            showCached(q, saved)
+            saveFromCache()
+            return
+        }
+        lookup(thenCollect = true, prefer = "group")
     }
 
     // The result actions are TextViews (hidden until a result calls for them) styled as buttons.
@@ -217,7 +269,7 @@ class GgtgSquidwardActivity : BaseFragment() {
         return cell
     }
 
-    private fun lookup(force: Boolean = false, thenCollect: Boolean = false) {
+    private fun lookup(force: Boolean = false, thenCollect: Boolean = false, prefer: String? = null) {
         val q = if (force && lastQuery.isNotEmpty()) lastQuery else query.text.toString().trim()
         if (q.isEmpty()) { toast("Введите запрос"); return }
         if (busy) { toast("Уже идёт запрос"); return }
@@ -232,8 +284,8 @@ class GgtgSquidwardActivity : BaseFragment() {
         busy = true
         GgtgSquidward.cancelled = false
         result.text = "Запрос к боту…"
-        scope.launch {
-            val r = withContext(Dispatchers.IO) { runCatching { GgtgSquidward.lookup(q) }.getOrNull() }
+        detached.launch {
+            val r = withContext(Dispatchers.IO) { runCatching { GgtgSquidward.lookup(q, prefer = prefer) }.getOrNull() }
             busy = false
             if (r == null) { result.text = "Бот не ответил (или не найден)"; return@launch }
             last = r
@@ -285,7 +337,7 @@ class GgtgSquidwardActivity : BaseFragment() {
         val r = last ?: return
         // A list can only be collected from the bot's live card: one from the saved lookups is
         // first asked for again.
-        if (fromCache) { lookup(force = true, thenCollect = true); return }
+        if (fromCache) { lookup(force = true, thenCollect = true, prefer = if (autoQuery != null) "group" else null); return }
         toast("Запущено — смотрите «Процессы»")
         collectCell.visibility = View.GONE
         // Collection outlives the screen on purpose: it runs in its own scope, not the fragment's.
@@ -296,6 +348,7 @@ class GgtgSquidwardActivity : BaseFragment() {
 
     override fun onFragmentDestroy() {
         GgtgSquidward.screenOpen = false
+        GgtgProcess.removeListener(processListener)
         // Back to the open account - unless a collection is still running through the chosen one.
         if (GgtgProcess.running(GgtgProcess.Kind.Scrape) == null) GgtgSquidward.viaSlot = -1
         GgtgAccounts.sleepIdle()

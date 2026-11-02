@@ -1043,6 +1043,39 @@ void SaveSidebarCollapsed(bool collapsed) {
 	}
 }
 
+// ggtg: which sidebar groups the user folded, kept between launches.
+[[nodiscard]] QString SidebarGroupsPath() {
+	return cWorkingDir() + u"tdata/ggtg_sidebar_groups"_q;
+}
+
+[[nodiscard]] base::flat_set<QString> LoadSidebarGroups() {
+	auto result = base::flat_set<QString>();
+	auto file = QFile(SidebarGroupsPath());
+	if (file.open(QIODevice::ReadOnly)) {
+		const auto lines = QString::fromUtf8(file.readAll()).split(
+			QChar('\n'));
+		for (const auto &line : lines) {
+			if (!line.trimmed().isEmpty()) {
+				result.emplace(line.trimmed());
+			}
+		}
+	}
+	return result;
+}
+
+void SaveSidebarGroups(const base::flat_set<QString> &folded) {
+	auto file = QFile(SidebarGroupsPath());
+	if (folded.empty()) {
+		file.remove();
+	} else if (file.open(QIODevice::WriteOnly | QIODevice::Truncate)) {
+		auto list = QStringList();
+		for (const auto &name : folded) {
+			list.push_back(name);
+		}
+		file.write(list.join(QChar('\n')).toUtf8());
+	}
+}
+
 // One row of the GGTG window's left sidebar: icon + label, with a
 // persistent "this is the open section" highlight - Ui::SettingsButton only
 // has transient hover/press states, nothing that stays lit. Colors are the
@@ -1115,6 +1148,21 @@ protected:
 			p.setPen(Qt::NoPen);
 			p.setBrush(_active ? st::dialogsBgActive : st::windowBgOver);
 			p.drawRoundedRect(pill, style::ConvertScale(10), style::ConvertScale(10));
+		}
+		if (_active) {
+			// ggtg: a thin accent mark on the left edge of the open row.
+			auto hq = PainterHighQualityEnabler(p);
+			p.setPen(Qt::NoPen);
+			p.setBrush(st::windowFgActive);
+			const auto h = style::ConvertScale(16);
+			p.drawRoundedRect(
+				QRectF(
+					style::ConvertScale(2),
+					(height() - h) / 2.,
+					style::ConvertScale(3),
+					h),
+				style::ConvertScale(1.5),
+				style::ConvertScale(1.5));
 		}
 		const auto iconTop = (height() - _icon->height()) / 2;
 		const auto iconLeft = _collapsed
@@ -1397,9 +1445,11 @@ public:
 	GroupHeaderButton(
 		not_null<QWidget*> parent,
 		const QString &name,
+		int count,
 		Fn<void()> onClick)
 	: AbstractButton(parent.get())
-	, _name(name) {
+	, _name(name)
+	, _count(count) {
 		setPointerCursor(true);
 		setClickedCallback(std::move(onClick));
 	}
@@ -1411,6 +1461,14 @@ public:
 		}
 	}
 
+	// A folded group that holds the open section shows a dot.
+	void setHasActive(bool active) {
+		if (_hasActive != active) {
+			_hasActive = active;
+			update();
+		}
+	}
+
 	[[nodiscard]] bool collapsed() const {
 		return _collapsed;
 	}
@@ -1418,28 +1476,76 @@ public:
 protected:
 	void paintEvent(QPaintEvent *e) override {
 		auto p = QPainter(this);
+		auto hq = PainterHighQualityEnabler(p);
+		const auto inset = style::ConvertScale(8);
 		if (isOver()) {
-			auto tint = st::windowBgOver->c;
-			tint.setAlphaF(0.4);
-			p.fillRect(rect(), tint);
+			p.setPen(Qt::NoPen);
+			p.setBrush(st::windowBgOver);
+			p.drawRoundedRect(
+				rect().marginsRemoved(QMargins(inset, 1, inset, 1)),
+				style::ConvertScale(8),
+				style::ConvertScale(8));
 		}
+		const auto &fg = isOver()
+			? st::windowActiveTextFg
+			: st::windowSubTextFg;
+		// ggtg: a drawn chevron (right when folded, down when open).
+		const auto c = QPointF(
+			st::ggtgSidebarIconLeft + style::ConvertScale(4),
+			height() / 2.);
+		const auto r = style::ConvertScaleExact(3);
+		auto pen = QPen(fg->c);
+		pen.setWidthF(style::ConvertScaleExact(1.5));
+		pen.setCapStyle(Qt::RoundCap);
+		pen.setJoinStyle(Qt::RoundJoin);
+		p.setPen(pen);
+		p.setBrush(Qt::NoBrush);
+		auto path = QPainterPath();
+		if (_collapsed) {
+			path.moveTo(c.x() - r / 2, c.y() - r);
+			path.lineTo(c.x() + r / 2, c.y());
+			path.lineTo(c.x() - r / 2, c.y() + r);
+		} else {
+			path.moveTo(c.x() - r, c.y() - r / 2);
+			path.lineTo(c.x(), c.y() + r / 2);
+			path.lineTo(c.x() + r, c.y() - r / 2);
+		}
+		p.drawPath(path);
+
 		p.setFont(st::semiboldFont);
-		p.setPen(isOver() ? st::windowActiveTextFg : st::windowSubTextFg);
-		const auto icon = _collapsed ? u"▸ "_q : u"▾ "_q;
-		const auto text = icon + _name.toUpper();
+		p.setPen(fg);
+		const auto left = st::ggtgSidebarTextLeft - style::ConvertScale(8);
 		p.drawText(
-			QRect(
-				st::ggtgSidebarToggleLeft,
-				0,
-				width() - st::ggtgSidebarToggleLeft,
-				height()),
+			QRect(left, 0, width() - left, height()),
 			Qt::AlignLeft | Qt::AlignVCenter,
-			text);
+			_name.toUpper());
+		if (_collapsed) {
+			const auto count = QString::number(_count);
+			const auto w = st::semiboldFont->width(count);
+			const auto right = width() - inset - style::ConvertScale(10) - w;
+			p.drawText(
+				QRect(right, 0, w, height()),
+				Qt::AlignLeft | Qt::AlignVCenter,
+				count);
+			if (_hasActive) {
+				const auto d = style::ConvertScaleExact(6);
+				p.setPen(Qt::NoPen);
+				p.setBrush(st::dialogsBgActive);
+				p.drawEllipse(QRectF(
+					right - style::ConvertScale(8) - d,
+					(height() - d) / 2.,
+					d,
+					d));
+			}
+		}
 	}
 
 private:
 	QString _name;
+	int _count = 0;
 	bool _collapsed = false;
+	bool _hasActive = false;
+
 };
 
 class GgtgShellHost final : public Ui::RpWidget {
@@ -1520,20 +1626,27 @@ public:
 				continue;
 			}
 			const auto groupName = entry.group;
+			const auto count = int(ranges::count(
+				_entries,
+				groupName,
+				&Entry::group));
 			const auto header = Ui::CreateChild<GroupHeaderButton>(
 				_sidebarContent,
 				groupName,
+				count,
 				[=] {
 					if (_collapsedGroups.contains(groupName)) {
 						_collapsedGroups.remove(groupName);
 					} else {
 						_collapsedGroups.emplace(groupName);
 					}
+					SaveSidebarGroups(_collapsedGroups);
 					layoutAll();
 				});
 			header->show();
 			_groupLabels.push_back({ groupName, header });
 		}
+		_collapsedGroups = LoadSidebarGroups();
 		_collapsed = QFile::exists(SidebarCollapsedPath());
 		_title = Ui::CreateChild<Ui::FlatLabel>(
 			this,
@@ -1930,6 +2043,8 @@ private:
 				const auto groupCollapsed = hasGroup && _collapsedGroups.contains(entry.group);
 
 				if (hasGroup && entry.group != previousGroup) {
+					// ggtg: air between groups.
+					y += style::ConvertScale(6);
 					const auto gi = ranges::find(
 						_groupLabels,
 						entry.group,
@@ -1937,6 +2052,12 @@ private:
 					if (gi != _groupLabels.end()) {
 						if (!folded) {
 							gi->header->setCollapsed(groupCollapsed);
+						gi->header->setHasActive(ranges::any_of(
+							_entries,
+							[&](const Entry &other) {
+								return other.group == entry.group
+									&& other.key == _activeKey;
+							}));
 							gi->header->setGeometry(0, y, scrollW, headerHeight);
 							gi->header->show();
 							y += headerHeight;
@@ -1947,7 +2068,7 @@ private:
 					previousGroup = entry.group;
 				}
 
-				if (groupCollapsed && !folded) {
+				if (groupCollapsed && !folded && entry.key != _activeKey) {
 					entry.row->hide();
 				} else {
 					entry.row->setCollapsed(folded);
@@ -1991,6 +2112,7 @@ private:
 		for (const auto &entry : _entries) {
 			entry.row->setActive(entry.key == key);
 		}
+		layoutAll();
 		_title->setText(i->title);
 		_tabsWidget = nullptr;
 		if (i->tabs.empty()) {

@@ -39,7 +39,7 @@ ggtgSidebarWidth: 232px;
 // wide enough for the same icon left offset the expanded rows use, plus a
 // matching margin on the right, so a collapsed row's icon sits centered.
 ggtgSidebarCollapsedWidth: 60px;
-ggtgSidebarRowHeight: 46px;
+ggtgSidebarRowHeight: 40px;
 ggtgSidebarTopSkip: 8px;
 ggtgSidebarIconLeft: 18px;
 ggtgSidebarTextLeft: 56px;

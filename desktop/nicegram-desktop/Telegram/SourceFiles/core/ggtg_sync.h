@@ -86,4 +86,20 @@ struct MergeResult {
 // that scans it is set up and starts syncing on its own.
 [[nodiscard]] QString PairingText(const Settings &settings);
 
+struct PeerAccount {
+	uint64 userId = 0;
+	QString phone;
+	QString firstName;
+	QString lastName;
+	QString username;
+	QString folder;
+	QString twoFactor;
+	QJsonObject proxy;
+	int mainDcId = 0;
+	QString device;
+};
+
+[[nodiscard]] std::vector<PeerAccount> PeerAccounts();
+void SavePeerAccounts(const QJsonArray &accounts, const QString &device);
+
 } // namespace Core::GgtgSync
