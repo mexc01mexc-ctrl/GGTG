@@ -201,6 +201,13 @@ class GgtgSyncAccountsActivity : BaseFragment() {
         val cm = ConnectionsManager.getInstance(freeSlot)
         val uc = UserConfig.getInstance(freeSlot)
 
+        fun cleanupSlot() {
+            try {
+                uc.clearConfig()
+                ConnectionsManager.setProxySettingsForAccount(freeSlot, false, "", 0, "", "", "")
+            } catch (_: Throwable) {}
+        }
+
         // 1. Setup proxy if account has one
         val proxy = acc.proxy
         if (proxy != null && proxy.has("host") && proxy.optString("host").isNotEmpty()) {
@@ -210,19 +217,18 @@ class GgtgSyncAccountsActivity : BaseFragment() {
             val pass = proxy.optString("password")
             val secret = proxy.optString("secret")
             ConnectionsManager.setProxySettingsForAccount(freeSlot, true, host, port, user, pass, secret)
+        } else {
+            ConnectionsManager.setProxySettingsForAccount(freeSlot, false, "", 0, "", "", "")
         }
 
         // 2. Setup authentic Android device parameters (model, SDK, app build, tz, languages)
         GgtgDevice.randomizeForPhoneLogin(freeSlot, acc.phone)
-        cm.reinit()
-        cm.cleanup(false)
 
-        val targetAppId = if (uc.ncgAppId != 0) uc.ncgAppId else BuildVars.APP_ID
-        val targetAppHash = uc.ncgAppHash.takeIf { !it.isNullOrEmpty() } ?: BuildVars.APP_HASH
-        val targetDc = if (acc.mainDcId != 0) acc.mainDcId else ConnectionsManager.DEFAULT_DATACENTER_ID
+        val targetAppId = BuildVars.APP_ID
+        val targetAppHash = BuildVars.APP_HASH
+        val targetDc = ConnectionsManager.DEFAULT_DATACENTER_ID
 
-        val flags = ConnectionsManager.RequestFlagWithoutLogin or ConnectionsManager.RequestFlagFailOnServerErrors or
-            ConnectionsManager.RequestFlagTryDifferentDc or ConnectionsManager.RequestFlagEnableUnauthorized
+        val flags = ConnectionsManager.RequestFlagWithoutLogin or ConnectionsManager.RequestFlagFailOnServerErrors
 
         // 3. Send code
         val (sent, sendError) = cm.sendSuspend(TLRPC.TL_auth_sendCode().apply {
@@ -230,9 +236,13 @@ class GgtgSyncAccountsActivity : BaseFragment() {
             api_id = targetAppId
             api_hash = targetAppHash
             settings = TLRPC.TL_codeSettings()
-        }, flags, targetDc, "sendCode") ?: return@withContext Triple(false, null, "Таймаут отправки кода")
+        }, flags, targetDc, "sendCode") ?: run {
+            cleanupSlot()
+            return@withContext Triple(false, null, "Таймаут отправки кода")
+        }
 
         if (sendError != null || sent !is TLRPC.TL_auth_sentCode) {
+            cleanupSlot()
             val errText = sendError?.text ?: "Ошибка отправки кода"
             return@withContext Triple(false, null, "Ошибка Telegram: $errText")
         }
@@ -249,6 +259,7 @@ class GgtgSyncAccountsActivity : BaseFragment() {
                 phone_number = digits
                 phone_code_hash = phoneCodeHash
             }, flags, targetDc, "cancelCode")
+            cleanupSlot()
             return@withContext Triple(false, null, "Ввод кода отменён")
         }
 
@@ -258,7 +269,10 @@ class GgtgSyncAccountsActivity : BaseFragment() {
             phone_number = digits
             phone_code_hash = phoneCodeHash
             phone_code = code
-        }, flags, targetDc, "signIn") ?: return@withContext Triple(false, null, "Таймаут авторизации")
+        }, flags, targetDc, "signIn") ?: run {
+            cleanupSlot()
+            return@withContext Triple(false, null, "Таймаут авторизации")
+        }
 
         val dcId = if (cm.currentDatacenterId != 0 && cm.currentDatacenterId != ConnectionsManager.DEFAULT_DATACENTER_ID) {
             cm.currentDatacenterId
@@ -288,7 +302,10 @@ class GgtgSyncAccountsActivity : BaseFragment() {
                     var hint: String? = null
                     while (true) {
                         val typed = progress.askPasswordSuspend(acc.phone, wrong, hint)
-                            ?: return@withContext Triple(false, null, "Ввод 2FA отменён")
+                        if (typed == null) {
+                            cleanupSlot()
+                            return@withContext Triple(false, null, "Ввод 2FA отменён")
+                        }
                         val pwRes = TdataImportHelper.trySubmitPassword(cm, dcId, typed)
                         if (pwRes.isSuccess) {
                             authorization = pwRes.getOrNull()
@@ -302,6 +319,7 @@ class GgtgSyncAccountsActivity : BaseFragment() {
                             continue
                         }
                         if (reason.startsWith("FLOOD_WAIT")) {
+                            cleanupSlot()
                             return@withContext Triple(false, null, "Лимит попыток: $reason")
                         }
                         wrong = false
@@ -309,6 +327,7 @@ class GgtgSyncAccountsActivity : BaseFragment() {
                     }
                 }
             } else {
+                cleanupSlot()
                 return@withContext Triple(false, null, "Ошибка входа: ${signError.text}")
             }
         } else {
@@ -316,6 +335,7 @@ class GgtgSyncAccountsActivity : BaseFragment() {
         }
 
         if (authorization !is TLRPC.TL_auth_authorization) {
+            cleanupSlot()
             return@withContext Triple(false, null, "Аккаунт требует регистрации имени")
         }
 
@@ -327,6 +347,7 @@ class GgtgSyncAccountsActivity : BaseFragment() {
 
         val actRes = GgtgImportSupport.activateSlot(freeSlot, user, dcId)
         if (actRes.isFailure) {
+            cleanupSlot()
             return@withContext Triple(false, null, "Ошибка активации: ${actRes.exceptionOrNull()?.message}")
         }
 
@@ -340,14 +361,17 @@ class GgtgSyncAccountsActivity : BaseFragment() {
 
     private suspend fun ConnectionsManager.sendSuspend(
         request: org.telegram.tgnet.TLObject,
-        flags: Int,
-        dcId: Int,
-        label: String
-    ): Pair<org.telegram.tgnet.TLObject?, TLRPC.TL_error?>? = kotlinx.coroutines.withTimeoutOrNull(60_000) {
+        flags: Int = ConnectionsManager.RequestFlagWithoutLogin or ConnectionsManager.RequestFlagFailOnServerErrors,
+        dcId: Int = ConnectionsManager.DEFAULT_DATACENTER_ID,
+        label: String = ""
+    ): Pair<org.telegram.tgnet.TLObject?, TLRPC.TL_error?>? = kotlinx.coroutines.withTimeoutOrNull(45_000) {
         kotlinx.coroutines.suspendCancellableCoroutine { cont ->
-            sendRequest(request, { resp, err ->
+            val reqId = sendRequest(request, { resp, err ->
                 if (cont.isActive) cont.resume(resp to err)
             }, null, null, flags, dcId, ConnectionsManager.ConnectionTypeGeneric, true)
+            cont.invokeOnCancellation {
+                cancelRequest(reqId, true)
+            }
         }
     }
 
