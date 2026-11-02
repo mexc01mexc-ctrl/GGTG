@@ -42,7 +42,9 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "ui/basic_click_handlers.h"
 #include "ui/layers/generic_box.h"
 #include "ui/boxes/confirm_box.h"
+#include "ui/boxes/country_select_box.h"
 #include "ui/boxes/peer_qr_box.h"
+#include "core/ggtg_geo.h"
 #include "ui/effects/animations.h"
 #include "ui/effects/radial_animation.h"
 #include "ui/painter.h"
@@ -670,7 +672,9 @@ public:
 		// this box calling MakeProxyListPickerBox itself, since that's
 		// defined later in this file, after this class. Null (the
 		// default) just hides the "Replace" entry point.
-		Fn<void(Fn<void(ProxyData)>)> pickFromList = nullptr);
+		Fn<void(Fn<void(ProxyData)>)> pickFromList = nullptr,
+		const QString &initialCountry = QString(),
+		Fn<void(QString countryIso, QString countryCode)> countryCallback = nullptr);
 
 	// Fills the quick-paste field from an externally-picked proxy (see
 	// pickFromList above) as if the user had typed/pasted it themselves.
@@ -709,6 +713,10 @@ private:
 	Fn<void(ProxyData)> _callback;
 	Fn<void(ProxyData)> _shareCallback;
 	Fn<void(Fn<void(ProxyData)>)> _pickFromList;
+	Fn<void(QString, QString)> _countryCallback;
+	rpl::variable<QString> _countryTitle;
+	QString _selectedCountryIso;
+	QString _selectedCountryCode;
 
 	object_ptr<Ui::VerticalLayout> _content;
 
@@ -1496,11 +1504,15 @@ ProxyBox::ProxyBox(
 	const ProxyData &data,
 	Fn<void(ProxyData)> callback,
 	Fn<void(ProxyData)> shareCallback,
-	Fn<void(Fn<void(ProxyData)>)> pickFromList)
+	Fn<void(Fn<void(ProxyData)>)> pickFromList,
+	const QString &initialCountry,
+	Fn<void(QString countryIso, QString countryCode)> countryCallback)
 : _allowShare(data.type != Type::None && shareCallback != nullptr)
 , _callback(std::move(callback))
 , _shareCallback(std::move(shareCallback))
 , _pickFromList(std::move(pickFromList))
+, _countryCallback(std::move(countryCallback))
+, _countryTitle(!initialCountry.isEmpty() ? initialCountry : u"Выбрать страну Telegram…"_q)
 , _content(this) {
 	setupControls(data);
 }
@@ -1577,11 +1589,17 @@ void ProxyBox::save() {
 		// this->_callback afterwards is a use-after-free (seen as the
 		// callback appearing "empty" and throwing bad_function_call).
 		const auto callback = _callback;
+		const auto countryCb = _countryCallback;
+		const auto iso = _selectedCountryIso;
+		const auto code = _selectedCountryCode;
 		// ...and close *before* invoking it: for the add-account flow the
 		// callback can swap out the whole window's content (a new account
 		// with no session shows the login screen), which must happen
 		// after this box has already let go of its layer, not before.
 		closeBox();
+		if (countryCb && (!iso.isEmpty() || !code.isEmpty())) {
+			countryCb(iso, code);
+		}
 		callback(data);
 	}
 }
@@ -1724,6 +1742,38 @@ void ProxyBox::setupControls(const ProxyData &data) {
 
 	const auto quickPaste = setupQuickPaste(data);
 	_quickPaste = quickPaste;
+
+	addLabel(_content, u"Страна (язык и часовой пояс)"_q);
+	const auto countryBtn = _content->add(
+		object_ptr<Ui::SettingsButton>(
+			_content,
+			_countryTitle.value(),
+			st::settingsButton),
+		st::proxyEditInputPadding);
+	countryBtn->setClickedCallback([=, weak = base::make_weak(this)] {
+		auto countryBox = Box<Ui::CountrySelectBox>(
+			_selectedCountryIso,
+			Ui::CountrySelectBox::Type::Countries);
+		const auto boxWeak = base::make_weak(countryBox.data());
+		countryBox->entryChosen(
+		) | rpl::on_next([=](const Ui::CountrySelectBox::Entry &entry) {
+			if (boxWeak) {
+				boxWeak->closeBox();
+			}
+			if (const auto strong = weak.get()) {
+				const auto geo = !entry.code.isEmpty()
+					? Core::GgtgGeo::MatchForPhone(entry.code)
+					: Core::GgtgGeo::MatchForCountry(entry.iso2);
+				strong->_selectedCountryIso = entry.iso2;
+				strong->_selectedCountryCode = entry.code;
+				strong->_countryTitle = entry.country
+					+ (entry.code.isEmpty() ? QString() : (u" (+"_q + entry.code + u")"_q))
+					+ u" · "_q + geo.systemLang + u", UTC"_q + Core::GgtgGeo::FormatUtcOffset(geo.tzOffset);
+			}
+		}, countryBox->lifetime());
+		Ui::show(std::move(countryBox));
+	});
+
 	setupTypes();
 	setupSocketAddress(data);
 	setupCredentials(data);
@@ -1897,11 +1947,31 @@ object_ptr<Ui::BoxContent> MakeAccountProxyBox(
 			}),
 			Ui::LayerOption::KeepOther);
 	};
+	const auto countryCallback = [=](const QString &iso, const QString &code) {
+		const auto geo = !code.isEmpty()
+			? Core::GgtgGeo::MatchForPhone(code)
+			: Core::GgtgGeo::MatchForCountry(iso);
+		auto dev = account->deviceOverride();
+		dev.systemLangCode = geo.systemLang;
+		dev.cloudLangCode = geo.cloudLang;
+		dev.tzOffset = geo.tzOffset;
+		account->setDeviceOverride(dev);
+	};
+	auto initialCountry = QString();
+	const auto phone = (account->sessionExists() && account->session().user())
+		? account->session().user()->phone()
+		: QString();
+	if (!phone.isEmpty()) {
+		const auto geo = Core::GgtgGeo::MatchForPhone(phone);
+		initialCountry = geo.country + u" · "_q + geo.systemLang + u", UTC"_q + Core::GgtgGeo::FormatUtcOffset(geo.tzOffset);
+	}
 	return Box<ProxyBox>(
 		current,
 		submit,
 		Fn<void(ProxyData)>(),
-		pickFromList);
+		pickFromList,
+		initialCountry,
+		countryCallback);
 }
 
 object_ptr<Ui::BoxContent> MakeManualProxyBox(
@@ -1922,6 +1992,10 @@ object_ptr<Ui::BoxContent> MakeManualProxyBox(
 
 [[nodiscard]] QString DescribeProxyList(const MTP::ProxyList &list) {
 	const auto name = list.name.isEmpty() ? u"(без названия)"_q : list.name;
+	const auto geoMatch = Core::GgtgGeo::MatchForName(name);
+	if (geoMatch) {
+		return name + u"  ·  "_q + geoMatch->country + u" ("_q + geoMatch->systemLang + u", UTC"_q + Core::GgtgGeo::FormatUtcOffset(geoMatch->tzOffset) + u") ("_q + QString::number(list.entries.size()) + u")"_q;
+	}
 	return name + u" ("_q + QString::number(list.entries.size()) + ')';
 }
 
@@ -2053,6 +2127,28 @@ object_ptr<Ui::BoxContent> MakeProxyListEditorBox(int listIndex) {
 				listIndex,
 				nameField->getLastText().trimmed());
 		}, nameField->lifetime());
+
+		const auto changeCountry = box->addRow(
+			object_ptr<Ui::LinkButton>(
+				box.get(),
+				u"Выбрать страну Telegram…"_q),
+			st::boxRowPadding);
+		changeCountry->setClickedCallback([=] {
+			auto countryBox = Box<Ui::CountrySelectBox>(
+				QString(),
+				Ui::CountrySelectBox::Type::Countries);
+			const auto weak = base::make_weak(countryBox.data());
+			countryBox->entryChosen(
+			) | rpl::on_next([=](const Ui::CountrySelectBox::Entry &entry) {
+				if (weak) {
+					weak->closeBox();
+				}
+				const auto name = entry.country + (entry.code.isEmpty() ? QString() : (u" (+"_q + entry.code + u")"_q));
+				nameField->setText(name);
+				MTP::GlobalProxyPool().renameList(listIndex, name);
+			}, countryBox->lifetime());
+			Ui::show(std::move(countryBox));
+		});
 
 		Ui::AddSkip(box->verticalLayout());
 		Ui::AddSubsectionTitle(box->verticalLayout(), tr::lng_proxy_section_title());
@@ -2431,6 +2527,32 @@ object_ptr<Ui::BoxContent> MakeProxyPoolManagerBox() {
 		box->setWidth(st::boxWideWidth);
 		box->setTitle(tr::lng_proxy_manager_title());
 		Ui::AddSkip(box->verticalLayout());
+
+		const auto countryBtn = box->addRow(
+			object_ptr<Ui::RoundButton>(
+				box.get(),
+				rpl::single(u"Добавить список по стране Telegram…"_q),
+				st::defaultActiveButton),
+			st::boxRowPadding);
+		countryBtn->setClickedCallback([=] {
+			auto countryBox = Box<Ui::CountrySelectBox>(
+				QString(),
+				Ui::CountrySelectBox::Type::Countries);
+			const auto weak = base::make_weak(countryBox.data());
+			countryBox->entryChosen(
+			) | rpl::on_next([=](const Ui::CountrySelectBox::Entry &entry) {
+				if (weak) {
+					weak->closeBox();
+				}
+				const auto name = entry.country + (entry.code.isEmpty() ? QString() : (u" (+"_q + entry.code + u")"_q));
+				const auto index = MTP::GlobalProxyPool().addList(name);
+				Ui::show(MakeProxyListEditorBox(index));
+			}, countryBox->lifetime());
+			Ui::show(std::move(countryBox));
+		});
+
+		Ui::AddSkip(box->verticalLayout());
+
 		// The name of a new list and the button that creates it, side by side.
 		const auto createRow = box->addRow(
 			object_ptr<Ui::RpWidget>(box),
@@ -2489,16 +2611,22 @@ object_ptr<Ui::BoxContent> MakeProxyPoolManagerBox() {
 				auto wrapOwned = object_ptr<Ui::RpWidget>(listWrap);
 				const auto row = wrapOwned.data();
 
+				const auto countText = tr::lng_proxy_in_list_count(
+					tr::now,
+					lt_count,
+					list.entries.size());
+				const auto geoMatch = Core::GgtgGeo::MatchForName(list.name);
+				const auto subtitle = geoMatch
+					? (geoMatch->country + u" ("_q + geoMatch->systemLang + u", UTC"_q + Core::GgtgGeo::FormatUtcOffset(geoMatch->tzOffset) + u")  ·  "_q + countText)
+					: countText;
+
 				const auto info = Ui::CreateChild<Ggtg::InfoRow>(
 					row,
 					rpl::single(Ggtg::InfoRowData{
 						.title = list.name.isEmpty()
 							? tr::lng_proxy_untitled_list(tr::now)
 							: list.name,
-						.subtitle = tr::lng_proxy_in_list_count(
-							tr::now,
-							lt_count,
-							list.entries.size()),
+						.subtitle = subtitle,
 						.chip = list.entries.empty()
 							? tr::lng_proxy_chip_empty(tr::now)
 							: QString::number(list.entries.size()),

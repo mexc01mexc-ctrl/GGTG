@@ -384,21 +384,26 @@ object GgtgDevice {
         }
     }
 
-    /** Fits this account's language and time zone to its proxy's location; device model / system are kept. Returns a one-line report. */
+    /** Fits this account's language and time zone to its phone number (instant) or proxy's location; device model / system are kept. Returns a one-line report. */
     suspend fun autoGeo(slot: Int): String {
         val uc = UserConfig.getInstance(slot)
         val phone = uc.currentUser?.phone.orEmpty()
         val phoneMatch = if (phone.isNotEmpty()) matchForPhone(phone) else null
 
-        val geo = try {
-            detect(slot)
-        } catch (t: Throwable) {
-            if (phoneMatch != null) {
-                Geo("phone", phoneMatch.country, langForCountry(phoneMatch.country), phoneMatch.tzOffset)
-            } else {
-                throw t
-            }
+        if (phoneMatch != null) {
+            val defPhone = phones.first()
+            save(
+                slot,
+                uc.ncgDeviceModel.ifEmpty { defPhone.model },
+                uc.ncgSystemVersion.ifEmpty { defPhone.system },
+                phoneMatch.systemLang, phoneMatch.cloudLang, phoneMatch.tzOffset,
+                uc.ncgAppVersion.ifEmpty { curatedBuilds.first() },
+                "android", 6, "eb06d4abfb49dc3eeb1aeb98ae0f581e"
+            )
+            return "+$phone (${phoneMatch.country}) → ${phoneMatch.systemLang}, UTC${formatOffset(phoneMatch.tzOffset)}"
         }
+
+        val geo = detect(slot)
         val defPhone = phones.first()
         save(
             slot,
@@ -485,7 +490,7 @@ object GgtgDevice {
                 profile.appVersion, GgtgDesktopProfiles.LANG_PACK,
                 GgtgDesktopProfiles.APP_ID, GgtgDesktopProfiles.APP_HASH
             )
-            autoGeoAfterProxy(slot)
+            if (phoneGeo == null) autoGeoAfterProxy(slot)
             return false
         }
 
@@ -496,7 +501,7 @@ object GgtgDevice {
             sysLang, cloudLang, tz,
             profile.appVersion, "android", 6, "eb06d4abfb49dc3eeb1aeb98ae0f581e"
         )
-        autoGeoAfterProxy(slot)
+        if (phoneGeo == null) autoGeoAfterProxy(slot)
         return false
     }
 
@@ -518,7 +523,6 @@ object GgtgDevice {
             sysLang, cloudLang, tz,
             p.appVersion, "android", 6, "eb06d4abfb49dc3eeb1aeb98ae0f581e"
         )
-        autoGeoAfterProxy(slot)
     }
 
     /** After a proxy was set or replaced: refit language / time zone to it (only when the account has a real proxy). */

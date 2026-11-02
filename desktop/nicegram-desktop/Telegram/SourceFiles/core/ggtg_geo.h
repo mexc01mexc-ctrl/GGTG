@@ -3,6 +3,8 @@
 
 #include <QtCore/QString>
 #include <QtCore/QRegularExpression>
+#include <optional>
+#include <cmath>
 
 namespace Core::GgtgGeo {
 
@@ -270,6 +272,27 @@ inline GeoMatch MatchForCountry(const QString &country) {
 		}
 	}
 	return { c.isEmpty() ? "US" : c, -18000, "en-US", "en" };
+}
+
+inline QString FormatUtcOffset(int seconds) {
+	const auto minutes = std::abs(seconds) / 60;
+	return QString(u"%1%2:%3"_q)
+		.arg(seconds < 0 ? u"-"_q : u"+"_q)
+		.arg(minutes / 60, 2, 10, QChar('0'))
+		.arg(minutes % 60, 2, 10, QChar('0'));
+}
+
+inline std::optional<GeoMatch> MatchForName(const QString &name) {
+	static const auto kParenRegex = QRegularExpression(u"\\(\\+?([0-9]+)\\)"_q);
+	const auto match = kParenRegex.match(name);
+	if (match.hasMatch()) {
+		return MatchForPhone(match.captured(1));
+	}
+	const auto phoneGeo = MatchForPhone(name);
+	if (phoneGeo.country != u"US"_q || name.contains(u"+1") || name.contains(u"US", Qt::CaseInsensitive)) {
+		return phoneGeo;
+	}
+	return std::nullopt;
 }
 
 } // namespace Core::GgtgGeo

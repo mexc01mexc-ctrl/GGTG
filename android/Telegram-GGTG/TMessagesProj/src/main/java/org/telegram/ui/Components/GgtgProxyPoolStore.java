@@ -125,16 +125,36 @@ public class GgtgProxyPoolStore {
     }
 
     public static void createList(String name) {
+        createList(name, "");
+    }
+
+    public static void createList(String name, String countryIso) {
         Set<String> names = new LinkedHashSet<>(prefs().getStringSet("names", Collections.emptySet()));
         names.add(name);
-        prefs().edit().putStringSet("names", names).apply();
+        SharedPreferences.Editor editor = prefs().edit().putStringSet("names", names);
+        if (countryIso != null && !countryIso.isEmpty()) {
+            editor.putString("country_" + name, countryIso);
+        }
+        editor.apply();
+    }
+
+    public static String getCountry(String name) {
+        return prefs().getString("country_" + name, "");
+    }
+
+    public static void setCountry(String name, String countryIso) {
+        prefs().edit().putString("country_" + name, countryIso != null ? countryIso : "").apply();
     }
 
     public static void renameList(String oldName, String newName) {
         if (newName.isEmpty() || newName.equals(oldName)) return;
         String text = getListText(oldName);
+        String country = getCountry(oldName);
         deleteList(oldName);
         replaceList(newName, text);
+        if (!country.isEmpty()) {
+            setCountry(newName, country);
+        }
     }
 
     public static synchronized List<Entry> getListEntries(String name) {
@@ -165,7 +185,7 @@ public class GgtgProxyPoolStore {
     public static void deleteList(String name) {
         Set<String> names = new LinkedHashSet<>(prefs().getStringSet("names", Collections.emptySet()));
         names.remove(name);
-        prefs().edit().putStringSet("names", names).remove("list_" + name).apply();
+        prefs().edit().putStringSet("names", names).remove("list_" + name).remove("country_" + name).apply();
     }
 
     public static synchronized String toJson() {

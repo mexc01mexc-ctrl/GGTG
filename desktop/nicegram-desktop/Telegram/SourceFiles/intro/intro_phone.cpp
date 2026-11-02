@@ -217,9 +217,6 @@ void PhoneWidget::submit() {
 		dev.tzOffset = geo.tzOffset;
 	}
 	account().setDeviceOverride(dev);
-	if (MTP::HasRealProxy(account().proxyOverride())) {
-		Settings::AutoDeviceGeo(&account(), nullptr);
-	}
 
 	api().instance().setUserPhone(_sentPhone);
 	const auto effectiveApiId = api().instance().apiId();

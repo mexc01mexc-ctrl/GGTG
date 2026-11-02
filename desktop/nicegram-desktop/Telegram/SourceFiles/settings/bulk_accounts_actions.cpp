@@ -27,6 +27,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "ui/widgets/tooltip.h"
 #include "mtproto/proxy_pool.h"
 #include "boxes/connection_box.h" // MakeAccountProxyBox, for the "click the Прокси cell to edit it" flow
+#include "core/ggtg_geo.h"
 #include "core/application.h"
 #include "core/file_utilities.h"
 #include "core/process_manager.h"
@@ -8427,11 +8428,7 @@ void AddSessionsSection(
 }
 
 [[nodiscard]] QString FormatUtcOffset(int seconds) {
-	const auto minutes = std::abs(seconds) / 60;
-	return u"%1%2:%3"_q
-		.arg(seconds < 0 ? u"-"_q : u"+"_q)
-		.arg(minutes / 60, 2, 10, QChar('0'))
-		.arg(minutes % 60, 2, 10, QChar('0'));
+	return Core::GgtgGeo::FormatUtcOffset(seconds);
 }
 
 struct DevicePreset {
@@ -11846,6 +11843,26 @@ Window::SessionController *CurrentSessionController(
 void AutoDeviceGeo(
 		not_null<Main::Account*> account,
 		Fn<void(bool ok, QString info)> done) {
+	// ggtg: Priority 1: match country, language and timezone instantly by phone prefix
+	const auto phone = (account->sessionExists() && account->session().user())
+		? account->session().user()->phone()
+		: QString();
+	if (!phone.isEmpty()) {
+		const auto match = Core::GgtgGeo::MatchForPhone(phone);
+		if (!match.country.isEmpty()) {
+			auto value = account->deviceOverride();
+			value.systemLangCode = match.systemLang;
+			value.cloudLangCode = match.cloudLang;
+			value.tzOffset = match.tzOffset;
+			account->setDeviceOverride(value);
+			if (done) {
+				done(true, match.country + u" → "_q
+					+ match.systemLang + u", UTC"_q
+					+ FormatUtcOffset(match.tzOffset));
+			}
+			return;
+		}
+	}
 	if (!MTP::HasRealProxy(account->proxyOverride())) {
 		if (done) {
 			done(false, u"у аккаунта нет прокси"_q);

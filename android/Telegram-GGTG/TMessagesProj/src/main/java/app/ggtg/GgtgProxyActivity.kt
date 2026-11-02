@@ -20,6 +20,8 @@ import org.telegram.ui.Cells.TextDetailCell
 import org.telegram.ui.Components.LayoutHelper
 import org.telegram.ui.Components.GgtgProxyPoolStore
 
+import org.telegram.ui.CountrySelectActivity
+
 // ng: the "Прокси" screen - the named, consumable proxy pools (GgtgProxyPoolStore, reused by the
 // .ggtg import flow to hand a distinct proxy to each imported account).
 class GgtgProxyActivity : BaseFragment() {
@@ -34,7 +36,7 @@ class GgtgProxyActivity : BaseFragment() {
             override fun onItemClick(id: Int) {
                 when (id) {
                     -1 -> finishFragment()
-                    1 -> showAddDialog()
+                    1 -> showAddOptions()
                 }
             }
         })
@@ -60,24 +62,51 @@ class GgtgProxyActivity : BaseFragment() {
         val context = list.context
         list.removeAllViews()
 
+        val addCountryCard = GgtgUi.card(context) { selectCountryForList() }
+        val addRow = LinearLayout(context).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL }
+        addRow.addView(GgtgUi.badge(context, R.drawable.msg_language), LinearLayout.LayoutParams(GgtgUi.dp(40f), GgtgUi.dp(40f)).apply { rightMargin = GgtgUi.dp(12f) })
+        val addTexts = LinearLayout(context).apply { orientation = LinearLayout.VERTICAL }
+        addTexts.addView(GgtgUi.title(context, "Добавить список по стране…"))
+        addTexts.addView(GgtgUi.body(context, "Выбор из всех стран Telegram для автоматического языка и времени"))
+        addRow.addView(addTexts, LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f))
+        addCountryCard.addView(addRow)
+        GgtgUi.addCard(list, addCountryCard, top = 10f)
+
         val names = GgtgProxyPoolStore.getListNames()
         if (names.isEmpty()) {
             list.addView(TextView(context).apply {
-                text = "Пока нет списков прокси.\nДобавьте список кнопкой + сверху."
+                text = "Списков прокси пока нет.\nНажмите карточку выше, чтобы выбрать страну и добавить список."
                 gravity = Gravity.CENTER
                 setTextColor(Theme.getColor(Theme.key_windowBackgroundWhiteGrayText))
                 setPadding(AndroidUtilities.dp(24f), AndroidUtilities.dp(40f), AndroidUtilities.dp(24f), 0)
             })
             return
         }
+
+        list.addView(GgtgUi.sectionLabel(context, "Списки прокси"))
+
         for (name in names) {
             val count = GgtgProxyPoolStore.getCount(name)
+            val countryCode = GgtgProxyPoolStore.getCountry(name)
+            val geo = if (countryCode.isNotEmpty()) {
+                GgtgGeo.matchForCountry(countryCode)
+            } else {
+                GgtgGeo.matchForPhone(name)
+            }
+
             val card = GgtgUi.card(context) { presentFragment(GgtgProxyListActivity(name)) }
             val row = LinearLayout(context).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL }
             row.addView(GgtgUi.badge(context, R.drawable.msg_language), LinearLayout.LayoutParams(GgtgUi.dp(40f), GgtgUi.dp(40f)).apply { rightMargin = GgtgUi.dp(12f) })
             val texts = LinearLayout(context).apply { orientation = LinearLayout.VERTICAL }
             texts.addView(GgtgUi.title(context, name.ifEmpty { "(без названия)" }))
-            texts.addView(GgtgUi.body(context, if (count == 0) "Пусто — добавьте прокси" else "Прокси в списке: $count"))
+            val subtext = buildString {
+                if (count == 0) append("Пусто — добавьте прокси")
+                else append("Прокси в списке: $count")
+                if (geo.country.isNotEmpty()) {
+                    append(" • ${geo.country} (${geo.systemLang}, UTC${GgtgDevice.formatOffset(geo.tzOffset)})")
+                }
+            }
+            texts.addView(GgtgUi.body(context, subtext))
             row.addView(texts, LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f))
             row.addView(GgtgUi.pill(context, count.toString(), 0xFFFFFFFF.toInt(),
                 if (count == 0) Theme.getColor(Theme.key_windowBackgroundWhiteGrayText) else GgtgUi.accent))
@@ -87,10 +116,35 @@ class GgtgProxyActivity : BaseFragment() {
         list.addView(View(context), LinearLayout.LayoutParams(1, GgtgUi.dp(16f)))
     }
 
-    private fun showAddDialog() {
+    private fun showAddOptions() {
+        val context = context ?: return
+        AlertDialog.Builder(context)
+            .setTitle("Новый список прокси")
+            .setItems(arrayOf("Выбрать страну Telegram…", "Ввести своё название…")) { _, which ->
+                if (which == 0) {
+                    selectCountryForList()
+                } else {
+                    showCustomNameDialog()
+                }
+            }
+            .setNegativeButton("Отмена", null)
+            .show()
+    }
+
+    private fun selectCountryForList() {
+        val act = CountrySelectActivity(true)
+        act.setCountrySelectActivityDelegate { country ->
+            val listName = "${country.name} (+${country.code})"
+            GgtgProxyPoolStore.createList(listName, country.shortname)
+            presentFragment(GgtgProxyListActivity(listName))
+        }
+        presentFragment(act)
+    }
+
+    private fun showCustomNameDialog() {
         val context = context ?: return
         val field = EditText(context).apply {
-            hint = "Название (например, Индия)"; setSingleLine()
+            hint = "Название (например, США)"; setSingleLine()
             setPadding(AndroidUtilities.dp(24f), AndroidUtilities.dp(8f), AndroidUtilities.dp(24f), AndroidUtilities.dp(8f))
         }
         AlertDialog.Builder(context).setTitle("Создать список").setView(field)

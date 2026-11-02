@@ -37,6 +37,9 @@ class GgtgAccountProxyActivity : BaseFragment(), NotificationCenter.Notification
     private var checkResult: TextView? = null
     private var field: android.widget.EditText? = null
     private var pingToken = 0
+    private var selectedCountryIso: String? = null
+    private var selectedCountryName: String? = null
+    private var countryLabel: TextView? = null
 
     override fun onFragmentCreate(): Boolean {
         NotificationCenter.getInstance(currentAccount).addObserver(this, NotificationCenter.didUpdateConnectionState)
@@ -70,7 +73,7 @@ class GgtgAccountProxyActivity : BaseFragment(), NotificationCenter.Notification
         // ---- the account's proxy and its state, as a row of Telegram's list
         val current = GgtgUi.card(context)
         val head = LinearLayout(context).apply { orientation = LinearLayout.HORIZONTAL; gravity = android.view.Gravity.CENTER_VERTICAL }
-        head.addView(GgtgUi.badge(context, "🌐"), LinearLayout.LayoutParams(GgtgUi.dp(40f), GgtgUi.dp(40f)).apply { rightMargin = GgtgUi.dp(12f) })
+        head.addView(GgtgUi.badge(context, R.drawable.msg_language), LinearLayout.LayoutParams(GgtgUi.dp(40f), GgtgUi.dp(40f)).apply { rightMargin = GgtgUi.dp(12f) })
         val texts = LinearLayout(context).apply { orientation = LinearLayout.VERTICAL }
         title = GgtgUi.title(context, "", 16f).also { texts.addView(it) }
         state = GgtgUi.body(context, "", 13f).also { texts.addView(it) }
@@ -85,6 +88,30 @@ class GgtgAccountProxyActivity : BaseFragment(), NotificationCenter.Notification
         val input = GgtgUi.input(context, "хост:порт:логин:пароль", quickText())
         field = input
         edit.addView(input)
+
+        val countryRow = LinearLayout(context).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = android.view.Gravity.CENTER_VERTICAL
+            setPadding(0, GgtgUi.dp(10f), 0, GgtgUi.dp(6f))
+        }
+        countryRow.addView(GgtgUi.badge(context, R.drawable.msg_language), LinearLayout.LayoutParams(GgtgUi.dp(36f), GgtgUi.dp(36f)).apply { rightMargin = GgtgUi.dp(10f) })
+        val cTexts = LinearLayout(context).apply { orientation = LinearLayout.VERTICAL }
+        cTexts.addView(GgtgUi.body(context, "Страна (язык и часовой пояс)", 12f))
+        val cLabel = GgtgUi.title(context, currentCountryText(), 14f).apply { setTextColor(GgtgUi.accent) }
+        countryLabel = cLabel
+        cTexts.addView(cLabel)
+        countryRow.addView(cTexts, LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f))
+        countryRow.addView(GgtgUi.body(context, "Изменить", 13f).apply { setTextColor(Theme.getColor(Theme.key_windowBackgroundWhiteGrayText)) })
+        countryRow.setOnClickListener {
+            val act = org.telegram.ui.CountrySelectActivity(true)
+            act.setCountrySelectActivityDelegate { country ->
+                selectedCountryIso = country.shortname
+                selectedCountryName = "${country.name} (+${country.code})"
+                countryLabel?.text = selectedCountryName
+            }
+            presentFragment(act)
+        }
+        edit.addView(countryRow)
         for (name in GgtgProxyPoolStore.getListNames()) {
             if (GgtgProxyPoolStore.getCount(name) == 0) continue
             edit.addView(GgtgUi.body(context, "Взять из списка «$name»", 14f).apply {
@@ -197,6 +224,17 @@ class GgtgAccountProxyActivity : BaseFragment(), NotificationCenter.Notification
         }
     }
 
+    private fun currentCountryText(): String {
+        selectedCountryName?.let { return it }
+        val uc = UserConfig.getInstance(currentAccount)
+        val phone = uc.currentUser?.phone.orEmpty()
+        if (phone.isNotEmpty()) {
+            val geo = GgtgGeo.matchForPhone(phone)
+            return "${geo.country} (+${phone.take(3)}) — по номеру"
+        }
+        return "Не выбрана (нажмите для выбора)"
+    }
+
     private fun save() {
         val e = entered() ?: return
         val uc = UserConfig.getInstance(currentAccount)
@@ -204,6 +242,26 @@ class GgtgAccountProxyActivity : BaseFragment(), NotificationCenter.Notification
             uc.ncgProxyUsername.orEmpty() == e.user && uc.ncgProxyPassword.orEmpty() == e.password
         if (!same) {
             ConnectionsManager.setProxySettingsForAccount(currentAccount, true, e.host, e.port, e.user, e.password, "")
+        }
+
+        val targetCountryIso = selectedCountryIso
+        val phone = uc.currentUser?.phone.orEmpty()
+        val geo = when {
+            !targetCountryIso.isNullOrEmpty() -> GgtgGeo.matchForCountry(targetCountryIso)
+            phone.isNotEmpty() -> GgtgGeo.matchForPhone(phone)
+            else -> null
+        }
+        if (geo != null) {
+            GgtgDevice.save(
+                currentAccount,
+                uc.ncgDeviceModel.ifEmpty { "SM-S928B" },
+                uc.ncgSystemVersion.ifEmpty { "SDK 34" },
+                geo.systemLang.lowercase(), geo.cloudLang, geo.tzOffset,
+                uc.ncgAppVersion.ifEmpty { GgtgAndroidProfiles.randomBuild() },
+                "android", 6, "eb06d4abfb49dc3eeb1aeb98ae0f581e"
+            )
+            Toast.makeText(parentActivity, "Прокси сохранён (${geo.country}, ${geo.systemLang}, UTC${GgtgDevice.formatOffset(geo.tzOffset)})", Toast.LENGTH_SHORT).show()
+        } else {
             GgtgDevice.autoGeoAfterProxy(currentAccount)
             Toast.makeText(parentActivity, "Прокси сохранён", Toast.LENGTH_SHORT).show()
         }
