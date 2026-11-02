@@ -12,7 +12,6 @@ import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import org.telegram.messenger.AndroidUtilities
-import org.telegram.messenger.ApplicationLoader
 import org.telegram.messenger.BuildVars
 import org.telegram.messenger.R
 import org.telegram.messenger.UserConfig
@@ -22,20 +21,16 @@ import org.telegram.ui.ActionBar.ActionBar.ActionBarMenuOnItemClick
 import org.telegram.ui.ActionBar.AlertDialog
 import org.telegram.ui.ActionBar.BaseFragment
 import org.telegram.ui.ActionBar.Theme
-import org.telegram.ui.Components.GgtgProxyChooser
 import org.telegram.ui.Components.LayoutHelper
-import java.io.File
 import kotlin.coroutines.resume
 
-// ng: accounts between this phone and GGTG Desktop through the sync's main account: every account gets a new,
-// independent session (so no session is ever shared and none breaks), carried as an encrypted catalog in the main
-// account's "Saved messages". Needs the sync set up first (GgtgSyncActivity).
+// ng: on-demand session minting for accounts from GGTG Desktop: each account gets a new,
+// independent mobile session born directly on Android with authentic hardware parameters.
+// The catalog of available accounts is exchanged automatically through the main account's sync.
 class GgtgSyncAccountsActivity : BaseFragment() {
 
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
     private var peerPicker: GgtgPeerAccountPicker? = null
-    private var phonePicker: GgtgAccountPicker? = null
-    private var noteInput: android.widget.EditText? = null
     private var btnMint: View? = null
 
     override fun createView(context: Context): View {
@@ -51,10 +46,10 @@ class GgtgSyncAccountsActivity : BaseFragment() {
         val root = GgtgUi.page(context, frame)
 
         GgtgUi.addCard(root, GgtgUi.infoCard(context, R.drawable.msg_info, "Безопасная синхронизация без риска бана",
-            "Сессии создаются прямо на телефоне с генерацией реальных характеристик устройства (модель, версия Android, язык, часовой пояс) и привязкой прокси. Telegram регистрирует сессию как чистое мобильное приложение. Сессии на Desktop продолжают работать параллельно."), top = 10f)
+            "Сессии создаются прямо на телефоне с генерацией уникальных характеристик устройства (модель, версия Android, язык, часовой пояс) и привязкой прокси. Telegram регистрирует сессию как чистое мобильное приложение. Сессии на Desktop продолжают работать параллельно."), top = 10f)
 
         // Section: Accounts on Desktop (Mint on Android)
-        root.addView(GgtgUi.sectionLabel(context, "Аккаунты на Desktop (Mac)"))
+        root.addView(GgtgUi.sectionLabel(context, "Доступные аккаунты с Desktop (Mac)"))
         val peerCard = GgtgUi.card(context)
         val pp = GgtgPeerAccountPicker(context)
         pp.setBackgroundColor(android.graphics.Color.TRANSPARENT)
@@ -77,26 +72,8 @@ class GgtgSyncAccountsActivity : BaseFragment() {
         }
         GgtgUi.addCard(root, refreshRow, top = 8f)
 
-        // Section: Send to Desktop
-        root.addView(GgtgUi.sectionLabel(context, "Отправить на Desktop"))
-        val noteCard = GgtgUi.card(context)
-        val nInput = GgtgUi.input(context, "Подпись сессий (напр. Телефон мастера)")
-        noteCard.addView(nInput)
-        GgtgUi.addCard(root, noteCard)
-        noteInput = nInput
-
-        val accounts = GgtgUi.card(context)
-        val p = GgtgAccountPicker(context)
-        p.setBackgroundColor(android.graphics.Color.TRANSPARENT)
-        accounts.addView(p, LinearLayout.LayoutParams(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT))
-        GgtgUi.addCard(root, accounts)
-        phonePicker = p
-        GgtgUi.addButton(root, GgtgUi.button(context, "Отправить выбранные на Desktop") { send() }, top = 14f)
-
-        // Legacy / manual fallback import
-        root.addView(GgtgUi.sectionLabel(context, "Ручной импорт пакета (.ggtg)"))
-        GgtgUi.addCard(root, GgtgUi.actionCard(context, R.drawable.msg_download, "Принять пакет .ggtg с Desktop",
-            "Если аккаунты были отправлены в виде файла пакета через «Избранное»") { receive() })
+        GgtgUi.addCard(root, GgtgUi.infoCard(context, R.drawable.msg_channel, "Синхронизация в обратную сторону",
+            "Все активные аккаунты с этого телефона автоматически доступны в списке на Mac («Настройки» → «Синхронизация» → «Аккаунты с телефона Android»). Никаких файлов пересылать вручную не требуется."), top = 14f)
 
         root.addView(GgtgUi.spacer(context))
 
@@ -378,99 +355,10 @@ class GgtgSyncAccountsActivity : BaseFragment() {
 
     private fun inform(title: String, text: String) {
         val context = context ?: return
-        GgtgApiOverride.inform(context, title, text)
-    }
-
-    private fun send() {
-        val context = context ?: return
-        val activity = parentActivity as? androidx.fragment.app.FragmentActivity ?: return
-        val slots = phonePicker?.selectedSlots().orEmpty()
-        if (slots.isEmpty()) { toast("Выберите хотя бы один аккаунт"); return }
-        if (GgtgSyncTransport.mainSlot() == null || GgtgSync.loadSettings().passphrase.isEmpty()) {
-            inform("Синхронизация", "Сначала настройте синхронизацию: главный аккаунт и фраза-пароль.")
-            return
-        }
-        val note = noteInput?.text?.toString()?.trim().orEmpty()
-        TdataExportHelper.exportForDesktop(activity, slots, note) { manifest, summary ->
-            if (manifest == null) {
-                inform("Аккаунты на Desktop", summary)
-            } else {
-                GgtgSyncTransport.sendAccounts("keys", manifest) { ok, text ->
-                    inform("Аккаунты на Desktop", if (ok) "$summary\n$text. На Desktop: «Синхронизация» → «Принять аккаунты с Android…»." else "Не отправилось: $text")
-                }
-            }
-        }
-    }
-
-    private fun receive() {
-        val context = context ?: return
-        GgtgSyncTransport.findIncoming { list, error ->
-            if (error.isNotEmpty()) { toast(error); return@findIncoming }
-            val remote = list.firstOrNull()
-            if (remote == null) { toast("С Desktop пока ничего не пришло"); return@findIncoming }
-            GgtgSyncTransport.fetchIncoming(remote) { bytes, problem ->
-                if (bytes == null) { toast(problem); return@fetchIncoming }
-                val copy = File(ApplicationLoader.applicationContext.cacheDir, "ggtg_sync_accounts.ggtg")
-                try { copy.writeBytes(bytes) } catch (t: Throwable) { toast("Не удалось сохранить файл"); return@fetchIncoming }
-                if (!GgtgPackImporter.isPack(copy)) { copy.delete(); toast("Это не экспорт GGTG"); return@fetchIncoming }
-                if (GgtgPackImporter.needsProxyPool(copy)) {
-                    GgtgProxyChooser.show(context) { source -> runImport(copy, source, remote) }
-                } else {
-                    runImport(copy, null, remote)
-                }
-            }
-        }
-    }
-
-    private fun runImport(file: File, source: GgtgProxySource?, remote: GgtgSyncTransport.Remote? = null) {
-        val activity = parentActivity ?: return
-        val progress = app.ggtg.ui.TdataImportProgressDialog(activity)
-        progress.show()
-        scope.launch {
-            try {
-                val result = withContext(Dispatchers.IO) { GgtgPackImporter.import(file, source, progress) }
-                try { progress.dismiss() } catch (_: Throwable) {}
-                val fullySuccessful = (result.imported.isNotEmpty() || result.alreadyLoggedIn > 0)
-                    && result.failed == 0
-                    && result.noFreeSlot == 0
-                    && result.noFreeProxy == 0
-                if (fullySuccessful && remote != null) {
-                    GgtgSyncTransport.deleteIncoming(remote)
-                }
-                val act = parentActivity
-                val msg = GgtgImportSupport.buildResultMessage(result)
-                val onDone = {
-                    val firstSlot = result.imported.firstOrNull()?.let { uid ->
-                        (0 until UserConfig.MAX_ACCOUNT_COUNT).firstOrNull { UserConfig.getInstance(it).clientUserId == uid }
-                    }
-                    val launchAct = org.telegram.ui.LaunchActivity.instance
-                    if (launchAct != null && !UserConfig.getInstance(launchAct.currentAccount).isClientActivated && firstSlot != null) {
-                        GgtgImportSupport.switchToImportedAccount(firstSlot)
-                    }
-                }
-                if (act != null && !act.isFinishing && !act.isDestroyed) {
-                    try {
-                        var handled = false
-                        val handleDone = { if (!handled) { handled = true; onDone() } }
-                        AlertDialog.Builder(act).setTitle("Аккаунты с Desktop")
-                            .setMessage(msg)
-                            .setPositiveButton("Закрыть") { _, _ -> handleDone() }
-                            .setOnDismissListener { handleDone() }
-                            .show()
-                    } catch (t: Throwable) {
-                        toast(msg)
-                        onDone()
-                    }
-                } else {
-                    toast(msg)
-                    onDone()
-                }
-            } catch (t: Throwable) {
-                try { progress.dismiss() } catch (_: Throwable) {}
-                toast("Ошибка импорта: ${t.message ?: t.javaClass.simpleName}")
-            } finally {
-                withContext(Dispatchers.IO) { file.delete() }
-            }
-        }
+        AlertDialog.Builder(context)
+            .setTitle(title)
+            .setMessage(text)
+            .setPositiveButton("OK", null)
+            .show()
     }
 }

@@ -479,11 +479,6 @@ void FinishExport(const std::shared_ptr<ExportRun> &run) {
 		run->nextTimer.cancel();
 	}
 	const auto &process = run->process;
-	if (run->errors.join('\n').contains(u"API_ID_PUBLISHED_FLOOD"_q)
-		|| run->errors.join('\n').contains(u"API_ID_INVALID"_q)) {
-		const auto show = run->show;
-		base::call_delayed(300, [=] { ShowApiOverrideBox(show); });
-	}
 	if (run->exported.isEmpty()) {
 		const auto errMsg = u"Ни один аккаунт не успел экспортироваться:\n"_q + run->errors.join('\n');
 		process->fail(errMsg);
@@ -1160,14 +1155,6 @@ object_ptr<Ui::BoxContent> MakeGgtgExportBox(
 		}
 
 		Ui::AddSkip(content);
-		const auto apiOverrideLink = box->addRow(
-			object_ptr<Ui::LinkButton>(box, u"Свой api_id (my.telegram.org)"_q),
-			st::boxRowPadding);
-		apiOverrideLink->setClickedCallback([=] {
-			ShowApiOverrideBox(box->uiShow());
-		});
-		Ui::AddSkip(content);
-
 		const auto sessionNoteField = box->addRow(
 			object_ptr<Ui::InputField>(
 				box,

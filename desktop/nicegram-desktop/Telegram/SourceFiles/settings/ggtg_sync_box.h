@@ -757,47 +757,13 @@ inline void FillGgtgSyncBox(
 	Ui::AddSkip(layout, st::defaultVerticalListSkip);
 
 	// ---- Accounts exchange ----
-	Ui::AddSubsectionTitle(layout, rpl::single(u"Обмен аккаунтами между устройствами"_q));
+	Ui::AddSubsectionTitle(layout, rpl::single(u"Аккаунты на телефоне (Android)"_q));
 	box->addRow(
 		object_ptr<Ui::FlatLabel>(
 			box,
-			u"Каждому аккаунту при переносе создаётся новая изолированная сессия, поэтому сессии не рвутся: аккаунт одновременно работает на Desktop и Android."_q,
+			u"Список активных аккаунтов синхронизируется через облако без отправки файлов. Выберите нужный аккаунт, чтобы создать для него сессию на этом Mac."_q,
 			st::boxDividerLabel),
 		st::boxRowPadding);
-
-	const auto send = box->addRow(
-		object_ptr<Ggtg::ActionRow>(
-			box,
-			rpl::single(u"Отправить аккаунты на Android…"_q),
-			u"↑"_q),
-		st::boxRowPadding);
-	send->setClickedCallback([=] {
-		box->uiShow()->show(MakeGgtgExportBox(controller, true));
-	});
-
-	const auto receive = box->addRow(
-		object_ptr<Ggtg::ActionRow>(
-			box,
-			rpl::single(u"Принять аккаунты с Android…"_q),
-			u"↓"_q),
-		st::boxRowPadding);
-	receive->setClickedCallback([=] {
-		Core::GgtgSync::FindIncoming([=](
-				std::vector<Core::GgtgSync::Remote> list,
-				QString error) {
-			if (!error.isEmpty()) {
-				Ggtg::Notice(box->uiShow(), error);
-				return;
-			}
-			if (list.empty()) {
-				Ggtg::Notice(
-					box->uiShow(),
-					u"С Android пока ничего не пришло"_q);
-				return;
-			}
-			AcceptAccountsFromAndroid(box, list.front());
-		});
-	});
 
 	const auto peerAccs = box->addRow(
 		object_ptr<Ggtg::ActionRow>(
@@ -809,12 +775,12 @@ inline void FillGgtgSyncBox(
 		ShowPeerAccountsFromAndroidBox(controller, box->uiShow());
 	});
 
-	const auto own = box->addRow(
-		object_ptr<Ui::LinkButton>(
+	box->addRow(
+		object_ptr<Ui::FlatLabel>(
 			box,
-			u"Свой api_id и api_hash (если Telegram отказывает в новой сессии)…"_q),
+			u"Аккаунты с этого Mac автоматически доступны в списке на телефоне («Синхронизация аккаунтов»). Сессии создаются независимо на каждом устройстве и работают одновременно."_q,
+			st::boxDividerLabel),
 		st::boxRowPadding);
-	own->setClickedCallback([=] { ShowApiOverrideBox(box->uiShow()); });
 
 	box->addButton(tr::lng_close(), [=] { box->closeBox(); });
 }

@@ -33,27 +33,10 @@ struct Value {
 }
 
 [[nodiscard]] inline Value Load() {
-	auto file = QFile(Path());
-	if (!file.open(QIODevice::ReadOnly)) {
-		return {};
-	}
-	const auto object = QJsonDocument::fromJson(file.readAll()).object();
-	return {
-		.apiId = object["apiId"].toString().toInt(),
-		.apiHash = object["apiHash"].toString().trimmed(),
-	};
+	return {};
 }
 
 inline void Save(const Value &value) {
-	QDir().mkpath(GgtgPaths::DbDir());
-	auto file = QSaveFile(Path());
-	if (file.open(QIODevice::WriteOnly)) {
-		file.write(QJsonDocument(QJsonObject{
-			{ "apiId", QString::number(value.apiId) },
-			{ "apiHash", value.apiHash },
-		}).toJson(QJsonDocument::Compact));
-		file.commit();
-	}
 }
 
 } // namespace Core::GgtgApiOverride

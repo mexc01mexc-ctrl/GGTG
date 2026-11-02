@@ -192,14 +192,9 @@ class GgtgSyncActivity : BaseFragment() {
         GgtgUi.addCard(column, auto)
 
         // ---- accounts between the devices ----
-        GgtgUi.addCard(column, GgtgUi.actionCard(context, R.drawable.msg2_devices, "Аккаунты между устройствами",
-            "Принять аккаунты с Desktop или отправить свои на Desktop — новой отдельной сессией, без разрыва.") {
+        GgtgUi.addCard(column, GgtgUi.actionCard(context, R.drawable.msg2_devices, "Синхронизация аккаунтов (по запросу)",
+            "Выбрать и добавить аккаунты с Mac прямо на телефон — с созданием нативной мобильной сессии.") {
             presentFragment(GgtgSyncAccountsActivity())
-        })
-
-        GgtgUi.addCard(column, GgtgUi.actionCard(context, R.drawable.msg_settings, "Свой api_id",
-            "Если Telegram отказывает в новой сессии (API_ID_PUBLISHED_FLOOD): как получить и куда ввести.") {
-            GgtgApiOverride.showDialog(context)
         })
 
         // not needed for the sync to work: for when one can't wait
