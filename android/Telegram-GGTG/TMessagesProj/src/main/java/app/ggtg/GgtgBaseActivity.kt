@@ -67,8 +67,14 @@ class GgtgBaseActivity(private val baseId: Long) : BaseFragment() {
         val header = card(context)
         header.orientation = LinearLayout.HORIZONTAL
         header.gravity = Gravity.CENTER_VERTICAL
-        header.addView(GgtgUi.circleIcon(context, if (isGroups) "👥" else "👤", 46f, color(Theme.key_windowBackgroundGray), GgtgUi.accent),
-            LinearLayout.LayoutParams(dp(46f), dp(46f)).apply { rightMargin = dp(12f) })
+        val headerIcon = android.widget.ImageView(context).apply {
+            setImageDrawable(GgtgUi.icon(context, if (isGroups) R.drawable.msg_groups else R.drawable.msg_contacts, GgtgUi.accent))
+        }
+        val headerCircle = android.widget.FrameLayout(context).apply {
+            background = rounded(color(Theme.key_windowBackgroundGray), dp(23f).toFloat())
+            addView(headerIcon, android.widget.FrameLayout.LayoutParams(dp(24f), dp(24f), Gravity.CENTER))
+        }
+        header.addView(headerCircle, LinearLayout.LayoutParams(dp(46f), dp(46f)).apply { rightMargin = dp(12f) })
         val headerTexts = LinearLayout(context).apply { orientation = LinearLayout.VERTICAL }
         headerTexts.addView(TextView(context).apply {
             text = meta?.title ?: "База"; textSize = 17f
@@ -118,32 +124,40 @@ class GgtgBaseActivity(private val baseId: Long) : BaseFragment() {
         // primary actions card
         val main = card(context)
         if (!isGroups) {
-            actionRow(main, "💾", "Сохранить изменения") { save() }
+            actionRow(main, R.drawable.msg_saved, "Сохранить изменения") { save() }
         }
-        actionRow(main, "📋", "Открыть списком (кликабельно)", chevron = true) { presentFragment(GgtgBaseListActivity(baseId, isGroups)) }
+        actionRow(main, R.drawable.msg_viewchats, "Открыть списком (кликабельно)", chevron = true) { presentFragment(GgtgBaseListActivity(baseId, isGroups)) }
+        if (!isGroups) {
+            actionRow(main, R.drawable.msg_contacts, "Проверить базу (загрузить профили через корзину / ротацию)", chevron = true) {
+                val ctx = context ?: parentActivity
+                if (ctx != null) {
+                    GgtgBaseChecker.checkBase(ctx, baseId, meta?.title ?: "База") { reload() }
+                }
+            }
+        }
         root.addView(main)
 
         // operations card
         sectionLabel(root, "Операции")
         val ops = card(context)
-        actionRow(ops, "📤", "Экспорт в файл (txt / csv)…") { chooseExport() }
+        actionRow(ops, R.drawable.msg_forward, "Экспорт в файл (txt / csv)…") { chooseExport() }
         if (!isGroups) {
-            actionRow(ops, "💤", "Удалить неактивных («был(а) давно»)…") { removeInactive() }
-            actionRow(ops, "✅", "Удалить написанных (статус OK)…") { removeSent() }
-            actionRow(ops, "🤖", "Очистить от фейков и ботов…") {
+            actionRow(ops, R.drawable.msg_clear, "Удалить неактивных («был(а) давно»)…") { removeInactive() }
+            actionRow(ops, R.drawable.msg_select, "Удалить написанных (статус OK)…") { removeSent() }
+            actionRow(ops, R.drawable.msg_bots, "Очистить от фейков и ботов…") {
                 val ctx = context ?: parentActivity
                 if (ctx != null) {
                     GgtgFakeDetector.showCleanBaseDialog(ctx, baseId, meta?.title ?: "База") { reload() }
                 }
             }
-            actionRow(ops, "➕", "Объединить") { merge() }
-            actionRow(ops, "✂️", "Разбить на части…") { split() }
+            actionRow(ops, R.drawable.msg_addcontact, "Объединить") { merge() }
+            actionRow(ops, R.drawable.msg_reorder, "Разбить на части…") { split() }
         }
         root.addView(ops)
 
         // delete, in its own card
         val danger = card(context)
-        actionRow(danger, "🗑", "Удалить базу", destructive = true) { delete() }
+        actionRow(danger, R.drawable.msg_delete, "Удалить базу", destructive = true) { delete() }
         root.addView(danger)
         return frame
     }
@@ -170,7 +184,7 @@ class GgtgBaseActivity(private val baseId: Long) : BaseFragment() {
         })
     }
 
-    private fun actionRow(card: LinearLayout, emoji: String, label: String, destructive: Boolean = false, chevron: Boolean = false, onClick: () -> Unit) {
+    private fun actionRow(card: LinearLayout, iconRes: Int, label: String, destructive: Boolean = false, chevron: Boolean = false, onClick: () -> Unit) {
         val row = LinearLayout(card.context).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
@@ -178,11 +192,11 @@ class GgtgBaseActivity(private val baseId: Long) : BaseFragment() {
             background = Theme.createSelectorDrawable(color(Theme.key_listSelector), 2)
             setOnClickListener { onClick() }
         }
-        // Telegram's own icon instead of an emoji
-        row.addView(android.widget.FrameLayout(card.context).apply {
-            addView(GgtgUi.glyphView(card.context, emoji, 22f,
-                if (destructive) color(Theme.key_text_RedRegular) else color(Theme.key_windowBackgroundWhiteGrayIcon)))
-        }, LinearLayout.LayoutParams(dp(30f), dp(24f)))
+        val iconColor = if (destructive) color(Theme.key_text_RedRegular) else color(Theme.key_windowBackgroundWhiteGrayIcon)
+        val iv = android.widget.ImageView(card.context).apply {
+            setImageDrawable(GgtgUi.icon(card.context, iconRes, iconColor))
+        }
+        row.addView(iv, LinearLayout.LayoutParams(dp(24f), dp(24f)).apply { rightMargin = dp(12f) })
         row.addView(TextView(card.context).apply {
             text = label; textSize = 15f
             setTextColor(if (destructive) color(Theme.key_text_RedRegular) else color(Theme.key_windowBackgroundWhiteBlackText))
@@ -205,6 +219,8 @@ class GgtgBaseActivity(private val baseId: Long) : BaseFragment() {
         val m = meta
         actionBar.setTitle("База")
         titleView?.text = m?.title ?: "База"
+        val srcTitle = GgtgDb.sourceTitle(m?.source ?: "")
+        val srcText = " · Источник: $srcTitle"
         if (isGroups) {
             val entries = GgtgDb.loadGroupEntries(baseId)
             editor.setText(entries.joinToString("\n") {
@@ -212,12 +228,12 @@ class GgtgBaseActivity(private val baseId: Long) : BaseFragment() {
                     (if (it.title.isNotEmpty()) " — " + it.title else "") + (if (it.membersCount > 0) " · ${it.membersCount} уч." else "")
             })
             editor.isEnabled = false
-            infoView?.text = "Групп: ${entries.size}"
+            infoView?.text = "Групп: ${entries.size}$srcText"
             return
         }
         val list = GgtgDb.loadUsernames(baseId)
         val bots = list.count { GgtgDb.isBotUsername(it) }
-        infoView?.text = "Юзернеймов: ${list.size}" + if (bots > 0) " · боты: $bots" else ""
+        infoView?.text = "Юзернеймов: ${list.size}" + (if (bots > 0) " · боты: $bots" else "") + srcText
         if (list.size > EDITOR_LIMIT) {
             editor.setText("")
             editor.isEnabled = false

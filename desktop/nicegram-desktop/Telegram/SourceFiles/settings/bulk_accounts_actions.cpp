@@ -2676,6 +2676,261 @@ enum class ListOrder {
 	return result;
 }
 
+void ShowSingleAccountPicker(
+		std::shared_ptr<Ui::Show> show,
+		Main::Account *currentAccount,
+		Fn<void(not_null<Main::Account*>)> onChosen) {
+	show->show(Box([=](not_null<Ui::GenericBox*> box) {
+		box->setWidth(st::accountsBoxWidth);
+		box->setTitle(rpl::single(u"Выбор аккаунта для отправки"_q));
+
+		const auto selected = std::make_shared<base::flat_set<not_null<Main::Account*>>>();
+		if (currentAccount) {
+			selected->emplace(currentAccount);
+		}
+		const auto expanded = std::make_shared<base::flat_set<QString>>();
+		for (const auto &account : Core::App().domain().orderedAccounts()) {
+			if (account->sessionExists()) {
+				expanded->emplace(account->trashed() ? TrashGroupTag() : account->folderTag());
+			}
+		}
+
+		const auto scroll = AddScrollableRowsArea(box->verticalLayout());
+
+		AccountAccordionHooks hooks{
+			.selected = selected.get(),
+			.expandedFolders = expanded.get(),
+			.addAccountRow = [=](not_null<Ui::VerticalLayout*> container, not_null<Main::Account*> account) {
+				const auto row = AddAccountPickerRow(container, account);
+				const auto isCurrent = (currentAccount == account.get());
+				row->setChecked(isCurrent);
+				row->checkedChanges() | rpl::on_next([=](bool) {
+					if (onChosen) {
+						onChosen(account);
+					}
+					box->closeBox();
+				}, row->lifetime());
+			},
+			.singleChoice = true,
+		};
+
+		RebuildAccountAccordion(scroll, hooks);
+
+		box->addButton(tr::lng_cancel(), [=] { box->closeBox(); });
+	}));
+}
+
+void StartBaseVerification(
+		std::shared_ptr<Ui::Show> show,
+		uint64 baseId,
+		const QString &title,
+		Fn<void()> onDone) {
+	const auto allUsernames = Data::LoadScrapedGroupUsernames(baseId);
+	if (allUsernames.isEmpty()) {
+		show->showToast(u"База пуста"_q);
+		return;
+	}
+	auto toCheck = QStringList();
+	for (const auto &u : allUsernames) {
+		const auto key = u.trimmed().remove('@');
+		if (key.isEmpty()) {
+			continue;
+		}
+		const auto meta = Data::LookupUserMeta(key);
+		if (meta.id == 0) {
+			toCheck.push_back(key);
+		}
+	}
+	if (toCheck.isEmpty()) {
+		show->showToast(u"Все пользователи в базе уже проверены"_q);
+		if (onDone) {
+			onDone();
+		}
+		return;
+	}
+
+	auto trashAccounts = std::vector<not_null<Main::Account*>>();
+	auto liveAccounts = std::vector<not_null<Main::Account*>>();
+	for (const auto &account : Core::App().domain().orderedAccounts()) {
+		if (!account->sessionExists()) {
+			continue;
+		}
+		if (account->trashed()) {
+			trashAccounts.push_back(account);
+		} else {
+			liveAccounts.push_back(account);
+		}
+	}
+	const auto usingTrash = !trashAccounts.empty();
+	const auto workers = usingTrash ? trashAccounts : liveAccounts;
+	if (workers.empty()) {
+		show->showToast(u"Нет подключённых аккаунтов"_q);
+		return;
+	}
+
+	show->show(Box([=](not_null<Ui::GenericBox*> box) {
+		box->setWidth(st::accountsBoxWidth);
+		box->setTitle(rpl::single(u"Проверка базы: "_q + title));
+
+		const auto modeText = usingTrash
+			? (u"Используются аккаунты из корзины ("_q
+				+ QString::number(workers.size())
+				+ u" шт.) — рабочие аккаунты защищены от флуда."_q)
+			: (u"Используется ротация рабочих аккаунтов ("_q
+				+ QString::number(workers.size())
+				+ u" шт.) — по 3 запроса на аккаунт."_q);
+		box->addRow(object_ptr<Ui::FlatLabel>(
+			box,
+			modeText,
+			st::boxDividerLabel));
+
+		const auto statusLabel = box->addRow(object_ptr<Ui::FlatLabel>(
+			box,
+			u"Проверено: 0 из "_q + QString::number(toCheck.size()),
+			st::boxLabel));
+
+		const auto workerLabel = box->addRow(object_ptr<Ui::FlatLabel>(
+			box,
+			u"Аккаунт: "_q + (workers.empty() ? QString() : workers.front()->session().user()->name()),
+			st::boxDividerLabel));
+
+		struct VerifyState {
+			int checkedCount = 0;
+			int resolvedCount = 0;
+			int workerIdx = 0;
+			int batchCount = 0;
+			base::flat_map<not_null<Main::Account*>, crl::time> cooldownUntil;
+			int currentIndex = 0;
+			bool active = false;
+			base::Timer stepTimer;
+		};
+		const auto state = box->lifetime().make_state<VerifyState>();
+		const auto weakBox = QPointer<Ui::GenericBox>(box.get());
+
+		const auto step = std::make_shared<Fn<void()>>();
+		*step = [=] {
+			if (!weakBox || state->active || state->currentIndex >= toCheck.size()) {
+				return;
+			}
+			const auto now = crl::now();
+			auto attempts = int(workers.size());
+			while (attempts-- > 0) {
+				if (state->workerIdx >= int(workers.size())) {
+					state->workerIdx = 0;
+				}
+				const auto cand = workers[state->workerIdx];
+				const auto it = state->cooldownUntil.find(cand);
+				if (it == state->cooldownUntil.end() || it->second <= now) {
+					break;
+				}
+				state->workerIdx = (state->workerIdx + 1) % int(workers.size());
+			}
+			const auto worker = workers[state->workerIdx];
+			const auto it = state->cooldownUntil.find(worker);
+			if (it != state->cooldownUntil.end() && it->second > now) {
+				const auto waitMs = std::min(int(it->second - now), 15000);
+				state->stepTimer.callOnce(waitMs);
+				return;
+			}
+
+			workerLabel->setText(u"Аккаунт: "_q + worker->session().user()->name());
+
+			const auto username = toCheck[state->currentIndex];
+			state->active = true;
+			const auto api = static_cast<MTP::Sender*>(&worker->session().api());
+			api->request(MTPcontacts_ResolveUsername(
+				MTP_flags(MTPcontacts_ResolveUsername::Flags(0)),
+				MTP_string(username),
+				MTP_string(QString())
+			)).done([=](const MTPcontacts_ResolvedPeer &result) {
+				state->active = false;
+				if (!weakBox) {
+					return;
+				}
+				result.match([&](const MTPDcontacts_resolvedPeer &data) {
+					worker->session().data().processUsers(data.vusers());
+					worker->session().data().processChats(data.vchats());
+					const auto peerId = peerFromMTP(data.vpeer());
+					if (peerId) {
+						if (const auto peer = worker->session().data().peer(peerId)) {
+							Data::RememberPeerName(peer);
+							state->resolvedCount++;
+						}
+					}
+				});
+				state->batchCount++;
+				const auto maxBatch = usingTrash ? 5 : 3;
+				if (state->batchCount >= maxBatch) {
+					state->batchCount = 0;
+					state->workerIdx = (state->workerIdx + 1) % int(workers.size());
+				}
+				state->checkedCount++;
+				state->currentIndex++;
+				statusLabel->setText(
+					u"Проверено: "_q + QString::number(state->checkedCount)
+					+ u" из "_q + QString::number(toCheck.size())
+					+ u" (найдено: "_q + QString::number(state->resolvedCount) + u")"_q);
+				if (state->currentIndex < toCheck.size()) {
+					state->stepTimer.callOnce(250);
+				} else {
+					show->showToast(
+						u"Проверка завершена. Определено пользователей: "_q
+						+ QString::number(state->resolvedCount));
+					if (onDone) {
+						onDone();
+					}
+					weakBox->closeBox();
+				}
+			}).fail([=](const MTP::Error &error) {
+				state->active = false;
+				if (!weakBox) {
+					return;
+				}
+				const auto type = error.type();
+				if (type.startsWith(u"FLOOD_WAIT"_q)) {
+					const auto seconds = type.mid(11).toInt();
+					const auto waitMs = (seconds > 0 ? std::min(seconds, 60) : 30) * 1000;
+					state->cooldownUntil[worker] = crl::now() + waitMs;
+					state->batchCount = 0;
+					state->workerIdx = (state->workerIdx + 1) % int(workers.size());
+				} else {
+					state->batchCount++;
+					const auto maxBatch = usingTrash ? 5 : 3;
+					if (state->batchCount >= maxBatch) {
+						state->batchCount = 0;
+						state->workerIdx = (state->workerIdx + 1) % int(workers.size());
+					}
+				}
+				state->checkedCount++;
+				state->currentIndex++;
+				statusLabel->setText(
+					u"Проверено: "_q + QString::number(state->checkedCount)
+					+ u" из "_q + QString::number(toCheck.size())
+					+ u" (найдено: "_q + QString::number(state->resolvedCount) + u")"_q);
+				if (state->currentIndex < toCheck.size()) {
+					state->stepTimer.callOnce(250);
+				} else {
+					show->showToast(
+						u"Проверка завершена. Определено пользователей: "_q
+						+ QString::number(state->resolvedCount));
+					if (onDone) {
+						onDone();
+					}
+					weakBox->closeBox();
+				}
+			}).send();
+		};
+
+		state->stepTimer.setCallback([=] { (*step)(); });
+		state->stepTimer.callOnce(100);
+
+		box->addButton(tr::lng_cancel(), [=] {
+			state->stepTimer.cancel();
+			box->closeBox();
+		});
+	}));
+}
+
 // A read-only, click-to-open view of a base's usernames - styled like
 // group members with photo/initials avatar, bold name, online status and
 // progressive chunked loading.
@@ -2689,7 +2944,8 @@ void ShowClickableUsernamesBox(
 		Fn<void(const QString &username)> download = nullptr,
 		Fn<void(const QString &username)> viaSquidward = nullptr,
 		Fn<bool(const QString &username)> isClosed = nullptr,
-		Fn<void(const QString &username, Fn<void()> done)> move = nullptr) {
+		Fn<void(const QString &username, Fn<void()> done)> move = nullptr,
+		uint64 baseId = 0) {
 	show->show(Box([=](not_null<Ui::GenericBox*> box) {
 		box->setWidth(style::ConvertScale(580));
 		box->setTitle(rpl::single(title));
@@ -2700,8 +2956,127 @@ void ShowClickableUsernamesBox(
 			// The list stays open when the account is switched
 			Ggtg::KeepOpenOnAccountSwitch(box);
 
+			const auto isGroupList = (download != nullptr) || (viaSquidward != nullptr);
+			const auto writingAccount = std::make_shared<not_null<Main::Account*>>(&Core::App().activeAccount());
+
+			auto baseSource = QString();
+			if (baseId != 0) {
+				for (const auto &m : Data::LoadScrapedGroupsIndex()) {
+					if (m.id == baseId) {
+						baseSource = m.source;
+						break;
+					}
+				}
+			}
+
 			const auto order = std::make_shared<ListOrder>(ListOrder::Base);
 			const auto rebuild = std::make_shared<Fn<void()>>();
+
+			if (!isGroupList) {
+				auto cardOwned = object_ptr<Ui::RpWidget>(box);
+				const auto card = cardOwned.data();
+				const auto cardHeight = style::ConvertScale(52);
+				card->resize(card->width(), cardHeight);
+
+				card->paintRequest() | rpl::on_next([=] {
+					auto p = Painter(card);
+					auto fill = st::windowBgOver->c;
+					p.setPen(Qt::NoPen);
+					p.setBrush(fill);
+					p.drawRoundedRect(card->rect(), style::ConvertScale(8), style::ConvertScale(8));
+				}, card->lifetime());
+
+				const auto userpicSize = style::ConvertScale(36);
+				const auto userpic = Ui::CreateChild<Ui::RpWidget>(card);
+				userpic->resize(userpicSize, userpicSize);
+				userpic->moveToLeft(style::ConvertScale(8), (cardHeight - userpicSize) / 2);
+				const auto userpicView = card->lifetime().make_state<Ui::PeerUserpicView>();
+
+				const auto nameLabel = Ui::CreateChild<Ui::FlatLabel>(card, QString(), st::boxLabel);
+				nameLabel->setAttribute(Qt::WA_TransparentForMouseEvents);
+				const auto detailsLabel = Ui::CreateChild<Ui::FlatLabel>(card, QString(), st::boxDividerLabel);
+				detailsLabel->setAttribute(Qt::WA_TransparentForMouseEvents);
+
+				const auto changeBtn = Ui::CreateChild<Ui::LinkButton>(card, u"Сменить"_q);
+				const auto verifyBtn = (baseId != 0) ? Ui::CreateChild<Ui::LinkButton>(card, u"Проверить базу"_q) : nullptr;
+
+				const auto updateCard = [=] {
+					const auto acc = *writingAccount;
+					auto nameText = QString();
+					auto detailsText = QString();
+					if (acc->sessionExists()) {
+						const auto u = acc->session().user();
+						nameText = u->name();
+						auto parts = QStringList();
+						if (!u->username().isEmpty()) {
+							parts.push_back(u"@"_q + u->username());
+						}
+						if (!u->phone().isEmpty()) {
+							parts.push_back(u->phone());
+						}
+						const auto tag = acc->trashed() ? u"Корзина"_q : acc->folderTag();
+						if (!tag.isEmpty()) {
+							parts.push_back(u"["_q + tag + u"]"_q);
+						}
+						detailsText = parts.join(u" · "_q);
+					} else {
+						nameText = u"Аккаунт не выбран"_q;
+					}
+					nameLabel->setText(nameText);
+					detailsLabel->setText(detailsText);
+					card->update();
+					userpic->update();
+				};
+				updateCard();
+
+				userpic->paintRequest() | rpl::on_next([=] {
+					auto p = Painter(userpic);
+					const auto acc = *writingAccount;
+					if (acc->sessionExists()) {
+						acc->session().user()->paintUserpicLeft(p, *userpicView, 0, 0, userpicSize, userpicSize);
+					} else {
+						Ui::EmptyUserpic(Ui::EmptyUserpic::UserpicColor(0), u"?"_q)
+							.paintCircle(p, 0, 0, userpicSize, userpicSize);
+					}
+				}, userpic->lifetime());
+
+				changeBtn->setClickedCallback([=] {
+					ShowSingleAccountPicker(show, (*writingAccount).get(), [=](not_null<Main::Account*> chosen) {
+						*writingAccount = chosen;
+						Core::App().domain().maybeActivate(chosen);
+						updateCard();
+					});
+				});
+				if (verifyBtn) {
+					verifyBtn->setClickedCallback([=] {
+						StartBaseVerification(show, baseId, title, [=] {
+							(*rebuild)();
+						});
+					});
+				}
+
+				card->widthValue() | rpl::on_next([=](int w) {
+					auto right = w - style::ConvertScale(12);
+					if (verifyBtn) {
+						verifyBtn->moveToRight(w - right, (cardHeight - verifyBtn->height()) / 2);
+						right -= verifyBtn->width() + style::ConvertScale(12);
+					}
+					changeBtn->moveToRight(w - right, (cardHeight - changeBtn->height()) / 2);
+					right -= changeBtn->width() + style::ConvertScale(12);
+
+					const auto textLeft = style::ConvertScale(8) + userpicSize + style::ConvertScale(10);
+					const auto textAvail = std::max(right - textLeft, style::ConvertScale(60));
+					nameLabel->resizeToWidth(textAvail);
+					detailsLabel->resizeToWidth(textAvail);
+					const auto totalTextHeight = nameLabel->height() + detailsLabel->height();
+					const auto textTop = (cardHeight - totalTextHeight) / 2;
+					nameLabel->moveToLeft(textLeft, textTop);
+					detailsLabel->moveToLeft(textLeft, textTop + nameLabel->height());
+				}, card->lifetime());
+
+				box->addRow(std::move(cardOwned), st::boxRowPadding);
+			}
+
 			const auto controls = box->addRow(
 				object_ptr<Ui::RpWidget>(box));
 
@@ -2713,7 +3088,6 @@ void ShowClickableUsernamesBox(
 				{ ListOrder::Online, u"По дате онлайна"_q },
 			};
 
-			const auto isGroupList = (download != nullptr) || (viaSquidward != nullptr);
 			const auto unitWord = [=](int count) {
 				const auto mod10 = count % 10;
 				const auto mod100 = count % 100;
@@ -2747,6 +3121,12 @@ void ShowClickableUsernamesBox(
 				controls,
 				QString::number(usernames.size()) + unitWord(usernames.size()),
 				st::boxDividerLabel);
+			const auto sourceLabel = (!baseSource.isEmpty())
+				? Ui::CreateChild<Ui::FlatLabel>(
+					controls,
+					u"Источник: "_q + Data::BaseSourceTitle(baseSource),
+					st::boxDividerLabel)
+				: nullptr;
 
 			const auto updateSortBtn = [=] {
 				sortBtn->setText(u"≡  Сортировка: "_q + sortTitles.at(*order) + u" ▾"_q);
@@ -2756,6 +3136,9 @@ void ShowClickableUsernamesBox(
 			const auto relayoutControls = [=] {
 				sortBtn->moveToLeft(0, 0);
 				countLabel->moveToRight(0, (sortBtn->height() - countLabel->height()) / 2);
+				if (sourceLabel) {
+					sourceLabel->moveToRight(countLabel->width() + style::ConvertScale(12), (sortBtn->height() - sourceLabel->height()) / 2);
+				}
 				controls->resize(controls->width(), sortBtn->height());
 			};
 			controls->widthValue() | rpl::on_next([=](int) {
@@ -2819,22 +3202,54 @@ void ShowClickableUsernamesBox(
 			const auto resolveQueue = std::make_shared<std::deque<std::pair<QString, QPointer<UsernameRow>>>>();
 			const auto resolveActive = std::make_shared<bool>(false);
 			const auto resolveTimer = std::make_shared<base::Timer>();
-			const auto floodCooldownUntil = std::make_shared<crl::time>(0);
+			const auto cooldownUntil = std::make_shared<base::flat_map<not_null<Main::Account*>, crl::time>>();
+			const auto resolveWorkerIdx = std::make_shared<int>(0);
+			const auto resolveBatchCount = std::make_shared<int>(0);
 
 			const auto stepResolve = std::make_shared<Fn<void()>>();
 			*stepResolve = [=] {
 				if (resolveQueue->empty() || *resolveActive) {
 					return;
 				}
+				auto trashAccounts = std::vector<not_null<Main::Account*>>();
+				auto liveAccounts = std::vector<not_null<Main::Account*>>();
+				for (const auto &account : Core::App().domain().orderedAccounts()) {
+					if (!account->sessionExists()) {
+						continue;
+					}
+					if (account->trashed()) {
+						trashAccounts.push_back(account);
+					} else {
+						liveAccounts.push_back(account);
+					}
+				}
+				const auto usingTrash = !trashAccounts.empty();
+				const auto workers = usingTrash ? trashAccounts : liveAccounts;
+				if (workers.empty()) {
+					return;
+				}
+
 				const auto now = crl::now();
-				if (*floodCooldownUntil > now) {
-					resolveTimer->callOnce(int(*floodCooldownUntil - now));
+				auto attempts = int(workers.size());
+				while (attempts-- > 0) {
+					if (*resolveWorkerIdx >= int(workers.size())) {
+						*resolveWorkerIdx = 0;
+					}
+					const auto cand = workers[*resolveWorkerIdx];
+					const auto it = cooldownUntil->find(cand);
+					if (it == cooldownUntil->end() || it->second <= now) {
+						break;
+					}
+					*resolveWorkerIdx = (*resolveWorkerIdx + 1) % int(workers.size());
+				}
+				const auto worker = workers[*resolveWorkerIdx];
+				const auto it = cooldownUntil->find(worker);
+				if (it != cooldownUntil->end() && it->second > now) {
+					const auto waitMs = std::min(int(it->second - now), 15000);
+					resolveTimer->callOnce(waitMs);
 					return;
 				}
-				const auto session = Core::App().activeAccount().maybeSession();
-				if (!session) {
-					return;
-				}
+
 				auto [username, row] = resolveQueue->front();
 				resolveQueue->pop_front();
 				if (!row) {
@@ -2843,7 +3258,7 @@ void ShowClickableUsernamesBox(
 					}
 					return;
 				}
-				if (const auto peer = session->data().peerByUsername(username)) {
+				if (const auto peer = worker->session().data().peerByUsername(username)) {
 					Data::RememberPeerName(peer);
 					row->setPeer(peer);
 					if (!resolveQueue->empty()) {
@@ -2852,43 +3267,54 @@ void ShowClickableUsernamesBox(
 					return;
 				}
 				*resolveActive = true;
-				const auto api = static_cast<MTP::Sender*>(&session->api());
+				const auto api = static_cast<MTP::Sender*>(&worker->session().api());
 				api->request(MTPcontacts_ResolveUsername(
 					MTP_flags(MTPcontacts_ResolveUsername::Flags(0)),
 					MTP_string(username),
 					MTP_string(QString())
-				)).done([=, api = api](const MTPcontacts_ResolvedPeer &result) {
+				)).done([=, session = &worker->session()](const MTPcontacts_ResolvedPeer &result) {
 					*resolveActive = false;
-					const auto currentSession = Core::App().activeAccount().maybeSession();
-					if (currentSession && (currentSession == session)) {
-						result.match([&](const MTPDcontacts_resolvedPeer &data) {
-							session->data().processUsers(data.vusers());
-							session->data().processChats(data.vchats());
-							const auto peerId = peerFromMTP(data.vpeer());
-							if (peerId) {
-								if (const auto peer = session->data().peer(peerId)) {
-									Data::RememberPeerName(peer);
-									if (row) {
-										row->setPeer(peer);
-									}
+					result.match([&](const MTPDcontacts_resolvedPeer &data) {
+						session->data().processUsers(data.vusers());
+						session->data().processChats(data.vchats());
+						const auto peerId = peerFromMTP(data.vpeer());
+						if (peerId) {
+							if (const auto peer = session->data().peer(peerId)) {
+								Data::RememberPeerName(peer);
+								if (row) {
+									row->setPeer(peer);
 								}
 							}
-						});
+						}
+					});
+					(*resolveBatchCount)++;
+					const auto maxBatch = usingTrash ? 5 : 3;
+					if (*resolveBatchCount >= maxBatch) {
+						*resolveBatchCount = 0;
+						*resolveWorkerIdx = (*resolveWorkerIdx + 1) % int(workers.size());
 					}
 					if (!resolveQueue->empty()) {
-						resolveTimer->callOnce(500);
+						resolveTimer->callOnce(300);
 					}
-				}).fail([=, api = api](const MTP::Error &error) {
+				}).fail([=](const MTP::Error &error) {
 					*resolveActive = false;
 					const auto type = error.type();
 					if (type.startsWith(u"FLOOD_WAIT"_q)) {
 						const auto seconds = type.mid(11).toInt();
 						const auto waitMs = (seconds > 0 ? std::min(seconds, 60) : 30) * 1000;
-						*floodCooldownUntil = crl::now() + waitMs;
+						(*cooldownUntil)[worker] = crl::now() + waitMs;
+						*resolveBatchCount = 0;
+						*resolveWorkerIdx = (*resolveWorkerIdx + 1) % int(workers.size());
 						if (!resolveQueue->empty()) {
-							resolveTimer->callOnce(waitMs);
+							resolveTimer->callOnce(100);
 						}
 					} else {
+						(*resolveBatchCount)++;
+						const auto maxBatch = usingTrash ? 5 : 3;
+						if (*resolveBatchCount >= maxBatch) {
+							*resolveBatchCount = 0;
+							*resolveWorkerIdx = (*resolveWorkerIdx + 1) % int(workers.size());
+						}
 						if (!resolveQueue->empty()) {
 							resolveTimer->callOnce(350);
 						}
@@ -2998,6 +3424,7 @@ void ShowClickableUsernamesBox(
 							}
 							return;
 						}
+						Core::App().domain().maybeActivate(*writingAccount);
 						OpenUsernamePeer(username, show, /*openProfile*/ false);
 					});
 				}
@@ -3025,12 +3452,18 @@ void ShowClickableUsernamesBox(
 						if (!isGroupList) {
 							entries.push_back({
 								u"Просмотр профиля"_q,
-								[=] { OpenUsernamePeer(username, show, /*openProfile*/ true); },
+								[=] {
+									Core::App().domain().maybeActivate(*writingAccount);
+									OpenUsernamePeer(username, show, /*openProfile*/ true);
+								},
 								&st::menuIconProfile,
 							});
 							entries.push_back({
 								u"Написать сообщение"_q,
-								[=] { OpenUsernamePeer(username, show, /*openProfile*/ false); },
+								[=] {
+									Core::App().domain().maybeActivate(*writingAccount);
+									OpenUsernamePeer(username, show, /*openProfile*/ false);
+								},
 								&st::menuIconChatBubble,
 							});
 						} else {
@@ -3100,6 +3533,7 @@ void ShowClickableUsernamesBox(
 						}
 						return;
 					}
+					Core::App().domain().maybeActivate(*writingAccount);
 					if (isGroupList) {
 						OpenUsernamePeer(username, show, /*openProfile*/ false);
 					} else {
@@ -3230,7 +3664,15 @@ void ShowEditBaseBox(
 				// with: users can be removed from it while this is open.
 				const auto stats = Data::ComputeBaseStats(
 					Data::LoadScrapedGroupUsernames(id));
-				auto text = u"Юзернеймов: "_q + QString::number(stats.total)
+				auto sourceTitle = QString();
+				for (const auto &meta : Data::LoadScrapedGroupsIndex()) {
+					if (meta.id == id) {
+						sourceTitle = Data::BaseSourceTitle(meta.source);
+						break;
+					}
+				}
+				auto text = (!sourceTitle.isEmpty() ? (u"Источник: "_q + sourceTitle + u"\n"_q) : QString())
+					+ u"Юзернеймов: "_q + QString::number(stats.total)
 					+ u". Осталось написать: "_q
 					+ QString::number(stats.remaining)
 					+ u"\nOK (уже написано): "_q + QString::number(stats.sent);
@@ -3344,7 +3786,8 @@ void ShowEditBaseBox(
 									done();
 								}
 							});
-					});
+					},
+					id);
 			});
 			if (actions.sendToBase) {
 				AddIconRowButton(
@@ -3504,6 +3947,11 @@ void ShowEditBaseBox(
 					},
 					.confirmText = u"Удалить"_q,
 				}));
+			});
+			addOp(u"Проверить базу (загрузить профили через корзину / ротацию)…"_q, [=] {
+				StartBaseVerification(show, id, title, [=] {
+					reopen();
+				});
 			});
 			addOp(u"Очистить от фейков и ботов…"_q, [=] {
 				Ggtg::FakeDetector::ShowCleanBaseBox(show, id, title, [=] {
@@ -4673,6 +5121,10 @@ object_ptr<Ui::BoxContent> MakeScrapedGroupsDbBox(
 				}
 				if (users) {
 					(*menu)->addAction(
+						u"Проверить базу…"_q,
+						[=] { StartBaseVerification(show, meta.id, meta.title); },
+						&st::menuIconFactcheck);
+					(*menu)->addAction(
 						u"Очистить от фейков и ботов…"_q,
 						[=] { Ggtg::FakeDetector::ShowCleanBaseBox(show, meta.id, meta.title); },
 						&st::menuIconCancel);
@@ -4760,6 +5212,7 @@ object_ptr<Ui::BoxContent> MakeScrapedGroupsDbBox(
 								? (u", ответили "_q
 									+ QString::number(repliedCount))
 								: QString())
+							+ u" · "_q + Data::BaseSourceTitle(meta.source)
 							+ u" · "_q + FormatScrapedAt(meta.savedAt),
 						.chip = (stats.remaining > 0)
 							? (u"осталось "_q
@@ -11058,20 +11511,27 @@ void RebuildAccountAccordion(
 		});
 		const auto checkbox = Ui::CreateChild<Ui::Checkbox>(
 			header, QString(), allSelected);
-		const auto checkboxSize = st::defaultCheckbox.checkPosition.x()
-			+ st::defaultCheck.diameter;
-		checkbox->resize(checkboxSize, st::defaultCheck.diameter);
-		checkbox->moveToLeft(
-			0,
-			(header->height() - checkbox->height()) / 2
-				+ style::ConvertScale(7));
+		const auto checkboxSize = hooks.singleChoice
+			? 0
+			: (st::defaultCheckbox.checkPosition.x() + st::defaultCheck.diameter);
+		if (hooks.singleChoice) {
+			checkbox->hide();
+		} else {
+			checkbox->resize(checkboxSize, st::defaultCheck.diameter);
+			checkbox->moveToLeft(
+				0,
+				(header->height() - checkbox->height()) / 2
+					+ style::ConvertScale(7));
+		}
 
 		const auto folderIcon = MakeFolderIcon(
 			header,
 			name,
 			folderIconSize,
 			isTrash);
-		const auto folderIconLeft = checkboxSize + style::ConvertScale(8);
+		const auto folderIconLeft = hooks.singleChoice
+			? style::ConvertScale(4)
+			: (checkboxSize + style::ConvertScale(8));
 		folderIcon->moveToLeft(
 			folderIconLeft, (header->height() - folderIconSize) / 2);
 
@@ -11127,7 +11587,7 @@ void RebuildAccountAccordion(
 			if (extra && extra->geometry().contains(pos)) {
 				return;
 			}
-			if (checkbox->geometry().contains(pos)) {
+			if (!hooks.singleChoice && checkbox->geometry().contains(pos)) {
 				checkbox->setChecked(!checkbox->checked());
 				return;
 			}

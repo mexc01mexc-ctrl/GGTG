@@ -20,8 +20,15 @@ object GgtgDb {
         val title: String,
         val count: Int,
         val savedAt: Long,
-        val kind: BaseKind
+        val kind: BaseKind,
+        val source: String = ""
     )
+
+    fun sourceTitle(source: String): String = when (source) {
+        "squidward" -> "Сквидвард"
+        "open_chat" -> "Открытая группа"
+        else -> "Вручную"
+    }
 
     // One row of a groups base: a public group (username) or a closed one (invite/c-link).
     data class GroupEntry(
@@ -174,7 +181,8 @@ object GgtgDb {
                     title = o.optString("title"),
                     count = o.optInt("count"),
                     savedAt = o.optString("savedAt").toLongOrNull() ?: 0,
-                    kind = kindFromString(o.optString("kind"))
+                    kind = kindFromString(o.optString("kind")),
+                    source = o.optString("source")
                 )
             }
         } catch (t: Throwable) { emptyList() }
@@ -190,20 +198,26 @@ object GgtgDb {
                 put("count", e.count)
                 put("savedAt", e.savedAt.toString())
                 put("kind", kindToString(e.kind))
+                if (e.source.isNotEmpty()) put("source", e.source)
             })
         }
         writeJson(indexPath(), array.toString())
         fireChanged()
     }
 
-    private fun appendToIndex(id: Long, title: String, count: Int, kind: BaseKind) {
+    private fun appendToIndex(id: Long, title: String, count: Int, kind: BaseKind, source: String = "") {
         val index = loadIndex().toMutableList()
         val now = System.currentTimeMillis() / 1000
         val at = index.indexOfFirst { it.id == id }
         if (at >= 0) {
-            index[at] = index[at].copy(title = title, count = count, savedAt = now)
+            index[at] = index[at].copy(
+                title = title,
+                count = count,
+                savedAt = now,
+                source = if (source.isNotEmpty()) source else index[at].source
+            )
         } else {
-            index.add(GroupMeta(id, title, count, now, kind))
+            index.add(GroupMeta(id, title, count, now, kind, source.ifEmpty { "manual" }))
         }
         writeIndex(index)
     }
@@ -218,7 +232,7 @@ object GgtgDb {
         } catch (t: Throwable) { emptyList() }
     }
 
-    fun saveUsernames(id: Long, title: String, usernames: List<String>, crossDedupe: Boolean = true) = synchronized(lock) {
+    fun saveUsernames(id: Long, title: String, usernames: List<String>, crossDedupe: Boolean = true, source: String = "") = synchronized(lock) {
         val seen = HashSet<String>()
         val normalized = ArrayList<String>()
         for (raw in usernames) {
@@ -234,7 +248,7 @@ object GgtgDb {
         normalized.forEach { array.put(it) }
         writeJson(groupPath(id), array.toString())
         statsGeneration++
-        appendToIndex(id, title, normalized.size, BaseKind.Users)
+        appendToIndex(id, title, normalized.size, BaseKind.Users, source)
     }
 
     // ---- group-entry bases ----
@@ -257,7 +271,7 @@ object GgtgDb {
         } catch (t: Throwable) { emptyList() }
     }
 
-    fun saveGroupEntries(id: Long, title: String, entries: List<GroupEntry>) = synchronized(lock) {
+    fun saveGroupEntries(id: Long, title: String, entries: List<GroupEntry>, source: String = "") = synchronized(lock) {
         val seen = HashSet<String>()
         val normalized = ArrayList<GroupEntry>()
         for (raw in entries) {
@@ -280,7 +294,7 @@ object GgtgDb {
             })
         }
         writeJson(groupPath(id), array.toString())
-        appendToIndex(id, title, normalized.size, BaseKind.Groups)
+        appendToIndex(id, title, normalized.size, BaseKind.Groups, source)
     }
 
     private fun namesInOtherBases(exceptId: Long, kind: BaseKind): Set<String> {
@@ -554,7 +568,7 @@ object GgtgDb {
     }
 
     /** Puts a base in as it is: keeps [savedAt], replaces the contents, no cross-base dedupe. */
-    fun importBase(id: Long, kind: BaseKind, title: String, savedAt: Long, usernames: List<String>, entries: List<GroupEntry>) =
+    fun importBase(id: Long, kind: BaseKind, title: String, savedAt: Long, usernames: List<String>, entries: List<GroupEntry>, source: String = "") =
         synchronized(lock) {
             val array = JSONArray()
             val count: Int
@@ -576,7 +590,7 @@ object GgtgDb {
             writeJson(groupPath(id), array.toString())
             statsGeneration++
             val index = loadIndex().toMutableList()
-            val meta = GroupMeta(id, title, count, savedAt, kind)
+            val meta = GroupMeta(id, title, count, savedAt, kind, source)
             val at = index.indexOfFirst { it.id == id }
             if (at >= 0) index[at] = meta else index.add(meta)
             writeIndex(index)

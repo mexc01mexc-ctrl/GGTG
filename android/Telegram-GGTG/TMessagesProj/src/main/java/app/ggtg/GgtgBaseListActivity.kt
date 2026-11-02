@@ -74,26 +74,9 @@ class GgtgBaseListActivity(private val baseId: Long, private val isGroups: Boole
 
     private fun showAccountPicker(onChosen: (Int) -> Unit) {
         val ctx = context ?: return
-        val activated = GgtgAccounts.activated()
-        if (activated.isEmpty()) {
-            toast("Нет подключённых аккаунтов")
-            return
+        GgtgAccountPicker.showSinglePicker(ctx, activeAccountSlot) { slot ->
+            onChosen(slot)
         }
-        val items = activated.map { ref ->
-            val label = GgtgAccounts.label(ref.slot)
-            val folder = if (ref.folder.isNotEmpty()) " [${GgtgAccounts.folderTitle(ref.folder)}]" else ""
-            val check = if (ref.slot == activeAccountSlot) "● " else "○ "
-            check + label + folder
-        }.toTypedArray()
-
-        org.telegram.ui.ActionBar.AlertDialog.Builder(ctx)
-            .setTitle("Выберите аккаунт для переписки")
-            .setItems(items) { _, which ->
-                val chosen = activated.getOrNull(which)?.slot ?: return@setItems
-                onChosen(chosen)
-            }
-            .setNegativeButton("Отмена", null)
-            .show()
     }
 
     private fun sortTitle(order: SortOrder) = when (order) {
@@ -204,61 +187,122 @@ class GgtgBaseListActivity(private val baseId: Long, private val isGroups: Boole
 
     private fun startBackgroundResolving() {
         resolveJob?.cancel()
-        val account = UserConfig.selectedAccount
-        val msgCtrl = MessagesController.getInstance(account)
+        val trashSlots = (0 until UserConfig.MAX_ACCOUNT_COUNT).filter {
+            val uc = UserConfig.getInstance(it)
+            uc.isClientActivated && uc.ncgTrashed
+        }
+        val liveSlots = (0 until UserConfig.MAX_ACCOUNT_COUNT).filter {
+            val uc = UserConfig.getInstance(it)
+            uc.isClientActivated && !uc.ncgTrashed
+        }
+        val usingTrash = trashSlots.isNotEmpty()
+        val workers = if (usingTrash) trashSlots else liveSlots
+        if (workers.isEmpty()) return
+
         resolveJob = scope.launch(Dispatchers.IO) {
-            val toResolve = synchronized(rows) {
-                rows.mapIndexedNotNull { index, row ->
-                    if (row.username.isNotEmpty() && ((!isGroups && row.user == null) || (isGroups && row.chat == null))) {
-                        index to row.username
-                    } else null
-                }
+            if (usingTrash) {
+                GgtgAccounts.wake(trashSlots)
             }
-            for ((index, username) in toResolve) {
-                if (!isActive) break
-                try {
-                    val req = TLRPC.TL_contacts_resolveUsername().apply { this.username = username }
-                    val pair = GgtgAccounts.request(account, req, ConnectionsManager.RequestFlagFailOnServerErrors)
-                    val resolved = pair?.first as? TLRPC.TL_contacts_resolvedPeer
-                    if (resolved != null) {
-                        withContext(Dispatchers.Main) {
-                            msgCtrl.putUsers(resolved.users, false)
-                            msgCtrl.putChats(resolved.chats, false)
-                            if (index < rows.size && rows[index].username.equals(username, ignoreCase = true)) {
-                                val old = rows[index]
-                                if (isGroups) {
-                                    val chat = resolved.chats.firstOrNull()
-                                    if (chat != null) {
-                                        val members = if (chat.participants_count > 0) chat.participants_count else old.membersCount
-                                        rows[index] = old.copy(
-                                            title = chat.title.ifEmpty { old.title },
-                                            membersCount = members,
-                                            chat = chat
-                                        )
-                                        listView?.adapter?.notifyItemChanged(index)
-                                    }
-                                } else {
-                                    val user = resolved.users.firstOrNull()
-                                    if (user != null) {
-                                        val isOnline = user.status is TLRPC.TL_userStatusOnline
-                                        val lastSeenText = LocaleController.formatUserStatus(account, user)
-                                        val name = ContactsController.formatName(user.first_name, user.last_name).ifEmpty { old.title }
-                                        rows[index] = old.copy(
-                                            title = name,
-                                            userId = user.id,
-                                            isOnline = isOnline,
-                                            lastSeenText = lastSeenText,
-                                            user = user
-                                        )
-                                        listView?.adapter?.notifyItemChanged(index)
+            try {
+                val toResolve = synchronized(rows) {
+                    rows.mapIndexedNotNull { index, row ->
+                        if (row.username.isNotEmpty() && ((!isGroups && row.user == null) || (isGroups && row.chat == null))) {
+                            index to row.username
+                        } else null
+                    }
+                }
+                var workerIdx = 0
+                var batchCount = 0
+                val maxBatch = if (usingTrash) 5 else 3
+                val cooldownUntil = HashMap<Int, Long>()
+
+                for ((index, username) in toResolve) {
+                    if (!isActive) break
+
+                    val now = System.currentTimeMillis()
+                    var attempts = workers.size
+                    while (attempts-- > 0) {
+                        if (workerIdx >= workers.size) workerIdx = 0
+                        val slot = workers[workerIdx]
+                        val cool = cooldownUntil[slot] ?: 0L
+                        if (now >= cool) break
+                        workerIdx = (workerIdx + 1) % workers.size
+                    }
+                    val chosenSlot = workers[workerIdx]
+                    val cool = cooldownUntil[chosenSlot] ?: 0L
+                    if (cool > now) {
+                        val waitTime = minOf(cool - now, 15000L)
+                        delay(waitTime)
+                    }
+
+                    val msgCtrl = MessagesController.getInstance(chosenSlot)
+                    try {
+                        val req = TLRPC.TL_contacts_resolveUsername().apply { this.username = username }
+                        val pair = GgtgAccounts.request(chosenSlot, req, ConnectionsManager.RequestFlagFailOnServerErrors)
+                        val resolved = pair?.first as? TLRPC.TL_contacts_resolvedPeer
+                        if (resolved != null) {
+                            withContext(Dispatchers.Main) {
+                                msgCtrl.putUsers(resolved.users, false)
+                                msgCtrl.putChats(resolved.chats, false)
+                                if (index < rows.size && rows[index].username.equals(username, ignoreCase = true)) {
+                                    val old = rows[index]
+                                    if (isGroups) {
+                                        val chat = resolved.chats.firstOrNull()
+                                        if (chat != null) {
+                                            val members = if (chat.participants_count > 0) chat.participants_count else old.membersCount
+                                            rows[index] = old.copy(
+                                                title = chat.title.ifEmpty { old.title },
+                                                membersCount = members,
+                                                chat = chat
+                                            )
+                                            listView?.adapter?.notifyItemChanged(index)
+                                        }
+                                    } else {
+                                        val user = resolved.users.firstOrNull()
+                                        if (user != null) {
+                                            GgtgDb.rememberUser(user)
+                                            val isOnline = user.status is TLRPC.TL_userStatusOnline
+                                            val lastSeenText = LocaleController.formatUserStatus(activeAccountSlot, user)
+                                            val name = ContactsController.formatName(user.first_name, user.last_name).ifEmpty { old.title }
+                                            rows[index] = old.copy(
+                                                title = name,
+                                                userId = user.id,
+                                                isOnline = isOnline,
+                                                lastSeenText = lastSeenText,
+                                                user = user
+                                            )
+                                            listView?.adapter?.notifyItemChanged(index)
+                                        }
                                     }
                                 }
                             }
                         }
+                        batchCount++
+                        if (batchCount >= maxBatch) {
+                            batchCount = 0
+                            workerIdx = (workerIdx + 1) % workers.size
+                        }
+                    } catch (t: Throwable) {
+                        val msg = t.message ?: ""
+                        if (msg.contains("FLOOD_WAIT", ignoreCase = true)) {
+                            val seconds = Regex("\\d+").find(msg)?.value?.toIntOrNull() ?: 30
+                            cooldownUntil[chosenSlot] = System.currentTimeMillis() + (seconds.coerceAtMost(60) * 1000L)
+                            batchCount = 0
+                            workerIdx = (workerIdx + 1) % workers.size
+                        } else {
+                            batchCount++
+                            if (batchCount >= maxBatch) {
+                                batchCount = 0
+                                workerIdx = (workerIdx + 1) % workers.size
+                            }
+                        }
                     }
-                } catch (_: Throwable) {
+                    delay(250)
                 }
-                delay(120)
+            } finally {
+                if (usingTrash) {
+                    GgtgAccounts.sleepIdle()
+                }
             }
         }
     }
@@ -348,7 +392,8 @@ class GgtgBaseListActivity(private val baseId: Long, private val isGroups: Boole
         val column = LinearLayout(context).apply { orientation = LinearLayout.VERTICAL }
         val head = GgtgUi.card(context)
         head.addView(GgtgUi.title(context, meta?.title ?: "Список", 17f))
-        val countTv = GgtgUi.body(context, (if (isGroups) "Групп: " else "Пользователей: ") + (meta?.count ?: 0))
+        val srcTitle = GgtgDb.sourceTitle(meta?.source ?: "")
+        val countTv = GgtgUi.body(context, (if (isGroups) "Групп: " else "Пользователей: ") + (meta?.count ?: 0) + "  ·  Источник: $srcTitle")
         countView = countTv
         head.addView(countTv,
             LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT).apply { topMargin = AndroidUtilities.dp(2f) })
@@ -358,43 +403,90 @@ class GgtgBaseListActivity(private val baseId: Long, private val isGroups: Boole
         val accountCard = LinearLayout(context).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
-            background = GgtgUi.rounded(Theme.getColor(Theme.key_windowBackgroundGray), AndroidUtilities.dp(8f).toFloat())
-            setPadding(AndroidUtilities.dp(10f), AndroidUtilities.dp(8f), AndroidUtilities.dp(10f), AndroidUtilities.dp(8f))
+            background = GgtgUi.rounded(Theme.getColor(Theme.key_windowBackgroundGray), AndroidUtilities.dp(10f).toFloat())
+            setPadding(AndroidUtilities.dp(12f), AndroidUtilities.dp(10f), AndroidUtilities.dp(12f), AndroidUtilities.dp(10f))
         }
-        val accIcon = android.widget.ImageView(context).apply {
+        val accAvatar = android.widget.FrameLayout(context).apply {
+            background = GgtgUi.rounded(Theme.getColor(Theme.key_windowBackgroundWhite), AndroidUtilities.dp(18f).toFloat())
+        }
+        val accAvatarIcon = android.widget.ImageView(context).apply {
             setImageDrawable(GgtgUi.icon(context, R.drawable.msg_contacts, Theme.getColor(Theme.key_windowBackgroundWhiteBlueText)))
         }
-        val accText = TextView(context).apply {
+        accAvatar.addView(accAvatarIcon, android.widget.FrameLayout.LayoutParams(AndroidUtilities.dp(20f), AndroidUtilities.dp(20f), Gravity.CENTER))
+
+        val accTexts = LinearLayout(context).apply { orientation = LinearLayout.VERTICAL }
+        val accTitleTv = TextView(context).apply {
+            textSize = 14f
+            setTypeface(null, Typeface.BOLD)
+            setTextColor(Theme.getColor(Theme.key_windowBackgroundWhiteBlackText))
+        }
+        val accSubTv = TextView(context).apply {
+            textSize = 12f
+            setTextColor(Theme.getColor(Theme.key_windowBackgroundWhiteGrayText))
+            setPadding(0, AndroidUtilities.dp(2f), 0, 0)
+        }
+        accTexts.addView(accTitleTv)
+        accTexts.addView(accSubTv)
+
+        val switchBtn = TextView(context).apply {
+            text = "Сменить"
             textSize = 13f
             setTypeface(null, Typeface.BOLD)
             setTextColor(Theme.getColor(Theme.key_windowBackgroundWhiteBlueText))
-            setPadding(AndroidUtilities.dp(8f), 0, AndroidUtilities.dp(4f), 0)
+            background = GgtgUi.rounded(Theme.getColor(Theme.key_windowBackgroundWhite), AndroidUtilities.dp(6f).toFloat())
+            setPadding(AndroidUtilities.dp(10f), AndroidUtilities.dp(6f), AndroidUtilities.dp(10f), AndroidUtilities.dp(6f))
         }
-        val accChevron = TextView(context).apply {
-            text = "▾"
-            textSize = 14f
-            setTypeface(null, Typeface.BOLD)
-            setTextColor(Theme.getColor(Theme.key_windowBackgroundWhiteBlueText))
-        }
+
         fun refreshAccText() {
-            val label = GgtgAccounts.label(activeAccountSlot)
-            accText.text = "Писать с: $label"
+            val user = GgtgAccounts.user(activeAccountSlot)
+            val name = org.telegram.messenger.UserObject.getUserName(user).trim().ifEmpty { "Аккаунт ${activeAccountSlot + 1}" }
+            val uc = UserConfig.getInstance(activeAccountSlot)
+            val folder = if (uc.ncgTrashed) "Корзина" else GgtgAccounts.folderTitle(uc.ncgFolder ?: "")
+            val handle = user?.username?.takeIf { it.isNotEmpty() }?.let { "@$it" }
+            val phone = user?.phone?.takeIf { it.isNotEmpty() }?.let { "+$it" }
+            val details = listOfNotNull(handle, phone, "[$folder]").joinToString("  ·  ")
+
+            accTitleTv.text = "Писать с: $name"
+            accSubTv.text = details
         }
         refreshAccText()
-        accountCard.addView(accIcon, LinearLayout.LayoutParams(AndroidUtilities.dp(18f), AndroidUtilities.dp(18f)))
-        accountCard.addView(accText, LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f))
-        accountCard.addView(accChevron)
-        accountCard.setOnClickListener {
+
+        accountCard.addView(accAvatar, LinearLayout.LayoutParams(AndroidUtilities.dp(36f), AndroidUtilities.dp(36f)))
+        accountCard.addView(accTexts, LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f).apply { leftMargin = AndroidUtilities.dp(10f) })
+        accountCard.addView(switchBtn)
+
+        val onPickAccount = {
             showAccountPicker { slot ->
                 activeAccountSlot = slot
                 refreshAccText()
                 toast("Аккаунт переключен: ${GgtgAccounts.label(slot)}")
             }
         }
+        accountCard.setOnClickListener { onPickAccount() }
+        switchBtn.setOnClickListener { onPickAccount() }
+
         head.addView(accountCard,
             LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT).apply {
                 topMargin = AndroidUtilities.dp(8f)
             })
+
+        if (!isGroups) {
+            val checkBtn = TextView(context).apply {
+                text = "Проверить базу (загрузить профили через корзину / ротацию)"
+                textSize = 13f
+                setTypeface(null, Typeface.BOLD)
+                setTextColor(Theme.getColor(Theme.key_windowBackgroundWhiteBlueText))
+                setPadding(AndroidUtilities.dp(4f), AndroidUtilities.dp(6f), AndroidUtilities.dp(4f), AndroidUtilities.dp(2f))
+                setOnClickListener {
+                    GgtgBaseChecker.checkBase(context, baseId, meta?.title ?: "База") {
+                        reloadRows()
+                    }
+                }
+            }
+            head.addView(checkBtn, LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT).apply {
+                topMargin = AndroidUtilities.dp(4f)
+            })
+        }
 
         val search = android.widget.EditText(context).apply {
             hint = "Поиск по имени, @username или ID"

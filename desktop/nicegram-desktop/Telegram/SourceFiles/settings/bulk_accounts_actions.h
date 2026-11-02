@@ -251,7 +251,19 @@ struct AccountAccordionHooks {
 		not_null<Ui::RpWidget*> header,
 		const std::vector<not_null<Main::Account*>> &accounts)> addHeaderWidget;
 	QString emptyText = u"Нет добавленных аккаунтов"_q;
+	bool singleChoice = false;
 };
+
+void ShowSingleAccountPicker(
+	std::shared_ptr<Ui::Show> show,
+	Main::Account *currentAccount,
+	Fn<void(not_null<Main::Account*>)> onChosen);
+
+void StartBaseVerification(
+	std::shared_ptr<Ui::Show> show,
+	uint64 baseId,
+	const QString &title,
+	Fn<void()> onDone = nullptr);
 
 // The whole "pick accounts" block of a form: a select-all row, the folder
 // accordion and a "Выбрано аккаунтов: N" line. A form's own state derives

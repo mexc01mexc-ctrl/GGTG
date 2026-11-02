@@ -25,6 +25,9 @@ class GgtgAccountPicker(context: Context) : LinearLayout(context) {
     private val folderBody = HashMap<String, LinearLayout>()
     private val expanded = HashSet<String>()
     var onSelectionChanged: (() -> Unit)? = null
+    var singleChoice: Boolean = false
+    var selectedSlot: Int = -1
+    var onAccountChosen: ((Int) -> Unit)? = null
 
     /** When true, a rebuild (after an account's menu changed something) keeps the ticked accounts. */
     var keepSelection = false
@@ -65,7 +68,9 @@ class GgtgAccountPicker(context: Context) : LinearLayout(context) {
             val body = LinearLayout(context).apply { orientation = VERTICAL; visibility = if (folder in expanded) VISIBLE else GONE }
             folderBody[folder] = body
 
-            val master = GgtgUi.checkBox(context)
+            val master = GgtgUi.checkBox(context).apply {
+                if (singleChoice) visibility = GONE
+            }
             folderMaster[folder] = master
             val sub = TextView(context).apply {
                 textSize = 13f
@@ -107,10 +112,19 @@ class GgtgAccountPicker(context: Context) : LinearLayout(context) {
             for (ref in refs) {
                 val cell = PickRow(context, ref.slot)
                 cell.setToday(todayProvider?.invoke(ref.slot))
+                if (singleChoice) {
+                    cell.setChecked(ref.slot == selectedSlot, false)
+                }
                 cell.setOnClickListener {
-                    cell.setChecked(!cell.isChecked, true)
-                    syncFolder(folder)
-                    onSelectionChanged?.invoke()
+                    if (singleChoice) {
+                        selectedSlot = ref.slot
+                        rowBySlot.forEach { (s, r) -> r.setChecked(s == selectedSlot, true) }
+                        onAccountChosen?.invoke(ref.slot)
+                    } else {
+                        cell.setChecked(!cell.isChecked, true)
+                        syncFolder(folder)
+                        onSelectionChanged?.invoke()
+                    }
                 }
                 cell.setOnLongClickListener {
                     GgtgAccountMenus.showAccountMenu(context, ref.slot, null) { rebuild(); onSelectionChanged?.invoke() }
@@ -221,6 +235,36 @@ class GgtgAccountPicker(context: Context) : LinearLayout(context) {
             }
             texts.addView(todayView)
             addView(texts, LayoutParams(0, LayoutParams.WRAP_CONTENT, 1f).apply { leftMargin = AndroidUtilities.dp(12f) })
+        }
+    }
+
+    companion object {
+        fun showSinglePicker(
+            context: Context,
+            currentSlot: Int,
+            title: String = "Выберите аккаунт для переписки",
+            onChosen: (Int) -> Unit
+        ) {
+            var dialog: org.telegram.ui.ActionBar.AlertDialog? = null
+            val picker = GgtgAccountPicker(context).apply {
+                singleChoice = true
+                selectedSlot = currentSlot
+                expanded.addAll(GgtgAccounts.byFolder().keys)
+                rebuild()
+                onAccountChosen = { slot ->
+                    dialog?.dismiss()
+                    onChosen(slot)
+                }
+            }
+            val scroll = android.widget.ScrollView(context).apply {
+                addView(picker, LayoutHelper.createScroll(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT, Gravity.TOP))
+            }
+            dialog = org.telegram.ui.ActionBar.AlertDialog.Builder(context)
+                .setTitle(title)
+                .setView(scroll)
+                .setNegativeButton("Отмена", null)
+                .create()
+            dialog?.show()
         }
     }
 }

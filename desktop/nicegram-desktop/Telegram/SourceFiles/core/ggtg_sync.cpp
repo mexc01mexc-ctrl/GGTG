@@ -247,6 +247,7 @@ Snapshot BuildSnapshot(const Settings &settings) {
 				: u"users"_q },
 			{ "title", meta.title },
 			{ "savedAt", QString::number(meta.savedAt) },
+			{ "source", meta.source },
 			{ "items", items },
 		});
 	}
@@ -499,6 +500,7 @@ MergeResult MergeSnapshot(const QByteArray &json) {
 			.kind = (object["kind"].toString() == u"groups"_q)
 				? Data::BaseKind::Groups
 				: Data::BaseKind::Users,
+			.source = object["source"].toString(),
 		};
 		if (!meta.id) {
 			continue;

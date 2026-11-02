@@ -53,7 +53,10 @@ struct ScrapedGroupMeta {
 	int count = 0;
 	qint64 savedAt = 0; // unix seconds
 	BaseKind kind = BaseKind::Users;
+	QString source;
 };
+
+[[nodiscard]] QString BaseSourceTitle(const QString &source);
 
 [[nodiscard]] std::vector<ScrapedGroupMeta> LoadScrapedGroupsIndex();
 [[nodiscard]] QStringList LoadScrapedGroupUsernames(uint64 id);
@@ -65,7 +68,8 @@ struct ScrapedGroupMeta {
 void SaveScrapedGroupUsernames(
 	uint64 id,
 	const QString &title,
-	const QStringList &usernames);
+	const QStringList &usernames,
+	const QString &source = QString());
 
 // What a hand-typed or pasted list of usernames turned into. Every line may
 // hold several separated by whitespace, commas or semicolons, each as
@@ -109,7 +113,8 @@ struct ScrapedGroupEntry {
 void SaveScrapedGroupEntries(
 	uint64 id,
 	const QString &title,
-	const std::vector<ScrapedGroupEntry> &entries);
+	const std::vector<ScrapedGroupEntry> &entries,
+	const QString &source = QString());
 
 // A fresh id for a hand-made base, guaranteed to never collide with a
 // real Telegram peer id (see the .cpp): peer ids never set the top bit.

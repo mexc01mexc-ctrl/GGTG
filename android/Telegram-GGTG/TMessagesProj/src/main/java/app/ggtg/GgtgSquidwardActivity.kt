@@ -328,7 +328,7 @@ class GgtgSquidwardActivity @JvmOverloads constructor(private val autoQuery: Str
         val title = saved.result.baseTitle
         val id = GgtgDb.generateManualBaseId()
         saved.groups?.let { GgtgDb.saveGroupEntries(id, title, it.kept) }
-        saved.users?.let { GgtgDb.saveUsernames(id, title, it) }
+        saved.users?.let { GgtgDb.saveUsernames(id, title, it, source = "squidward") }
         savedCell.visibility = View.GONE
         toast("Сохранено в «$title»")
     }

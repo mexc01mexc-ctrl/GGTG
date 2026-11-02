@@ -20,6 +20,8 @@ import org.json.JSONObject
 import org.telegram.messenger.AndroidUtilities
 import org.telegram.messenger.ApplicationLoader
 import org.telegram.messenger.FileLog
+import org.telegram.messenger.MessagesController
+import org.telegram.messenger.UserConfig
 import org.telegram.messenger.UserObject
 import org.telegram.tgnet.TLRPC
 import org.telegram.ui.ActionBar.AlertDialog
@@ -420,8 +422,26 @@ object GgtgFakeDetector {
     fun filterUsernames(usernames: List<String>, thresholdPercent: Int = 60): Pair<List<String>, List<String>> {
         val alive = mutableListOf<String>()
         val fakes = mutableListOf<String>()
+        val account = UserConfig.selectedAccount
+        val msgCtrl = MessagesController.getInstance(account)
         for (u in usernames) {
-            val res = analyzeUsername(u)
+            val clean = u.trim().removePrefix("@").lowercase()
+            val meta = GgtgDb.lookupUser(clean)
+            val cachedUser = msgCtrl.getUser(clean) ?: (if (meta?.id != null && meta.id != 0L) msgCtrl.getUser(meta.id) else null)
+            val res = if (cachedUser != null) {
+                analyzeUser(cachedUser, null)
+            } else if (meta != null && (meta.id != 0L || meta.name.isNotEmpty())) {
+                val dummyUser = TLRPC.TL_user().apply {
+                    id = meta.id
+                    username = clean
+                    val parts = meta.name.split(" ", limit = 2)
+                    first_name = parts.getOrNull(0) ?: ""
+                    last_name = parts.getOrNull(1) ?: ""
+                }
+                analyzeUser(dummyUser, null)
+            } else {
+                analyzeUsername(u)
+            }
             if (res.fakeProbability >= thresholdPercent) {
                 fakes.add(u)
             } else {

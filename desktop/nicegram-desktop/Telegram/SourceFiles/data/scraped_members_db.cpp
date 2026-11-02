@@ -468,13 +468,17 @@ void SetSmsSendRecord(
 void WriteIndex(const std::vector<ScrapedGroupMeta> &index) {
 	auto array = QJsonArray();
 	for (const auto &entry : index) {
-		array.append(QJsonObject{
+		auto obj = QJsonObject{
 			{ "id", QString::number(entry.id) },
 			{ "title", entry.title },
 			{ "count", entry.count },
 			{ "savedAt", QString::number(entry.savedAt) },
 			{ "kind", BaseKindToString(entry.kind) },
-		});
+		};
+		if (!entry.source.isEmpty()) {
+			obj["source"] = entry.source;
+		}
+		array.append(obj);
 	}
 	WriteJson(IndexPath(), QJsonDocument(array));
 	IndexCache() = index;
@@ -488,7 +492,8 @@ void AppendToIndex(
 		uint64 id,
 		const QString &title,
 		int count,
-		BaseKind kind) {
+		BaseKind kind,
+		const QString &source = QString()) {
 	auto index = LoadScrapedGroupsIndex();
 	const auto now = qint64(base::unixtime::now());
 	auto found = false;
@@ -497,6 +502,9 @@ void AppendToIndex(
 			entry.title = title;
 			entry.count = count;
 			entry.savedAt = now;
+			if (!source.isEmpty()) {
+				entry.source = source;
+			}
 			found = true;
 			break;
 		}
@@ -508,6 +516,7 @@ void AppendToIndex(
 			.count = count,
 			.savedAt = now,
 			.kind = kind,
+			.source = source.isEmpty() ? u"manual"_q : source,
 		});
 	}
 	WriteIndex(index);
@@ -545,7 +554,7 @@ void FinishScrape(
 		return;
 	}
 	const auto save = [=](const QStringList &list) {
-		SaveScrapedGroupUsernames(id, title, list);
+		SaveScrapedGroupUsernames(id, title, list, u"open_chat"_q);
 		if (ui) {
 			ui->showToast(
 				u"База: сохранено пользователей с юзернеймом в \""_q + title
@@ -1128,6 +1137,15 @@ void ScrapeChannelMembers(
 
 } // namespace
 
+QString BaseSourceTitle(const QString &source) {
+	if (source == u"squidward"_q) {
+		return u"Сквидвард"_q;
+	} else if (source == u"open_chat"_q) {
+		return u"Открытая группа"_q;
+	}
+	return u"Вручную"_q;
+}
+
 std::vector<ScrapedGroupMeta> LoadScrapedGroupsIndex() {
 	if (const auto &cached = IndexCache()) {
 		return *cached;
@@ -1145,6 +1163,7 @@ std::vector<ScrapedGroupMeta> LoadScrapedGroupsIndex() {
 			// BaseKindFromString defaults those to Users, which is what
 			// they always were.
 			.kind = BaseKindFromString(object["kind"].toString()),
+			.source = object["source"].toString(),
 		});
 	}
 	IndexCache() = result;
@@ -1244,7 +1263,8 @@ QStringList LoadScrapedGroupUsernames(uint64 id) {
 void WriteUsernamesBase(
 		uint64 id,
 		const QString &title,
-		const QStringList &normalized) {
+		const QStringList &normalized,
+		const QString &source = QString()) {
 	auto array = QJsonArray();
 	for (const auto &username : normalized) {
 		array.append(username);
@@ -1252,13 +1272,14 @@ void WriteUsernamesBase(
 	WriteJson(GroupPath(id), QJsonDocument(array));
 	UsernamesCache()[id] = normalized;
 	++StatsGeneration();
-	AppendToIndex(id, title, int(normalized.size()), BaseKind::Users);
+	AppendToIndex(id, title, int(normalized.size()), BaseKind::Users, source);
 }
 
 void WriteEntriesBase(
 		uint64 id,
 		const QString &title,
-		const std::vector<ScrapedGroupEntry> &normalized) {
+		const std::vector<ScrapedGroupEntry> &normalized,
+		const QString &source = QString()) {
 	auto array = QJsonArray();
 	for (const auto &entry : normalized) {
 		array.append(QJsonObject{
@@ -1272,13 +1293,14 @@ void WriteEntriesBase(
 	WriteJson(GroupPath(id), QJsonDocument(array));
 	UsernamesCache().erase(id);
 	++StatsGeneration();
-	AppendToIndex(id, title, int(normalized.size()), BaseKind::Groups);
+	AppendToIndex(id, title, int(normalized.size()), BaseKind::Groups, source);
 }
 
 void SaveScrapedGroupUsernames(
 		uint64 id,
 		const QString &title,
-		const QStringList &usernames) {
+		const QStringList &usernames,
+		const QString &source) {
 	auto seen = base::flat_set<QString>();
 	auto normalized = QStringList();
 	for (const auto &raw : usernames) {
@@ -1311,7 +1333,7 @@ void SaveScrapedGroupUsernames(
 			u"Не добавлено, уже есть в другой базе: "_q
 				+ QString::number(dropped));
 	}
-	WriteUsernamesBase(id, title, normalized);
+	WriteUsernamesBase(id, title, normalized, source);
 }
 
 std::vector<ScrapedGroupEntry> LoadScrapedGroupEntries(uint64 id) {
@@ -1339,7 +1361,8 @@ std::vector<ScrapedGroupEntry> LoadScrapedGroupEntries(uint64 id) {
 void SaveScrapedGroupEntries(
 		uint64 id,
 		const QString &title,
-		const std::vector<ScrapedGroupEntry> &entries) {
+		const std::vector<ScrapedGroupEntry> &entries,
+		const QString &source) {
 	auto seen = base::flat_set<QString>();
 	auto normalized = std::vector<ScrapedGroupEntry>();
 	for (const auto &raw : entries) {
@@ -1379,7 +1402,7 @@ void SaveScrapedGroupEntries(
 			u"Групп не добавлено, уже есть в другой базе: "_q
 				+ QString::number(dropped));
 	}
-	WriteEntriesBase(id, title, normalized);
+	WriteEntriesBase(id, title, normalized, source);
 }
 
 uint64 GenerateManualBaseId() {

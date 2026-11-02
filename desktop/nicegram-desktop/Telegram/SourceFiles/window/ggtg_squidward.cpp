@@ -1616,7 +1616,7 @@ void Screen::saveUsers() {
 	}
 	const auto title = _session->baseTitle();
 	const auto id = Data::GenerateManualBaseId();
-	Data::SaveScrapedGroupUsernames(id, title, _users->usernames);
+	Data::SaveScrapedGroupUsernames(id, title, _users->usernames, u"squidward"_q);
 	renderSaved(
 		id,
 		title,

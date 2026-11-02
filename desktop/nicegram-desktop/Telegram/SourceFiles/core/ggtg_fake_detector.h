@@ -885,11 +885,42 @@ struct CleanResult {
 inline CleanResult FilterUsernames(const QStringList &usernames, int thresholdPercent = 60) {
 	auto result = CleanResult();
 	for (const auto &u : usernames) {
-		const auto res = AnalyzeUsername(u);
-		if (res.fakeProbability >= thresholdPercent) {
-			result.fakes.push_back(u);
+		const auto key = u.trimmed().remove('@').toLower();
+		const auto meta = Data::LookupUserMeta(key);
+		if (meta.id != 0 || !meta.name.isEmpty()) {
+			auto firstName = meta.name;
+			auto lastName = QString();
+			const auto space = meta.name.indexOf(' ');
+			if (space > 0) {
+				firstName = meta.name.left(space);
+				lastName = meta.name.mid(space + 1);
+			}
+			const auto res = AnalyzeUser(
+				meta.id,
+				key,
+				firstName,
+				lastName,
+				/*bio*/ QString(),
+				/*hasPhoto*/ true,
+				/*isPremium*/ false,
+				/*isBot*/ Data::IsBotUsername(key),
+				/*isVerified*/ false,
+				/*isScam*/ false,
+				/*isFake*/ false,
+				/*onlineText*/ meta.lastseenText
+			);
+			if (res.fakeProbability >= thresholdPercent) {
+				result.fakes.push_back(u);
+			} else {
+				result.alive.push_back(u);
+			}
 		} else {
-			result.alive.push_back(u);
+			const auto res = AnalyzeUsername(u);
+			if (res.fakeProbability >= thresholdPercent) {
+				result.fakes.push_back(u);
+			} else {
+				result.alive.push_back(u);
+			}
 		}
 	}
 	return result;

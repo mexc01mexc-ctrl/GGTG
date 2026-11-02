@@ -198,8 +198,9 @@ class GgtgBasesActivity : BaseFragment() {
         })
         val date = if (meta.savedAt > 0) SimpleDateFormat("dd.MM.yyyy", Locale.getDefault()).format(Date(meta.savedAt * 1000)) else ""
         val groupWord = if (meta.count % 10 == 1 && meta.count % 100 != 11) "группа" else if (meta.count % 10 in 2..4 && meta.count % 100 !in 12..14) "группы" else "групп"
+        val srcLabel = GgtgDb.sourceTitle(meta.source)
         texts.addView(TextView(context).apply {
-            text = (if (isGroups) "${meta.count} $groupWord" else "осталось ${GgtgDb.remainingIn(meta.id)} из ${meta.count}") + (if (date.isNotEmpty()) "  ·  $date" else "")
+            text = (if (isGroups) "${meta.count} $groupWord" else "осталось ${GgtgDb.remainingIn(meta.id)} из ${meta.count}") + "  ·  $srcLabel" + (if (date.isNotEmpty()) "  ·  $date" else "")
             textSize = 13f
             setTextColor(color(Theme.key_windowBackgroundWhiteGrayText))
             setPadding(0, dp(2f), 0, 0)
@@ -213,13 +214,15 @@ class GgtgBasesActivity : BaseFragment() {
         card.setOnClickListener { presentFragment(GgtgBaseActivity(meta.id)) }
         // long press: delete right from the list. Whoever was written to keeps the note where they came from.
         card.setOnLongClickListener {
-            GgtgUi.menu(context, meta.title, listOf(
+            GgtgUi.menu(context, meta.title, listOfNotNull(
                 GgtgUi.MenuItem("Открыть списком (кликабельно)", R.drawable.msg_viewchats) { presentFragment(GgtgBaseListActivity(meta.id, isGroups)) },
-                *(if (isGroups) emptyArray() else arrayOf(
-                    GgtgUi.MenuItem("Очистить от фейков и ботов…", R.drawable.msg_bots) {
-                        GgtgFakeDetector.showCleanBaseDialog(context, meta.id, meta.title) { rebuildLists() }
-                    },
-                    GgtgUi.MenuItem("Анализ и чистка базы…", R.drawable.msg_info) { GgtgAnalysis.open(this, meta.id, meta.title) { rebuildLists() } })),
+                if (isGroups) null else GgtgUi.MenuItem("Проверить базу…", R.drawable.msg_contacts) {
+                    GgtgBaseChecker.checkBase(context, meta.id, meta.title) { rebuildLists() }
+                },
+                if (isGroups) null else GgtgUi.MenuItem("Очистить от фейков и ботов…", R.drawable.msg_bots) {
+                    GgtgFakeDetector.showCleanBaseDialog(context, meta.id, meta.title) { rebuildLists() }
+                },
+                if (isGroups) null else GgtgUi.MenuItem("Анализ и чистка базы…", R.drawable.msg_info) { GgtgAnalysis.open(this, meta.id, meta.title) { rebuildLists() } },
                 GgtgUi.MenuItem("Копировать название", R.drawable.msg_copy) {
                     AndroidUtilities.addToClipboard(meta.title)
                     android.widget.Toast.makeText(context, "Скопировано", android.widget.Toast.LENGTH_SHORT).show()

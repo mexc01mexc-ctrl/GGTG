@@ -1327,7 +1327,7 @@ void Session::finishUsers(std::vector<UserRow> rows, bool stopped) {
 		if (_autoSave && !stopped && !result.usernames.isEmpty()) {
 			_autoSave = false;
 			const auto id = Data::GenerateManualBaseId();
-			Data::SaveScrapedGroupUsernames(id, baseTitle(), result.usernames);
+			Data::SaveScrapedGroupUsernames(id, baseTitle(), result.usernames, u"squidward"_q);
 		}
 		_users.fire(std::move(result));
 	});

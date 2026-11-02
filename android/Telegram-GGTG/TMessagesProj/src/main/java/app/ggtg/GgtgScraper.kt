@@ -207,7 +207,7 @@ object GgtgScraper {
                 return
             }
             val title = "Участники: " + GgtgDb.groupBaseTitle(chat.title ?: username, username)
-            GgtgDb.saveUsernames(GgtgDb.generateManualBaseId(), title, collected.toList())
+            GgtgDb.saveUsernames(GgtgDb.generateManualBaseId(), title, collected.toList(), source = "open_chat")
             process.succeed("Собрано: ${collected.size}")
         } catch (t: Throwable) {
             process.fail("Ошибка: ${t.message}")

@@ -196,6 +196,7 @@ object GgtgSync {
                 put("kind", if (meta.kind == GgtgDb.BaseKind.Groups) "groups" else "users")
                 put("title", meta.title)
                 put("savedAt", meta.savedAt.toString())
+                if (meta.source.isNotEmpty()) put("source", meta.source)
                 put("items", items)
             })
         }
@@ -456,7 +457,7 @@ object GgtgSync {
                         items.optString(j).takeIf { it.isNotEmpty() }?.let { names.add(it) }
                     }
                 }
-                GgtgDb.importBase(id, kind, o.optString("title"), savedAt, names, entries)
+                GgtgDb.importBase(id, kind, o.optString("title"), savedAt, names, entries, o.optString("source"))
                 bases++
             }
         }
