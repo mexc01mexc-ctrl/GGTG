@@ -104,13 +104,14 @@ inline const std::vector<ServiceInfo> &Services() {
 	static const auto list = std::vector<ServiceInfo>{
 		{ u"hero-sms"_q, u"Hero-SMS (SMS + Email)"_q, u"https://hero-sms.com/stubs/handler_api.php"_q, u"https://hero-sms.com"_q, true },
 		{ u"smsbower"_q, u"SMSBower (SMS + Email)"_q, u"https://smsbower.page/stubs/handler_api.php"_q, u"https://smsbower.app"_q, true },
+		{ u"vak-sms"_q, u"Vak-SMS"_q, u"https://vak-sms.com/api/"_q, u"https://vak-sms.com"_q, false },
+		{ u"sms-man"_q, u"SMS-MAN"_q, u"https://api.sms-man.com/stubs/handler_api.php"_q, u"https://sms-man.com"_q, false },
+		{ u"smspool"_q, u"SMSPool"_q, u"https://api.smspool.net"_q, u"https://smspool.net"_q, false },
 		{ u"onlinesim"_q, u"OnlineSim"_q, u"https://onlinesim.io/stubs/handler_api.php"_q, u"https://onlinesim.io"_q, false },
 		{ u"sms-activate"_q, u"SMS-Activate"_q, u"https://api.sms-activate.org/stubs/handler_api.php"_q, u"https://sms-activate.org"_q, false },
 		{ u"5sim"_q, u"5SIM"_q, u"https://5sim.net/stubs/handler_api.php"_q, u"https://5sim.net"_q, false },
-		{ u"vak-sms"_q, u"Vak-SMS"_q, u"https://vak-sms.com/stubs/handler_api.php"_q, u"https://vak-sms.com"_q, false },
 		{ u"smshub"_q, u"SMSHub"_q, u"https://smshub.org/stubs/handler_api.php"_q, u"https://smshub.org"_q, false },
 		{ u"grizzly"_q, u"Grizzly SMS"_q, u"https://api.grizzlysms.com/stubs/handler_api.php"_q, u"https://grizzlysms.com"_q, false },
-		{ u"sms-man"_q, u"SMS-MAN"_q, u"https://api.sms-man.com/stubs/handler_api.php"_q, u"https://sms-man.com"_q, false },
 		{ u"custom"_q, u"Свой сервис (API URL)"_q, QString(), QString(), false },
 	};
 	return list;
@@ -121,44 +122,37 @@ struct CountryItem {
 	QString flag;
 	QString name;
 	QString phoneCode;
+	QString isoCode;
 	int count = 0;
 	double cost = 0.0;
 };
 
 inline const std::vector<CountryItem> &PopularCountries() {
 	static const auto list = std::vector<CountryItem>{
-		{ 16, QString(), u"Великобритания"_q, u"+44"_q },
-		{ 187, QString(), u"США"_q, u"+1"_q },
-		{ 6, QString(), u"Индонезия"_q, u"+62"_q },
-		{ 2, QString(), u"Казахстан"_q, u"+77"_q },
-		{ 22, QString(), u"Индия"_q, u"+91"_q },
-		{ 73, QString(), u"Бразилия"_q, u"+55"_q },
-		{ 10, QString(), u"Вьетнам"_q, u"+84"_q },
-		{ 19, QString(), u"Нигерия"_q, u"+234"_q },
-		{ 4, QString(), u"Филиппины"_q, u"+63"_q },
-		{ 11, QString(), u"Кыргызстан"_q, u"+996"_q },
-		{ 35, QString(), u"Азербайджан"_q, u"+994"_q },
-		{ 40, QString(), u"Узбекистан"_q, u"+998"_q },
-		{ 51, QString(), u"Беларусь"_q, u"+375"_q },
-		{ 1, QString(), u"Украина"_q, u"+380"_q },
-		{ 143, QString(), u"Таджикистан"_q, u"+992"_q },
-		{ 128, QString(), u"Грузия"_q, u"+995"_q },
-		{ 148, QString(), u"Армения"_q, u"+374"_q },
-		{ 17, QString(), u"Молдова"_q, u"+373"_q },
-		{ 0, QString(), u"Россия"_q, u"+7"_q },
+		{ 16, QString(), u"Великобритания"_q, u"+44"_q, u"GB"_q },
+		{ 187, QString(), u"США"_q, u"+1"_q, u"US"_q },
+		{ 6, QString(), u"Индонезия"_q, u"+62"_q, u"ID"_q },
+		{ 2, QString(), u"Казахстан"_q, u"+77"_q, u"KZ"_q },
+		{ 22, QString(), u"Индия"_q, u"+91"_q, u"IN"_q },
+		{ 73, QString(), u"Бразилия"_q, u"+55"_q, u"BR"_q },
+		{ 10, QString(), u"Вьетнам"_q, u"+84"_q, u"VN"_q },
+		{ 19, QString(), u"Нигерия"_q, u"+234"_q, u"NG"_q },
+		{ 4, QString(), u"Филиппины"_q, u"+63"_q, u"PH"_q },
+		{ 11, QString(), u"Кыргызстан"_q, u"+996"_q, u"KG"_q },
+		{ 35, QString(), u"Азербайджан"_q, u"+994"_q, u"AZ"_q },
+		{ 40, QString(), u"Узбекистан"_q, u"+998"_q, u"UZ"_q },
+		{ 51, QString(), u"Беларусь"_q, u"+375"_q, u"BY"_q },
+		{ 1, QString(), u"Украина"_q, u"+380"_q, u"UA"_q },
+		{ 143, QString(), u"Таджикистан"_q, u"+992"_q, u"TJ"_q },
+		{ 128, QString(), u"Грузия"_q, u"+995"_q, u"GE"_q },
+		{ 148, QString(), u"Армения"_q, u"+374"_q, u"AM"_q },
+		{ 17, QString(), u"Молдова"_q, u"+373"_q, u"MD"_q },
+		{ 0, QString(), u"Россия"_q, u"+7"_q, u"RU"_q },
 	};
 	return list;
 }
 
-inline QString CountryCodeById(int id) {
-	for (const auto &item : PopularCountries()) {
-		if (item.id == id) {
-			const auto m = Core::GgtgGeo::MatchForPhone(item.phoneCode);
-			return m.country;
-		}
-	}
-	return u"US"_q;
-}
+inline QString CountryCodeById(int id, const QString &serviceId = QString());
 
 enum class MobileTokenProvider {
 	None = 0,
@@ -1034,39 +1028,6 @@ inline QString ResolveBaseUrl(const SettingsData &data) {
 	return Services().front().baseUrl;
 }
 
-inline void FetchBalance(
-		const SettingsData &data,
-		Fn<void(QString balance, QString error)> done) {
-	const auto base = ResolveBaseUrl(data);
-	const auto key = data.apiKey.trimmed();
-	if (base.isEmpty()) {
-		done(QString(), u"Не указан адрес SMS-сервиса"_q);
-		return;
-	}
-	if (key.isEmpty()) {
-		done(QString(), u"Не указан API-ключ"_q);
-		return;
-	}
-	const auto url = QUrl(base + u"?api_key="_q + key + u"&action=getBalance"_q);
-	SendApiGet(url, [=](const QString &resp, const QString &err) {
-		if (!err.isEmpty()) {
-			done(QString(), err);
-			return;
-		}
-		if (resp.startsWith(u"ACCESS_BALANCE:"_q)) {
-			done(resp.mid(15).trimmed(), QString());
-		} else if (resp == u"BAD_KEY"_q) {
-			done(QString(), u"Неверный API-ключ"_q);
-		} else if (resp == u"ERROR_SQL"_q) {
-			done(QString(), u"Ошибка на стороне сервера SMS"_q);
-		} else if (resp == u"NO_KEY"_q) {
-			done(QString(), u"Ключ не передан"_q);
-		} else {
-			done(QString(), resp);
-		}
-	});
-}
-
 // Countries the SMS service really has (action=getCountries), by service id.
 // Only the service's own current list is ever shown, never a built-in one.
 inline QMutex &LiveCountriesMutex() {
@@ -1084,7 +1045,130 @@ inline QMutex &LiveCountriesMutex() {
 	const auto lock = QMutexLocker(&LiveCountriesMutex());
 	const auto &live = LiveCountries();
 	const auto it = live.constFind(serviceId);
-	return (it != live.constEnd()) ? *it : std::vector<CountryItem>();
+	return (it != live.constEnd()) ? *it : PopularCountries();
+}
+
+inline QString CountryCodeById(int id, const QString &serviceId) {
+	for (const auto &item : CountriesFor(serviceId)) {
+		if (item.id == id && !item.isoCode.isEmpty()) {
+			return item.isoCode;
+		}
+	}
+	for (const auto &item : PopularCountries()) {
+		if (item.id == id) {
+			if (!item.isoCode.isEmpty()) {
+				return item.isoCode;
+			}
+			const auto m = Core::GgtgGeo::MatchForPhone(item.phoneCode);
+			return m.country;
+		}
+	}
+	return u"US"_q;
+}
+
+inline void FetchBalance(
+		const SettingsData &data,
+		Fn<void(QString balance, QString error)> done) {
+	const auto base = ResolveBaseUrl(data);
+	const auto key = data.apiKey.trimmed();
+	if (base.isEmpty()) {
+		done(QString(), u"Не указан адрес SMS-сервиса"_q);
+		return;
+	}
+	if (key.isEmpty()) {
+		done(QString(), u"Не указан API-ключ"_q);
+		return;
+	}
+
+	if (data.serviceId == u"vak-sms"_q) {
+		const auto url = QUrl(u"https://vak-sms.com/api/getBalance/?apiKey="_q + key);
+		SendApiGet(url, [=](const QString &resp, const QString &err) {
+			if (!err.isEmpty()) {
+				done(QString(), err);
+				return;
+			}
+			const auto doc = QJsonDocument::fromJson(resp.toUtf8());
+			if (doc.isObject()) {
+				const auto obj = doc.object();
+				if (obj.contains(u"balance"_q)) {
+					const auto val = obj.value(u"balance"_q);
+					const auto balStr = val.isDouble()
+						? QString::number(val.toDouble(), 'f', 2)
+						: val.toString();
+					done(balStr, QString());
+					return;
+				}
+				if (obj.contains(u"error"_q)) {
+					done(QString(), obj.value(u"error"_q).toString());
+					return;
+				}
+			}
+			if (resp.startsWith(u"ACCESS_BALANCE:"_q)) {
+				done(resp.mid(15).trimmed(), QString());
+				return;
+			}
+			done(QString(), resp);
+		});
+		return;
+	}
+
+	if (data.serviceId == u"smspool"_q) {
+		const auto url = QUrl(u"https://api.smspool.net/request/balance?key="_q + key);
+		SendApiGet(url, [=](const QString &resp, const QString &err) {
+			if (!err.isEmpty()) {
+				done(QString(), err);
+				return;
+			}
+			const auto doc = QJsonDocument::fromJson(resp.toUtf8());
+			if (doc.isObject()) {
+				const auto obj = doc.object();
+				if (obj.contains(u"balance"_q)) {
+					const auto val = obj.value(u"balance"_q);
+					const auto balStr = val.isDouble()
+						? QString::number(val.toDouble(), 'f', 2)
+						: val.toString();
+					done(balStr, QString());
+					return;
+				}
+				if (obj.contains(u"message"_q)) {
+					done(QString(), obj.value(u"message"_q).toString());
+					return;
+				}
+			}
+			done(QString(), resp);
+		});
+		return;
+	}
+
+	// For sms-man and other handler_api services
+	const auto url = QUrl(base + u"?api_key="_q + key + u"&action=getBalance"_q);
+	SendApiGet(url, [=](const QString &resp, const QString &err) {
+		if (!err.isEmpty()) {
+			done(QString(), err);
+			return;
+		}
+		if (resp.startsWith(u"ACCESS_BALANCE:"_q)) {
+			done(resp.mid(15).trimmed(), QString());
+		} else if (resp == u"BAD_KEY"_q) {
+			done(QString(), u"Неверный API-ключ"_q);
+		} else if (resp == u"ERROR_SQL"_q) {
+			done(QString(), u"Ошибка на стороне сервера SMS"_q);
+		} else if (resp == u"NO_KEY"_q) {
+			done(QString(), u"Ключ не передан"_q);
+		} else {
+			// Check if response is JSON (e.g. sms-man control api response)
+			const auto doc = QJsonDocument::fromJson(resp.toUtf8());
+			if (doc.isObject() && doc.object().contains(u"balance"_q)) {
+				const auto val = doc.object().value(u"balance"_q);
+				const auto balStr = val.isDouble()
+					? QString::number(val.toDouble(), 'f', 2)
+					: val.toString();
+				done(balStr, QString());
+				return;
+			}
+			done(QString(), resp);
+		}
+	});
 }
 
 [[nodiscard]] inline QString CountryTitle(const CountryItem &c) {
@@ -1133,6 +1217,8 @@ inline QMutex &LiveCountriesMutex() {
 			const auto o = value.toObject();
 			if (o.contains(u"id"_q)) {
 				item.id = o[u"id"_q].toVariant().toInt();
+			} else if (o.contains(u"ID"_q)) {
+				item.id = o[u"ID"_q].toVariant().toInt();
 			}
 			if (o.contains(u"visible"_q) && o[u"visible"_q].toVariant().toInt() == 0) {
 				return;
@@ -1144,14 +1230,20 @@ inline QMutex &LiveCountriesMutex() {
 					break;
 				}
 			}
+			if (o.contains(u"short_name"_q)) {
+				item.isoCode = o[u"short_name"_q].toString().trimmed().toUpper();
+			} else if (o.contains(u"iso"_q)) {
+				item.isoCode = o[u"iso"_q].toString().trimmed().toUpper();
+			}
 		}
 		if (item.name.isEmpty()) {
 			return;
 		}
 		for (const auto &known : PopularCountries()) {
-			if (known.id == item.id) {
+			if (known.id == item.id || (!item.isoCode.isEmpty() && known.isoCode == item.isoCode)) {
 				item.flag = known.flag;
 				item.phoneCode = known.phoneCode;
+				if (item.isoCode.isEmpty()) item.isoCode = known.isoCode;
 				break;
 			}
 		}
@@ -1251,6 +1343,19 @@ inline void FetchOperators(
 		done({}, u"Не указан сервис, ключ или страна"_q);
 		return;
 	}
+
+	if (data.serviceId == u"smspool"_q || data.serviceId == u"vak-sms"_q) {
+		std::vector<OperatorInfo> list;
+		list.push_back(OperatorInfo{
+			.name = u"any"_q,
+			.title = u"Любой оператор (any)"_q,
+			.count = -1,
+			.price = QString(),
+		});
+		done(list, QString());
+		return;
+	}
+
 	const auto opUrl = QUrl(base
 		+ u"?api_key="_q + key
 		+ u"&action=getOperators&country="_q + QString::number(countryId));
@@ -1337,8 +1442,46 @@ inline void FetchCountries(
 		return;
 	}
 	const auto serviceId = data.serviceId;
+	const auto key = data.apiKey.trimmed();
+
+	if (serviceId == u"smspool"_q) {
+		const auto url = QUrl(u"https://api.smspool.net/country/retrieve_all?key="_q + key);
+		SendApiGet(url, [=](const QString &resp, const QString &err) {
+			if (!err.isEmpty()) {
+				done(err);
+				return;
+			}
+			auto list = ParseCountries(resp);
+			if (list.empty()) {
+				list = PopularCountries();
+			}
+			{
+				const auto lock = QMutexLocker(&LiveCountriesMutex());
+				LiveCountries().insert(serviceId, std::move(list));
+			}
+			done(QString());
+		});
+		return;
+	}
+
+	if (serviceId == u"vak-sms"_q) {
+		const auto url = QUrl(u"https://vak-sms.com/api/getCountryList/?apiKey="_q + key);
+		SendApiGet(url, [=](const QString &resp, const QString &err) {
+			auto list = ParseCountries(resp);
+			if (list.empty()) {
+				list = PopularCountries();
+			}
+			{
+				const auto lock = QMutexLocker(&LiveCountriesMutex());
+				LiveCountries().insert(serviceId, std::move(list));
+			}
+			done(QString());
+		});
+		return;
+	}
+
 	const auto url = QUrl(base
-		+ u"?api_key="_q + data.apiKey.trimmed()
+		+ u"?api_key="_q + key
 		+ u"&action=getCountries"_q);
 	SendApiGet(url, [=](const QString &resp, const QString &err) {
 		if (!err.isEmpty()) {
@@ -1368,6 +1511,88 @@ inline void OrderNumber(
 		done(QString(), QString(), u"Проверьте настройки сервиса и API-ключ"_q);
 		return;
 	}
+
+	if (data.serviceId == u"vak-sms"_q) {
+		const auto countryIso = CountryCodeById(countryId, data.serviceId).toLower();
+		auto urlStr = u"https://vak-sms.com/api/getNumber/?apiKey="_q + key
+			+ u"&service=tg&country="_q + countryIso;
+		const auto op = data.smsOperator.trimmed();
+		if (!op.isEmpty() && op != u"any"_q) {
+			urlStr += u"&operator="_q + op;
+		}
+		SendApiGet(QUrl(urlStr), [=](const QString &resp, const QString &err) {
+			if (!err.isEmpty()) {
+				done(QString(), QString(), err);
+				return;
+			}
+			const auto doc = QJsonDocument::fromJson(resp.toUtf8());
+			if (doc.isObject()) {
+				const auto obj = doc.object();
+				const auto tel = obj.value(u"tel"_q).toVariant().toString().trimmed();
+				const auto idNum = obj.value(u"idNum"_q).toVariant().toString().trimmed();
+				if (!tel.isEmpty() && !idNum.isEmpty()) {
+					done(idNum, tel, QString());
+					return;
+				}
+				const auto errStr = obj.value(u"error"_q).toString();
+				if (errStr == u"noNumbers"_q) {
+					done(QString(), QString(), u"Нет свободных номеров для этой страны"_q);
+					return;
+				} else if (errStr == u"noMoney"_q) {
+					done(QString(), QString(), u"Недостаточно средств на балансе сервиса"_q);
+					return;
+				} else if (errStr == u"apiKeyNotFound"_q) {
+					done(QString(), QString(), u"Неверный API-ключ"_q);
+					return;
+				} else if (!errStr.isEmpty()) {
+					done(QString(), QString(), errStr);
+					return;
+				}
+			}
+			done(QString(), QString(), resp);
+		});
+		return;
+	}
+
+	if (data.serviceId == u"smspool"_q) {
+		const auto countryIso = CountryCodeById(countryId, data.serviceId).toUpper();
+		const auto urlStr = u"https://api.smspool.net/purchase/sms?key="_q + key
+			+ u"&country="_q + countryIso
+			+ u"&service=telegram"_q;
+		SendApiGet(QUrl(urlStr), [=](const QString &resp, const QString &err) {
+			if (!err.isEmpty()) {
+				done(QString(), QString(), err);
+				return;
+			}
+			const auto doc = QJsonDocument::fromJson(resp.toUtf8());
+			if (doc.isObject()) {
+				const auto obj = doc.object();
+				const auto success = obj.value(u"success"_q).toVariant().toInt();
+				if (success == 1) {
+					const auto orderId = obj.value(u"order_id"_q).toString().trimmed();
+					auto number = obj.value(u"number"_q).toVariant().toString().trimmed();
+					if (number.isEmpty()) {
+						const auto cc = obj.value(u"cc"_q).toVariant().toString().trimmed();
+						const auto pn = obj.value(u"phonenumber"_q).toVariant().toString().trimmed();
+						number = cc + pn;
+					}
+					if (!orderId.isEmpty() && !number.isEmpty()) {
+						done(orderId, number, QString());
+						return;
+					}
+				}
+				const auto msg = obj.value(u"message"_q).toString();
+				if (!msg.isEmpty()) {
+					done(QString(), QString(), msg);
+					return;
+				}
+			}
+			done(QString(), QString(), resp);
+		});
+		return;
+	}
+
+	// Handler API (sms-man, sms-activate, 5sim, hero-sms, smsbower, etc.)
 	auto urlStr = base
 		+ u"?api_key="_q + key
 		+ u"&action=getNumber&service=tg&country="_q
@@ -1390,6 +1615,23 @@ inline void OrderNumber(
 			const auto parts = resp.split(':');
 			if (parts.size() >= 3) {
 				done(parts[1], parts[2], QString());
+				return;
+			}
+		}
+		// Also parse JSON response if service returned JSON (e.g. sms-man control api)
+		const auto doc = QJsonDocument::fromJson(resp.toUtf8());
+		if (doc.isObject()) {
+			const auto obj = doc.object();
+			if (obj.contains(u"request_id"_q) && obj.contains(u"number"_q)) {
+				const auto reqId = obj.value(u"request_id"_q).toVariant().toString();
+				const auto num = obj.value(u"number"_q).toVariant().toString();
+				if (!reqId.isEmpty() && !num.isEmpty()) {
+					done(reqId, num, QString());
+					return;
+				}
+			}
+			if (obj.contains(u"error_msg"_q)) {
+				done(QString(), QString(), obj.value(u"error_msg"_q).toString());
 				return;
 			}
 		}
@@ -1417,6 +1659,93 @@ inline void PollSmsCode(
 		Fn<void(QString status, QString code, QString error)> done) {
 	const auto base = ResolveBaseUrl(data);
 	const auto key = data.apiKey.trimmed();
+
+	if (data.serviceId == u"vak-sms"_q) {
+		const auto url = QUrl(u"https://vak-sms.com/api/getSmsCode/?apiKey="_q + key + u"&idNum="_q + activationId);
+		SendApiGet(url, [=](const QString &resp, const QString &err) {
+			if (!err.isEmpty()) {
+				done(QString(), QString(), err);
+				return;
+			}
+			const auto doc = QJsonDocument::fromJson(resp.toUtf8());
+			if (doc.isObject()) {
+				const auto obj = doc.object();
+				if (obj.contains(u"smsCode"_q) && !obj.value(u"smsCode"_q).isNull()) {
+					const auto raw = obj.value(u"smsCode"_q).toVariant().toString().trimmed();
+					if (!raw.isEmpty() && raw != u"null"_q) {
+						static const auto re = QRegularExpression(u"\\b(\\d{5,6})\\b"_q);
+						const auto m = re.match(raw);
+						const auto code = m.hasMatch() ? m.captured(1) : raw;
+						done(u"ok"_q, code, QString());
+						return;
+					}
+				}
+				if (obj.contains(u"sms"_q) && !obj.value(u"sms"_q).isNull()) {
+					const auto raw = obj.value(u"sms"_q).toVariant().toString().trimmed();
+					if (!raw.isEmpty() && raw != u"null"_q) {
+						static const auto re = QRegularExpression(u"\\b(\\d{5,6})\\b"_q);
+						const auto m = re.match(raw);
+						const auto code = m.hasMatch() ? m.captured(1) : raw;
+						done(u"ok"_q, code, QString());
+						return;
+					}
+				}
+				if (obj.contains(u"error"_q)) {
+					const auto errStr = obj.value(u"error"_q).toString();
+					if (errStr == u"wait_code"_q || errStr.isEmpty()) {
+						done(u"wait"_q, QString(), QString());
+						return;
+					}
+					if (errStr == u"badIdNum"_q) {
+						done(u"cancel"_q, QString(), u"Заказ отменен"_q);
+						return;
+					}
+				}
+				done(u"wait"_q, QString(), QString());
+				return;
+			}
+			done(u"wait"_q, QString(), QString());
+		});
+		return;
+	}
+
+	if (data.serviceId == u"smspool"_q) {
+		const auto url = QUrl(u"https://api.smspool.net/sms/check?key="_q + key + u"&orderid="_q + activationId);
+		SendApiGet(url, [=](const QString &resp, const QString &err) {
+			if (!err.isEmpty()) {
+				done(QString(), QString(), err);
+				return;
+			}
+			const auto doc = QJsonDocument::fromJson(resp.toUtf8());
+			if (doc.isObject()) {
+				const auto obj = doc.object();
+				const auto status = obj.value(u"status"_q).toVariant().toInt();
+				if (status == 3) { // Completed
+					const auto raw = obj.contains(u"sms"_q)
+						? obj.value(u"sms"_q).toVariant().toString().trimmed()
+						: obj.value(u"full_sms"_q).toString().trimmed();
+					static const auto re = QRegularExpression(u"\\b(\\d{5,6})\\b"_q);
+					const auto m = re.match(raw);
+					const auto code = m.hasMatch() ? m.captured(1) : raw;
+					done(u"ok"_q, code, QString());
+					return;
+				} else if (status == 1 || status == 7 || status == 8) { // Pending / processing / activating
+					done(u"wait"_q, QString(), QString());
+					return;
+				} else if (status == 4) { // Resend
+					done(u"retry"_q, QString(), QString());
+					return;
+				} else if (status == 2 || status == 5 || status == 6) { // Expired / cancelled / refunded
+					done(u"cancel"_q, QString(), u"Заказ отменен или истек"_q);
+					return;
+				}
+			}
+			done(u"other"_q, QString(), resp);
+		});
+		return;
+	}
+
+	// Handler API (sms-man, hero-sms, smsbower, etc.)
 	const auto url = QUrl(base
 		+ u"?api_key="_q + key
 		+ u"&action=getStatus&id="_q + activationId);
@@ -1444,6 +1773,25 @@ inline void PollSmsCode(
 			const auto code = m.hasMatch() ? m.captured(1) : raw;
 			done(u"ok"_q, code, QString());
 		} else {
+			// Check if JSON (sms-man control API)
+			const auto doc = QJsonDocument::fromJson(resp.toUtf8());
+			if (doc.isObject()) {
+				const auto obj = doc.object();
+				if (obj.contains(u"sms_code"_q) && !obj.value(u"sms_code"_q).isNull()) {
+					const auto raw = obj.value(u"sms_code"_q).toVariant().toString().trimmed();
+					if (!raw.isEmpty()) {
+						static const auto re = QRegularExpression(u"\\b(\\d{5,6})\\b"_q);
+						const auto m = re.match(raw);
+						const auto code = m.hasMatch() ? m.captured(1) : raw;
+						done(u"ok"_q, code, QString());
+						return;
+					}
+				}
+				if (obj.value(u"error_code"_q).toString() == u"wait_sms"_q) {
+					done(u"wait"_q, QString(), QString());
+					return;
+				}
+			}
 			done(u"other"_q, QString(), resp);
 		}
 	});
@@ -1456,6 +1804,45 @@ inline void SetSmsStatus(
 		Fn<void(bool ok, QString resp, QString error)> done = nullptr) {
 	const auto base = ResolveBaseUrl(data);
 	const auto key = data.apiKey.trimmed();
+
+	if (data.serviceId == u"vak-sms"_q) {
+		const auto vakStatus = (status == 6) ? u"end"_q : (status == 3 ? u"send"_q : u"bad"_q);
+		const auto url = QUrl(u"https://vak-sms.com/api/setStatus/?apiKey="_q + key
+			+ u"&idNum="_q + activationId
+			+ u"&status="_q + vakStatus);
+		SendApiGet(url, [=](const QString &resp, const QString &err) {
+			if (done) {
+				done(err.isEmpty(), resp, err);
+			}
+		});
+		return;
+	}
+
+	if (data.serviceId == u"smspool"_q) {
+		if (status == 8 || status == -1) { // Cancel
+			const auto url = QUrl(u"https://api.smspool.net/sms/cancel?key="_q + key + u"&orderid="_q + activationId);
+			SendApiGet(url, [=](const QString &resp, const QString &err) {
+				if (done) {
+					done(err.isEmpty(), resp, err);
+				}
+			});
+			return;
+		}
+		if (status == 3) { // Resend
+			const auto url = QUrl(u"https://api.smspool.net/sms/resend?key="_q + key + u"&orderid="_q + activationId);
+			SendApiGet(url, [=](const QString &resp, const QString &err) {
+				if (done) {
+					done(err.isEmpty(), resp, err);
+				}
+			});
+			return;
+		}
+		if (done) {
+			done(true, u"OK"_q, QString());
+		}
+		return;
+	}
+
 	const auto url = QUrl(base
 		+ u"?api_key="_q + key
 		+ u"&action=setStatus&status="_q + QString::number(status)
@@ -1585,7 +1972,9 @@ inline void StartRefundSupervisor() {
 				SaveRefundQueue();
 
 				SetSmsStatus(task.settings, actId, 8, [=](bool ok, QString resp, QString err) {
-					if (resp == u"ACCESS_CANCEL"_q || resp == u"ACCESS_CANCEL_ALREADY"_q || resp == u"STATUS_CANCEL"_q) {
+					if (resp == u"ACCESS_CANCEL"_q || resp == u"ACCESS_CANCEL_ALREADY"_q || resp == u"STATUS_CANCEL"_q
+						|| resp.contains(u"\"success\":1"_q) || resp.contains(u"\"success\": 1"_q) || resp.contains(u"\"success\":true"_q)
+						|| resp.contains(u"\"response\":\"1\""_q) || resp.contains(u"\"response\": 1"_q) || resp.contains(u"\"response\":1"_q)) {
 						if (logCb) {
 							logCb(u"[Автовозврат] Средства за номер +"_q + phone + u" (ID: "_q + actId + u") успешно возвращены на баланс!"_q);
 						}

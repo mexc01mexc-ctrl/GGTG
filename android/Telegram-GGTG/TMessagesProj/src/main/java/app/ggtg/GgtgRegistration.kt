@@ -53,13 +53,14 @@ object GgtgRegistration {
     val SERVICES = listOf(
         ServiceInfo("hero-sms", "Hero-SMS", "https://hero-sms.com/stubs/handler_api.php", "https://hero-sms.com"),
         ServiceInfo("smsbower", "SMSBower", "https://smsbower.page/stubs/handler_api.php", "https://smsbower.app"),
+        ServiceInfo("vak-sms", "Vak-SMS", "https://vak-sms.com/api/", "https://vak-sms.com"),
+        ServiceInfo("sms-man", "SMS-MAN", "https://api.sms-man.com/stubs/handler_api.php", "https://sms-man.com"),
+        ServiceInfo("smspool", "SMSPool", "https://api.smspool.net", "https://smspool.net"),
         ServiceInfo("onlinesim", "OnlineSim", "https://onlinesim.io/stubs/handler_api.php", "https://onlinesim.io"),
         ServiceInfo("sms-activate", "SMS-Activate", "https://api.sms-activate.org/stubs/handler_api.php", "https://sms-activate.org"),
         ServiceInfo("5sim", "5SIM", "https://5sim.net/stubs/handler_api.php", "https://5sim.net"),
-        ServiceInfo("vak-sms", "Vak-SMS", "https://vak-sms.com/stubs/handler_api.php", "https://vak-sms.com"),
         ServiceInfo("smshub", "SMSHub", "https://smshub.org/stubs/handler_api.php", "https://smshub.org"),
         ServiceInfo("grizzly", "Grizzly SMS", "https://api.grizzlysms.com/stubs/handler_api.php", "https://grizzlysms.com"),
-        ServiceInfo("sms-man", "SMS-MAN", "https://api.sms-man.com/stubs/handler_api.php", "https://sms-man.com"),
         ServiceInfo("custom", "Свой сервис (API URL)", "", "")
     )
 
@@ -322,21 +323,79 @@ object GgtgRegistration {
         }
     }
 
+    fun countryCodeById(id: Int, serviceId: String = ""): String {
+        for (item in countriesFor(serviceId)) {
+            if (item.id == id && item.isoCode.isNotEmpty()) {
+                return item.isoCode
+            }
+        }
+        for (item in COUNTRIES) {
+            if (item.id == id && item.isoCode.isNotEmpty()) {
+                return item.isoCode
+            }
+        }
+        return "US"
+    }
+
     // -----------------------------------------------------------------------------
-    // SMS Service HTTP API (Handler API standard)
+    // SMS Service HTTP API
     // -----------------------------------------------------------------------------
     suspend fun fetchBalance(config: Config): Result<String> {
         val base = resolveBaseUrl(config)
         val key = config.apiKey.trim()
-        if (base.isEmpty() || key.isEmpty()) return Result.failure(Exception("Проверьте адрес сервиса и API-ключ"))
+        if (base.isEmpty() && config.serviceId != "smspool") return Result.failure(Exception("Проверьте адрес сервиса и API-ключ"))
+        if (key.isEmpty()) return Result.failure(Exception("Не указан API-ключ"))
+
+        if (config.serviceId == "vak-sms") {
+            val url = "https://vak-sms.com/api/getBalance/?apiKey=$key"
+            return fetchApiGet(url).mapCatching { resp ->
+                val obj = try { JSONObject(resp) } catch (e: Throwable) { null }
+                if (obj != null) {
+                    if (obj.has("balance")) {
+                        return@mapCatching obj.optString("balance")
+                    }
+                    if (obj.has("error")) {
+                        throw Exception(obj.optString("error"))
+                    }
+                }
+                if (resp.startsWith("ACCESS_BALANCE:")) {
+                    return@mapCatching resp.removePrefix("ACCESS_BALANCE:").trim()
+                }
+                resp
+            }
+        }
+
+        if (config.serviceId == "smspool") {
+            val url = "https://api.smspool.net/request/balance?key=$key"
+            return fetchApiGet(url).mapCatching { resp ->
+                val obj = try { JSONObject(resp) } catch (e: Throwable) { null }
+                if (obj != null) {
+                    if (obj.has("balance")) {
+                        return@mapCatching obj.optString("balance")
+                    }
+                    if (obj.has("message")) {
+                        throw Exception(obj.optString("message"))
+                    }
+                }
+                resp
+            }
+        }
+
         val url = "$base?api_key=$key&action=getBalance"
-        return fetchApiGet(url).map { resp ->
+        return fetchApiGet(url).mapCatching { resp ->
             when {
                 resp.startsWith("ACCESS_BALANCE:") -> resp.removePrefix("ACCESS_BALANCE:").trim()
                 resp == "BAD_KEY" -> throw Exception("Неверный API-ключ")
                 resp == "ERROR_SQL" -> throw Exception("Ошибка базы на стороне SMS-сервиса")
                 resp == "NO_KEY" -> throw Exception("Ключ не передан")
-                else -> resp
+                else -> {
+                    val obj = try { JSONObject(resp) } catch (e: Throwable) { null }
+                    if (obj != null && obj.has("balance")) {
+                        obj.optString("balance")
+                    } else {
+                        resp
+                    }
+                }
             }
         }
     }
@@ -364,16 +423,21 @@ object GgtgRegistration {
         fun add(value: Any?, key: String) {
             var id = key.toIntOrNull() ?: return
             var name = ""
+            var iso = ""
             if (value is String) {
                 name = value
             } else if (value is org.json.JSONObject) {
                 if (value.has("id")) id = value.optInt("id", id)
+                else if (value.has("ID")) id = value.optInt("ID", id)
                 if (value.has("visible") && value.optInt("visible", 1) == 0) return
                 name = listOf("rus", "name", "title", "eng").map { value.optString(it, "").trim() }.firstOrNull { it.isNotEmpty() } ?: ""
+                iso = listOf("short_name", "iso").map { value.optString(it, "").trim().uppercase(Locale.ROOT) }.firstOrNull { it.isNotEmpty() } ?: ""
             }
             if (name.isEmpty()) return
-            val known = COUNTRIES.firstOrNull { it.id == id }
-            result.add(CountryItem(id, known?.flag ?: "", name, known?.phoneCode ?: ""))
+            val known = COUNTRIES.firstOrNull { it.id == id || (iso.isNotEmpty() && it.isoCode.equals(iso, ignoreCase = true)) }
+            val phoneCode = known?.phoneCode ?: ""
+            val flag = known?.flag ?: ""
+            result.add(CountryItem(id, flag, name, phoneCode, iso.ifEmpty { known?.isoCode ?: "" }))
         }
         try {
             val text = raw.trim()
@@ -391,8 +455,28 @@ object GgtgRegistration {
 
     suspend fun fetchCountries(config: Config): Result<Int> {
         val base = resolveBaseUrl(config)
-        if (base.isEmpty()) return Result.failure(Exception("Не указан адрес SMS-сервиса"))
-        return fetchApiGet("$base?api_key=${config.apiKey.trim()}&action=getCountries").map { resp ->
+        val key = config.apiKey.trim()
+        if (base.isEmpty() && config.serviceId != "smspool") return Result.failure(Exception("Не указан адрес SMS-сервиса"))
+
+        if (config.serviceId == "smspool") {
+            val url = "https://api.smspool.net/country/retrieve_all?key=$key"
+            return fetchApiGet(url).map { resp ->
+                val list = parseCountries(resp).ifEmpty { COUNTRIES }
+                liveCountries[config.serviceId] = list
+                list.size
+            }
+        }
+
+        if (config.serviceId == "vak-sms") {
+            val url = "https://vak-sms.com/api/getCountryList/?apiKey=$key"
+            return fetchApiGet(url).map { resp ->
+                val list = parseCountries(resp).ifEmpty { COUNTRIES }
+                liveCountries[config.serviceId] = list
+                list.size
+            }
+        }
+
+        return fetchApiGet("$base?api_key=$key&action=getCountries").map { resp ->
             val list = parseCountries(resp)
             if (list.isEmpty()) throw Exception("Сервис не вернул список стран")
             liveCountries[config.serviceId] = list
@@ -424,9 +508,18 @@ object GgtgRegistration {
     suspend fun fetchOperators(config: Config, countryId: Int): Result<List<OperatorInfo>> = withContext(Dispatchers.IO) {
         val base = resolveBaseUrl(config)
         val key = config.apiKey.trim()
-        if (base.isEmpty() || key.isEmpty() || countryId < 0) {
-            return@withContext Result.failure(Exception("Не указан сервис, ключ или страна"))
+        if (countryId < 0) {
+            return@withContext Result.failure(Exception("Не указана страна"))
         }
+
+        if (config.serviceId == "smspool" || config.serviceId == "vak-sms") {
+            return@withContext Result.success(listOf(OperatorInfo("any", "Любой оператор (any)")))
+        }
+
+        if (base.isEmpty() || key.isEmpty()) {
+            return@withContext Result.failure(Exception("Не указан сервис или ключ"))
+        }
+
         val opUrl = "$base?api_key=$key&action=getOperators&country=$countryId"
         val opRes = fetchApiGet(opUrl)
         val opRaw = opRes.getOrNull() ?: ""
@@ -513,7 +606,59 @@ object GgtgRegistration {
     suspend fun orderNumber(config: Config, countryId: Int): Result<Pair<String, String>> {
         val base = resolveBaseUrl(config)
         val key = config.apiKey.trim()
-        if (base.isEmpty() || key.isEmpty()) return Result.failure(Exception("Не указан API-ключ SMS-сервиса"))
+        if (key.isEmpty()) return Result.failure(Exception("Не указан API-ключ SMS-сервиса"))
+
+        if (config.serviceId == "vak-sms") {
+            val countryIso = countryCodeById(countryId, config.serviceId).lowercase(Locale.ROOT)
+            var url = "https://vak-sms.com/api/getNumber/?apiKey=$key&service=tg&country=$countryIso"
+            val op = config.smsOperator.trim()
+            if (op.isNotEmpty() && op != "any") {
+                url += "&operator=$op"
+            }
+            return fetchApiGet(url).mapCatching { resp ->
+                val obj = try { JSONObject(resp) } catch (e: Throwable) { null }
+                if (obj != null) {
+                    val tel = obj.optString("tel", "").trim()
+                    val idNum = obj.optString("idNum", "").trim()
+                    if (tel.isNotEmpty() && idNum.isNotEmpty()) {
+                        return@mapCatching idNum to tel
+                    }
+                    val err = obj.optString("error", "")
+                    if (err == "noNumbers") throw Exception("Нет свободных номеров для этой страны")
+                    if (err == "noMoney") throw Exception("Недостаточно средств на балансе сервиса")
+                    if (err == "apiKeyNotFound") throw Exception("Неверный API-ключ")
+                    if (err.isNotEmpty()) throw Exception(err)
+                }
+                throw Exception("Ответ сервиса: $resp")
+            }
+        }
+
+        if (config.serviceId == "smspool") {
+            val countryIso = countryCodeById(countryId, config.serviceId).uppercase(Locale.ROOT)
+            val url = "https://api.smspool.net/purchase/sms?key=$key&country=$countryIso&service=telegram"
+            return fetchApiGet(url).mapCatching { resp ->
+                val obj = try { JSONObject(resp) } catch (e: Throwable) { null }
+                if (obj != null) {
+                    val success = obj.optInt("success", 0)
+                    if (success == 1) {
+                        val orderId = obj.optString("order_id", "").trim()
+                        var number = obj.optString("number", "").trim()
+                        if (number.isEmpty()) {
+                            val cc = obj.optString("cc", "").trim()
+                            val pn = obj.optString("phonenumber", "").trim()
+                            number = cc + pn
+                        }
+                        if (orderId.isNotEmpty() && number.isNotEmpty()) {
+                            return@mapCatching orderId to number
+                        }
+                    }
+                    val msg = obj.optString("message", "")
+                    if (msg.isNotEmpty()) throw Exception(msg)
+                }
+                throw Exception("Ответ сервиса: $resp")
+            }
+        }
+
         var url = "$base?api_key=$key&action=getNumber&service=tg&country=$countryId"
         val op = config.smsOperator.trim()
         if (op.isNotEmpty() && op != "any") {
@@ -523,11 +668,24 @@ object GgtgRegistration {
         if (mp.isNotEmpty()) {
             url += "&maxPrice=$mp"
         }
-        return fetchApiGet(url).map { resp ->
+        return fetchApiGet(url).mapCatching { resp ->
             if (resp.startsWith("ACCESS_NUMBER:")) {
                 val parts = resp.split(':')
                 if (parts.size >= 3) {
-                    return@map parts[1] to parts[2]
+                    return@mapCatching parts[1] to parts[2]
+                }
+            }
+            val obj = try { JSONObject(resp) } catch (e: Throwable) { null }
+            if (obj != null) {
+                if (obj.has("request_id") && obj.has("number")) {
+                    val reqId = obj.optString("request_id")
+                    val num = obj.optString("number")
+                    if (reqId.isNotEmpty() && num.isNotEmpty()) {
+                        return@mapCatching reqId to num
+                    }
+                }
+                if (obj.has("error_msg")) {
+                    throw Exception(obj.optString("error_msg"))
                 }
             }
             throw when (resp) {
@@ -544,6 +702,53 @@ object GgtgRegistration {
     suspend fun pollSmsCode(config: Config, activationId: String): Triple<String, String?, String?> {
         val base = resolveBaseUrl(config)
         val key = config.apiKey.trim()
+
+        if (config.serviceId == "vak-sms") {
+            val url = "https://vak-sms.com/api/getSmsCode/?apiKey=$key&idNum=$activationId"
+            val res = fetchApiGet(url).getOrNull() ?: return Triple("error", null, "Сетевой сбой при опросе SMS")
+            val obj = try { JSONObject(res) } catch (e: Throwable) { null }
+            if (obj != null) {
+                val raw = if (obj.has("smsCode") && !obj.isNull("smsCode")) {
+                    obj.optString("smsCode").trim()
+                } else if (obj.has("sms") && !obj.isNull("sms")) {
+                    obj.optString("sms").trim()
+                } else ""
+                if (raw.isNotEmpty() && raw != "null") {
+                    val codeMatch = Regex("\\b(\\d{5,6})\\b").find(raw)
+                    val code = codeMatch?.groupValues?.get(1) ?: raw
+                    return Triple("ok", code, null)
+                }
+                val err = obj.optString("error", "")
+                if (err == "badIdNum") {
+                    return Triple("cancel", null, "Заказ отменен")
+                }
+                return Triple("wait", null, null)
+            }
+            return Triple("wait", null, null)
+        }
+
+        if (config.serviceId == "smspool") {
+            val url = "https://api.smspool.net/sms/check?key=$key&orderid=$activationId"
+            val res = fetchApiGet(url).getOrNull() ?: return Triple("error", null, "Сетевой сбой при опросе SMS")
+            val obj = try { JSONObject(res) } catch (e: Throwable) { null }
+            if (obj != null) {
+                val status = obj.optInt("status", 1)
+                if (status == 3) {
+                    val raw = if (obj.has("sms")) obj.optString("sms").trim() else obj.optString("full_sms").trim()
+                    val codeMatch = Regex("\\b(\\d{5,6})\\b").find(raw)
+                    val code = codeMatch?.groupValues?.get(1) ?: raw
+                    return Triple("ok", code, null)
+                } else if (status == 1 || status == 7 || status == 8) {
+                    return Triple("wait", null, null)
+                } else if (status == 4) {
+                    return Triple("retry", null, null)
+                } else if (status == 2 || status == 5 || status == 6) {
+                    return Triple("cancel", null, "Заказ отменен или истек")
+                }
+            }
+            return Triple("other", null, res)
+        }
+
         val url = "$base?api_key=$key&action=getStatus&id=$activationId"
         val res = fetchApiGet(url).getOrNull() ?: return Triple("error", null, "Сетевой сбой при опросе SMS")
         return when {
@@ -562,13 +767,46 @@ object GgtgRegistration {
                     Triple("ok", code, null)
                 }
             }
-            else -> Triple("other", null, res)
+            else -> {
+                val obj = try { JSONObject(res) } catch (e: Throwable) { null }
+                if (obj != null) {
+                    val raw = obj.optString("sms_code", "").trim()
+                    if (raw.isNotEmpty() && raw != "null") {
+                        val codeMatch = Regex("\\b(\\d{5,6})\\b").find(raw)
+                        val code = codeMatch?.groupValues?.get(1) ?: raw
+                        return Triple("ok", code, null)
+                    }
+                    if (obj.optString("error_code") == "wait_sms") {
+                        return Triple("wait", null, null)
+                    }
+                }
+                Triple("other", null, res)
+            }
         }
     }
 
     suspend fun setSmsStatus(config: Config, activationId: String, status: Int): Result<String> {
         val base = resolveBaseUrl(config)
         val key = config.apiKey.trim()
+
+        if (config.serviceId == "vak-sms") {
+            val vakStatus = if (status == 6) "end" else if (status == 3) "send" else "bad"
+            val url = "https://vak-sms.com/api/setStatus/?apiKey=$key&idNum=$activationId&status=$vakStatus"
+            return fetchApiGet(url)
+        }
+
+        if (config.serviceId == "smspool") {
+            if (status == 8 || status == -1) {
+                val url = "https://api.smspool.net/sms/cancel?key=$key&orderid=$activationId"
+                return fetchApiGet(url)
+            }
+            if (status == 3) {
+                val url = "https://api.smspool.net/sms/resend?key=$key&orderid=$activationId"
+                return fetchApiGet(url)
+            }
+            return Result.success("OK")
+        }
+
         val url = "$base?api_key=$key&action=setStatus&status=$status&id=$activationId"
         return fetchApiGet(url)
     }
@@ -1387,7 +1625,9 @@ object GgtgRegistration {
                             task.attempts++
                             val res = setSmsStatus(task.config, task.activationId, 8)
                             val resp = res.getOrNull() ?: ""
-                            if (resp == "ACCESS_CANCEL" || resp == "ACCESS_CANCEL_ALREADY") {
+                            if (resp == "ACCESS_CANCEL" || resp == "ACCESS_CANCEL_ALREADY"
+                                || resp.contains("\"success\":1") || resp.contains("\"success\": 1") || resp.contains("\"success\":true")
+                                || resp.contains("\"response\":\"1\"") || resp.contains("\"response\": 1") || resp.contains("\"response\":1")) {
                                 log("[Автовозврат] Средства успешно возвращены сервисом: номер +${task.phone} (ID: ${task.activationId})!")
                                 refundQueue.remove(id)
                                 pendingActivations.remove(id)
@@ -1418,7 +1658,9 @@ object GgtgRegistration {
             engineScope.launch {
                 val res = setSmsStatus(config, activationId, 8)
                 val resp = res.getOrNull() ?: ""
-                if (resp == "ACCESS_CANCEL" || resp == "ACCESS_CANCEL_ALREADY") {
+                if (resp == "ACCESS_CANCEL" || resp == "ACCESS_CANCEL_ALREADY"
+                    || resp.contains("\"success\":1") || resp.contains("\"success\": 1") || resp.contains("\"success\":true")
+                    || resp.contains("\"response\":\"1\"") || resp.contains("\"response\": 1") || resp.contains("\"response\":1")) {
                     log("Возврат средств получен сразу: номер +$phone (ID: $activationId) отменён, средства возвращены!")
                     pendingActivations.remove(activationId)
                     refundQueue.remove(activationId)

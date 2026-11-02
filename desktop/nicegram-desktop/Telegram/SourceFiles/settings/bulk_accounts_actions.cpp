@@ -2700,7 +2700,10 @@ void ShowSingleAccountPicker(
 		AccountAccordionHooks hooks{
 			.selected = selected.get(),
 			.expandedFolders = expanded.get(),
-			.addAccountRow = [=](not_null<Ui::VerticalLayout*> container, not_null<Main::Account*> account) {
+			// ggtg: hooks keep raw pointers to `selected` / `expanded`; the
+			// copies of this lambda (held by every rebuild) own them, or a
+			// folder click after the box builder returned hit freed memory.
+			.addAccountRow = [=, keepSelected = selected, keepExpanded = expanded](not_null<Ui::VerticalLayout*> container, not_null<Main::Account*> account) {
 				const auto row = AddAccountPickerRow(container, account);
 				const auto isCurrent = (currentAccount == account.get());
 				row->setChecked(isCurrent);
