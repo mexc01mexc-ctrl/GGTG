@@ -2447,6 +2447,25 @@ void RemoveChannelsFromGroupsBase(
 	ChannelsCheckNext(controller, baseId, state);
 }
 
+// ggtg: the base is shared by every account, so a username known to any of
+// them counts (the active account first). Peers are per-account objects:
+// only the name/status are taken, never the peer itself, to another account.
+[[nodiscard]] PeerData *FindPeerInAnyAccount(const QString &key) {
+	if (const auto session = Core::App().activeAccount().maybeSession()) {
+		if (const auto peer = session->data().peerByUsername(key)) {
+			return peer;
+		}
+	}
+	for (const auto &account : Core::App().domain().orderedAccounts()) {
+		if (const auto session = account->maybeSession()) {
+			if (const auto peer = session->data().peerByUsername(key)) {
+				return peer;
+			}
+		}
+	}
+	return nullptr;
+}
+
 void RememberUserMeta(const QString &username, const UserMeta &meta) {
 	const auto key = username.trimmed().remove('@').toLower();
 	if (key.isEmpty()) {
@@ -2490,11 +2509,9 @@ QString KnownPeerName(const QString &username) {
 	if (const auto i = cache.find(key); i != cache.end()) {
 		return i->second;
 	}
-	if (const auto session = Core::App().activeAccount().maybeSession()) {
-		if (const auto peer = session->data().peerByUsername(key)) {
-			RememberPeerName(peer);
-			return peer->name();
-		}
+	if (const auto peer = FindPeerInAnyAccount(key)) {
+		RememberPeerName(peer);
+		return peer->name();
 	}
 	return QString();
 }
@@ -2504,20 +2521,18 @@ UserMeta LookupUserMeta(const QString &username) {
 	if (key.isEmpty()) {
 		return {};
 	}
-	if (const auto session = Core::App().activeAccount().maybeSession()) {
-		if (const auto peer = session->data().peerByUsername(key)) {
-			RememberPeerName(peer);
-			if (const auto user = peer->asUser()) {
-				const auto now = base::unixtime::now();
-				const auto meta = UserMeta{
-					.name = peer->name(),
-					.id = peer->id.value,
-					.lastseen = Data::SortByOnlineValue(user, now),
-					.lastseenText = Data::OnlineText(user, now),
-				};
-				RememberUserMeta(key, meta);
-				return meta;
-			}
+	if (const auto peer = FindPeerInAnyAccount(key)) {
+		RememberPeerName(peer);
+		if (const auto user = peer->asUser()) {
+			const auto now = base::unixtime::now();
+			const auto meta = UserMeta{
+				.name = peer->name(),
+				.id = peer->id.value,
+				.lastseen = Data::SortByOnlineValue(user, now),
+				.lastseenText = Data::OnlineText(user, now),
+			};
+			RememberUserMeta(key, meta);
+			return meta;
 		}
 	}
 	const auto &cache = UsersMetaCache();

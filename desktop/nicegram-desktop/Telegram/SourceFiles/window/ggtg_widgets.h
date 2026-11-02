@@ -313,8 +313,13 @@ inline void KeepOpenOnAccountSwitch(not_null<QWidget*> box) {
 }
 
 [[nodiscard]] inline bool HasKeptBoxIn(not_null<QWidget*> window) {
-	for (const auto &entry : KeptBoxes()) {
-		if (entry && entry->isVisible() && entry->window() == window.get()) {
+	auto &all = KeptBoxes();
+	all.erase(std::remove_if(all.begin(), all.end(), [](
+			const QPointer<QWidget> &entry) {
+		return entry.isNull();
+	}), all.end());
+	for (const auto &entry : all) {
+		if (entry && entry->window() == window.get()) {
 			return true;
 		}
 	}

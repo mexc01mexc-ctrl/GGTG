@@ -115,7 +115,9 @@ class GgtgBaseListActivity(private val baseId: Long, private val isGroups: Boole
                 val clean = u.trim().removePrefix("@")
                 val meta = GgtgDb.lookupUser(clean)
                 val uid = meta?.id ?: 0L
-                val user: TLRPC.User? = msgCtrl.getUser(clean) ?: (if (uid != 0L) msgCtrl.getUser(uid) else null)
+                val ownUser: TLRPC.User? = msgCtrl.getUser(clean) ?: (if (uid != 0L) msgCtrl.getUser(uid) else null)
+                // ggtg: known to any account counts for the name/status; row.user stays the active account's own
+                val user: TLRPC.User? = ownUser ?: GgtgAccounts.findKnownUser(clean, uid, account)
                 val actualUid = user?.id ?: uid
                 val name = if (user != null) {
                     ContactsController.formatName(user.first_name, user.last_name).ifEmpty { meta?.name ?: "@$clean" }
@@ -152,7 +154,7 @@ class GgtgBaseListActivity(private val baseId: Long, private val isGroups: Boole
                     isOnline = isOnline,
                     lastSeenTime = lastSeenTime,
                     lastSeenText = lastSeenText,
-                    user = user
+                    user = ownUser
                 ))
             }
         }
@@ -538,10 +540,11 @@ class GgtgBaseListActivity(private val baseId: Long, private val isGroups: Boole
             Browser.openUrl(context, row.fallbackUrl)
             return
         }
-        if (account != UserConfig.selectedAccount) {
-            org.telegram.ui.LaunchActivity.instance?.switchToAccount(account, false)
-        }
-        if (row.user != null) {
+        // ggtg: LaunchActivity.switchToAccount rebuilds the fragment stack and destroys this screen
+        // (crash on presentFragment). The fragments carry their own account via setCurrentAccount;
+        // row.user/row.chat were loaded under the selected account, so for another slot we resolve anew.
+        val sameAccount = account == UserConfig.selectedAccount
+        if (sameAccount && row.user != null && MessagesController.getInstance(account).getUser(row.user.id) != null) {
             val args = Bundle().apply { putLong("user_id", row.user.id) }
             val fragment = if (preferChat) {
                 ChatActivity(args)
@@ -552,7 +555,7 @@ class GgtgBaseListActivity(private val baseId: Long, private val isGroups: Boole
             presentFragment(fragment)
             return
         }
-        if (row.chat != null) {
+        if (sameAccount && row.chat != null) {
             val args = Bundle().apply { putLong("chat_id", row.chat.id) }
             val fragment = ChatActivity(args)
             fragment.setCurrentAccount(account)

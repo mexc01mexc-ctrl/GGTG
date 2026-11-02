@@ -91,6 +91,23 @@ object GgtgAccounts {
 
     fun user(slot: Int): TLRPC.User? = UserConfig.getInstance(slot).currentUser
 
+    /** ggtg: a base is shared by every account, so a username/id known to any activated account
+     *  counts. The preferred slot is asked first. The result is for display only (name, status):
+     *  access_hash is per account, so open a chat with a user object of its own account. */
+    fun findKnownUser(username: String, uid: Long, preferSlot: Int): TLRPC.User? {
+        val slots = ArrayList<Int>()
+        slots.add(preferSlot)
+        for (ref in activated()) if (ref.slot != preferSlot) slots.add(ref.slot)
+        for (slot in slots) {
+            if (!UserConfig.getInstance(slot).isClientActivated) continue
+            val ctrl = org.telegram.messenger.MessagesController.getInstance(slot)
+            val u = (if (username.isNotEmpty()) ctrl.getUser(username) else null)
+                ?: (if (uid != 0L) ctrl.getUser(uid) else null)
+            if (u != null) return u
+        }
+        return null
+    }
+
     fun label(slot: Int): String {
         val uc = UserConfig.getInstance(slot)
         val user = uc.currentUser ?: return "Аккаунт ${slot + 1}"

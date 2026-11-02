@@ -2681,6 +2681,7 @@ void ShowSingleAccountPicker(
 		Main::Account *currentAccount,
 		Fn<void(not_null<Main::Account*>)> onChosen) {
 	show->show(Box([=](not_null<Ui::GenericBox*> box) {
+		Ggtg::KeepOpenOnAccountSwitch(box);
 		box->setWidth(st::accountsBoxWidth);
 		box->setTitle(rpl::single(u"Выбор аккаунта для отправки"_q));
 
@@ -2697,6 +2698,7 @@ void ShowSingleAccountPicker(
 
 		const auto scroll = AddScrollableRowsArea(box->verticalLayout());
 
+		const auto weakBox = QPointer<Ui::GenericBox>(box.get());
 		AccountAccordionHooks hooks{
 			.selected = selected.get(),
 			.expandedFolders = expanded.get(),
@@ -2707,11 +2709,19 @@ void ShowSingleAccountPicker(
 				const auto row = AddAccountPickerRow(container, account);
 				const auto isCurrent = (currentAccount == account.get());
 				row->setChecked(isCurrent);
-				row->checkedChanges() | rpl::on_next([=](bool) {
-					if (onChosen) {
-						onChosen(account);
+				row->checkedChanges() | rpl::on_next([=](bool checked) {
+					if (!checked) {
+						return;
 					}
-					box->closeBox();
+					const auto chosen = account;
+					Ui::PostponeCall([=] {
+						if (weakBox) {
+							weakBox->closeBox();
+						}
+						if (onChosen) {
+							onChosen(chosen);
+						}
+					});
 				}, row->lifetime());
 			},
 			.singleChoice = true,
@@ -2720,7 +2730,7 @@ void ShowSingleAccountPicker(
 		RebuildAccountAccordion(scroll, hooks);
 
 		box->addButton(tr::lng_cancel(), [=] { box->closeBox(); });
-	}));
+	}), Ui::LayerOption::KeepOther);
 }
 
 void StartBaseVerification(
@@ -2958,6 +2968,7 @@ void ShowClickableUsernamesBox(
 		} else {
 			// The list stays open when the account is switched
 			Ggtg::KeepOpenOnAccountSwitch(box);
+			const auto weakBox = QPointer<Ui::GenericBox>(box.get());
 
 			const auto isGroupList = (download != nullptr) || (viaSquidward != nullptr);
 			const auto writingAccount = std::make_shared<not_null<Main::Account*>>(&Core::App().activeAccount());
@@ -3004,7 +3015,11 @@ void ShowClickableUsernamesBox(
 				const auto verifyBtn = (baseId != 0) ? Ui::CreateChild<Ui::LinkButton>(card, u"Проверить базу"_q) : nullptr;
 
 				const auto updateCard = [=] {
+					if (!weakBox) {
+						return;
+					}
 					const auto acc = *writingAccount;
+					*userpicView = Ui::PeerUserpicView();
 					auto nameText = QString();
 					auto detailsText = QString();
 					if (acc->sessionExists()) {
@@ -3045,8 +3060,13 @@ void ShowClickableUsernamesBox(
 
 				changeBtn->setClickedCallback([=] {
 					ShowSingleAccountPicker(show, (*writingAccount).get(), [=](not_null<Main::Account*> chosen) {
+						if (!weakBox) {
+							return;
+						}
 						*writingAccount = chosen;
-						Core::App().domain().maybeActivate(chosen);
+						if (chosen->sessionExists()) {
+							Core::App().domain().maybeActivate(chosen);
+						}
 						updateCard();
 					});
 				});
@@ -3427,7 +3447,9 @@ void ShowClickableUsernamesBox(
 							}
 							return;
 						}
-						Core::App().domain().maybeActivate(*writingAccount);
+						if ((*writingAccount)->sessionExists()) {
+							Core::App().domain().maybeActivate(*writingAccount);
+						}
 						OpenUsernamePeer(username, show, /*openProfile*/ false);
 					});
 				}
@@ -3456,7 +3478,9 @@ void ShowClickableUsernamesBox(
 							entries.push_back({
 								u"Просмотр профиля"_q,
 								[=] {
-									Core::App().domain().maybeActivate(*writingAccount);
+									if ((*writingAccount)->sessionExists()) {
+										Core::App().domain().maybeActivate(*writingAccount);
+									}
 									OpenUsernamePeer(username, show, /*openProfile*/ true);
 								},
 								&st::menuIconProfile,
@@ -3464,7 +3488,9 @@ void ShowClickableUsernamesBox(
 							entries.push_back({
 								u"Написать сообщение"_q,
 								[=] {
-									Core::App().domain().maybeActivate(*writingAccount);
+									if ((*writingAccount)->sessionExists()) {
+										Core::App().domain().maybeActivate(*writingAccount);
+									}
 									OpenUsernamePeer(username, show, /*openProfile*/ false);
 								},
 								&st::menuIconChatBubble,
