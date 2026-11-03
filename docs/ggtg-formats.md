@@ -137,3 +137,7 @@ Android: `filesDir/ggtg_bulk_db/pinned_countries.json` (долгое нажат�
 якорям и этим точкам, дальше последнего якоря идёт с недавней скоростью до «сейчас», а дата первого фото
 профиля ограничивает ответ сверху. Desktop: `tdata/ggtg_db/id_calibration.json`,
 Android: `filesDir/ggtg_bulk_db/id_calibration.json`.
+Точки добавляются сами при регистрации и вручную: в профиле правый клик (Mac) / долгое нажатие (Android)
+на «Примерная дата регистрации» → «Уточнить дату по Telegram». Запрос `messages.getPeerSettings`,
+поле `registration_month` ("MM.YYYY", Telegram отдаёт его, когда незнакомый человек пишет первым);
+точка ставится на середину месяца (`ParseRegistrationMonth` / `parseRegistrationMonth`).

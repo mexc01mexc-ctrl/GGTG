@@ -84,6 +84,38 @@ object GgtgIdDate {
         } catch (_: Throwable) {}
     }
 
+    /** Telegram's "MM.YYYY" (peerSettings.registration_month) -> unix seconds of the middle of that month, 0 if unreadable. */
+    @JvmStatic
+    fun parseRegistrationMonth(text: String?): Long {
+        if (text.isNullOrEmpty()) return 0L
+        var month = 0
+        var year = 0
+        for (part in text.split(Regex("[^0-9]+")).filter { it.isNotEmpty() }) {
+            val v = part.toIntOrNull() ?: continue
+            if (part.length == 4) year = v else if (v in 1..12) month = v
+        }
+        if (year !in 2013..2100 || month < 1) return 0L
+        val cal = Calendar.getInstance(TimeZone.getTimeZone("UTC"))
+        cal.clear()
+        cal.set(year, month - 1, 15, 12, 0, 0)
+        return cal.timeInMillis / 1000
+    }
+
+    /** Asks Telegram for the month and year the user registered in (it tells it for strangers who wrote first) and
+     *  feeds it to the id -> date calibration. [done] gets the month text, or null when Telegram does not tell. */
+    @JvmStatic
+    fun refineFromTelegram(account: Int, userId: Long, done: java.util.function.Consumer<String?>) {
+        val user = org.telegram.messenger.MessagesController.getInstance(account).getUser(userId)
+        val req = org.telegram.tgnet.TLRPC.TL_messages_getPeerSettings()
+        req.peer = org.telegram.messenger.MessagesController.getInstance(account).getInputPeer(userId)
+        org.telegram.tgnet.ConnectionsManager.getInstance(account).sendRequest(req) { resp, _ ->
+            val month = (resp as? org.telegram.tgnet.TLRPC.TL_messages_peerSettings)?.settings?.registration_month
+            val time = parseRegistrationMonth(month)
+            if (time > 0) calibrate(userId, time)
+            org.telegram.messenger.AndroidUtilities.runOnUIThread { done.accept(if (time > 0) month else null) }
+        }
+    }
+
     /** Anchors and exact points, sorted by id and kept monotone: an exact point wins over a contradicting anchor. */
     @Synchronized
     private fun points(): List<Point> {

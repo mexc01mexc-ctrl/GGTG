@@ -16476,6 +16476,22 @@ public class ProfileActivity extends BaseFragment implements NotificationCenter.
             });
         }
 
+        if (position == userIdRow) {
+            // ggtg: Telegram tells the month of registration of a stranger who wrote first - feed it to the id -> date estimate
+            itemOptions.add(R.drawable.msg_info, "Уточнить дату по Telegram", () -> {
+                app.ggtg.GgtgIdDate.refineFromTelegram(currentAccount, userId, month -> {
+                    if (month == null) {
+                        BulletinFactory.of(this).createErrorBulletin("Telegram не сообщает дату для этого аккаунта (приходит, только когда пишет незнакомый человек)").show();
+                    } else {
+                        BulletinFactory.of(this).createSimpleBulletin(R.drawable.msg_info, "Дата уточнена: " + month).show();
+                        if (listAdapter != null && userIdRow >= 0) {
+                            listAdapter.notifyItemChanged(userIdRow);
+                        }
+                    }
+                });
+            });
+        }
+
         if (position == fakeAnalysisRow) {
             final TLRPC.User targetUser = userId != 0 ? getMessagesController().getUser(userId) : user;
             final TLRPC.UserFull targetUserInfo = userId != 0 ? getMessagesController().getUserFull(userId) : userFull;

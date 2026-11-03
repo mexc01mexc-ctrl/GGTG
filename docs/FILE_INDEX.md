@@ -109,7 +109,7 @@
 | `GgtgGeo.kt` | 11 KB | country, timezone and language resolution by phone prefix and proxy |
 | `GgtgHome.kt` | 11 KB | "Главная" of the GGTG tab, like the desktop one: a greeting with the one thing to do, tiles with the numbers, what is running right now, the answers of people and (until everything is set up) the first steps. Drawn in the colors of the theme. It sits above the… |
 | `GgtgHubActivity.kt` | 9 KB | the GGTG hub - one screen listing every bulk-tools section, mirroring the desktop app's GGTG window (window/window_main_menu.cpp). Each row opens its own fragment. Titles kept in Russian to match the desktop build the user works from. With inTab it is the seco… |
-| `GgtgIdDate.kt` | 9 KB | estimates approximate Telegram account registration date based on sequentially issued user_id |
+| `GgtgIdDate.kt` | 10 KB | estimates approximate Telegram account registration date based on sequentially issued user_id |
 | `GgtgImportActivity.kt` | 7 KB | "Импорт .ggtg" - installs a pack written by GGTG Desktop's "Экспорт" section (a zip with manifest.json holding each account's own brand-new session, folder, 2FA and proxy). Accounts whose own proxy can't be used pull one from a chosen pool instead. |
 | `GgtgImportSupport.kt` | 8 KB | the pieces of the account-import flow every import path (.ggtg pack, tdata handoff) needs: the result summary and activating a slot whose auth key was just installed. The progress window itself lives in app.ggtg.ui.TdataImportProgressDialog (shared - it also d… |
 | `GgtgIosProfiles.kt` | 2 KB | authentic Telegram iOS (iPhone) client profile generator. Matches official Telegram iOS sessions with Apple device models, iOS versions, and Telegram iOS build numbers. api_id = 10840, lang_pack = "ios". |

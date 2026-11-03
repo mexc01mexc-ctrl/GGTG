@@ -1,5 +1,6 @@
 #pragma once
 
+#include <QtCore/QRegularExpression>
 #include <QtCore/QDir>
 #include <QtCore/QFile>
 #include <QtCore/QFileDevice>
@@ -192,6 +193,24 @@ inline void AddIdCalibration(uint64 id, int64 time) {
 	}
 	file.write(QJsonDocument(array).toJson(QJsonDocument::Compact));
 	file.commit();
+}
+
+// Telegram's "MM.YYYY" (peerSettings.registration_month) -> unix seconds of the middle of that month, 0 if unreadable.
+[[nodiscard]] inline int64 ParseRegistrationMonth(const QString &text) {
+	auto month = 0;
+	auto year = 0;
+	for (const auto &part : text.split(QRegularExpression(u"[^0-9]+"_q), Qt::SkipEmptyParts)) {
+		const auto value = part.toInt();
+		if (part.size() == 4) {
+			year = value;
+		} else if (value >= 1 && value <= 12) {
+			month = value;
+		}
+	}
+	if (year < 2013 || year > 2100 || month < 1) {
+		return 0;
+	}
+	return QDateTime(QDate(year, month, 15), QTime(12, 0), Qt::UTC).toSecsSinceEpoch();
 }
 
 // `upperBound`: the account is not younger than this (unix seconds, 0 - unknown), e.g. the date of its
