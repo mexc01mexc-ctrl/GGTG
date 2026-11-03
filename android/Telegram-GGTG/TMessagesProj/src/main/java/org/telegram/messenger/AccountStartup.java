@@ -13,7 +13,7 @@ import java.util.ArrayList;
  */
 public class AccountStartup {
 
-    private static final int BATCH_SIZE = 4;
+    private static final int BATCH_SIZE = 5;
     private static final long CHECK_DELAY = 500;
     private static final long BATCH_TIMEOUT = 15000;
 
@@ -77,6 +77,10 @@ public class AccountStartup {
     private static void check() {
         boolean waiting = false;
         for (int a : batch) {
+            // ggtg: a trashed account sleeps without a connection, so it never holds a batch back
+            if (ConnectionsManager.getInstance(a).isAsleep()) {
+                continue;
+            }
             int state = ConnectionsManager.getInstance(a).getConnectionState();
             if (state == ConnectionsManager.ConnectionStateConnecting
                     || state == ConnectionsManager.ConnectionStateWaitingForNetwork

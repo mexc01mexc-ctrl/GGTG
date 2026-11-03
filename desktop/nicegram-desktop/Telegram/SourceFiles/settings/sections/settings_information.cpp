@@ -1984,7 +1984,7 @@ void SetupAccountsWrap(
 		const ::Main::Domain::PendingPreview &preview) {
 	auto result = object_ptr<Ui::SettingsButton>(
 		parent,
-		rpl::single(preview.name + u"  (ожидает)"_q),
+		rpl::single(preview.name),
 		st::mainMenuAddAccountButton);
 	const auto raw = result.data();
 	const auto icon = Ui::CreateChild<Ui::RpWidget>(raw);
@@ -2006,6 +2006,40 @@ void SetupAccountsWrap(
 	}, icon->lifetime());
 	icon->show();
 	icon->raise();
+	// Queued: blinking blue dot, same spot as the live rows' status dot.
+	const auto dotSize = st::mainMenuAccountStatusDot;
+	const auto dot = Ui::CreateChild<Ui::RpWidget>(raw);
+	dot->resize(dotSize, dotSize);
+	dot->setAttribute(Qt::WA_TransparentForMouseEvents);
+	const auto blinkOn = raw->lifetime().make_state<bool>(true);
+	const auto blink = raw->lifetime().make_state<base::Timer>();
+	blink->setCallback([=] {
+		*blinkOn = !*blinkOn;
+		dot->update();
+	});
+	const auto trashed = preview.trashed; // asleep: no network, gray
+	if (!trashed) {
+		blink->callEach(500);
+	}
+	dot->paintRequest(
+	) | rpl::on_next([=] {
+		auto p = Painter(dot);
+		auto hq = PainterHighQualityEnabler(p);
+		p.setPen(Qt::NoPen);
+		p.setBrush(trashed
+			? QColor(142, 142, 147)
+			: QColor(0, 122, 255, *blinkOn ? 255 : 60));
+		p.drawEllipse(dot->rect());
+	}, dot->lifetime());
+	raw->heightValue(
+	) | rpl::on_next([=](int height) {
+		const auto left = st::mainMenuAddAccountButton.iconLeft
+			+ (st::settingsIconAdd.width() - userpicSize) / 2;
+		dot->move(
+			std::max(left - st::mainMenuAccountStatusSkip - dotSize, 0),
+			(height - dotSize) / 2);
+	}, dot->lifetime());
+	dot->show();
 	icon->paintRequest(
 	) | rpl::on_next([=] {
 		auto p = Painter(icon);
@@ -2067,6 +2101,7 @@ void SetupAccountsWrap(
 		base::unique_qptr<Ui::PopupMenu> menu;
 		bool connected = false;
 		bool frozen = false;
+		bool asleep = false; // trash: never connects unless opened
 		bool connecting = false; // just started, not connected yet
 		bool blinkOn = true;
 		base::Timer connectionPoll;
@@ -2249,12 +2284,16 @@ void SetupAccountsWrap(
 	const auto refreshConnected = [=] {
 		const auto connected = AccountConnected(account);
 		const auto frozen = AccountFrozen(account);
+		const auto asleep = account->asleep();
 		const auto connecting = !connected
 			&& !frozen
+			&& !asleep
 			&& (crl::now() - account->startedAt() < kConnectingGrace);
 		if (connected != state->connected
 			|| frozen != state->frozen
+			|| asleep != state->asleep
 			|| connecting != state->connecting) {
+			state->asleep = asleep;
 			state->connected = connected;
 			state->frozen = frozen;
 			state->connecting = connecting;
@@ -2293,7 +2332,9 @@ void SetupAccountsWrap(
 		auto p = Painter(connectionDot);
 		auto hq = PainterHighQualityEnabler(p);
 		p.setPen(Qt::NoPen);
-		p.setBrush(state->frozen
+		p.setBrush(state->asleep
+			? QColor(142, 142, 147)
+			: state->frozen
 			? QColor(0, 122, 255)
 			: state->connected
 			? QColor(76, 217, 100)

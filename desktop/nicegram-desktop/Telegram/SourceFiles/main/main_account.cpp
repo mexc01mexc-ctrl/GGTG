@@ -402,6 +402,7 @@ void Account::wake() {
 		return;
 	}
 	_asleep = false;
+	_startedAt = crl::now(); // ggtg: connecting grace starts at wake
 	if (_mtp) {
 		// What setProxyOverride would have applied all along: the account's
 		// own proxy, or the unreachable address while it has none.
