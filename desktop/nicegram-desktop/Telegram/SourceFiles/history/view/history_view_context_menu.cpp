@@ -77,8 +77,8 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "boxes/sticker_set_box.h"
 #include "boxes/stickers_box.h"
 #include "boxes/translate_box.h"
-#include "core/ggtg_ai.h"
-#include "settings/ggtg_ai_translate.h"
+#include "core/ggtg_lang.h"
+#include "settings/ggtg_translate.h"
 #include "data/components/ephemeral_messages.h"
 #include "data/components/factchecks.h"
 #include "data/data_photo.h"
@@ -1921,7 +1921,7 @@ void FillContextMenuItems(
 				}, &st::menuIconTranslate);
 			}
 			// GGTG: the free online translation shown in the message itself
-			// (see settings/ggtg_ai_translate.h).
+			// (see settings/ggtg_translate.h).
 			if (!translate.text.trimmed().isEmpty()
 				&& !list->hasCopyRestriction(view->data())) {
 				if (item->freeTranslationShown()) {

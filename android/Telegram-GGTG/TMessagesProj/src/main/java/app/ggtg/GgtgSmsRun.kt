@@ -135,7 +135,7 @@ class SmsRun(val usernames: List<String>, val accounts: List<SmsAccount>, val la
         val r = recipients[i]
         r.inProgress = false; r.outcome = outcome; r.reason = reason
         counts[outcome.ordinal]++
-        addLog(slot, (if (outcome == SmsOutcome.Sent) "✓ @" else "✗ @") + r.username + " - итог: " + outcome.title +
+        addLog(slot, (if (outcome == SmsOutcome.Sent) "Отправлено @" else "Не отправлено @") + r.username + " - итог: " + outcome.title +
             (if (reason.isEmpty()) "" else ": $reason"))
         accountOf[slot]?.let { a ->
             r.account = a.label

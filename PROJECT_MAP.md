@@ -7,7 +7,7 @@
 ## 1. Что такое GGTG
 
 GGTG — это Telegram-клиент для работы со множеством аккаунтов: рассылки по базам,
-сбор аудитории, накрутка, ИИ-помощник для ответов. Есть три платформы:
+сбор аудитории, накрутка, детектор фейков. Есть три платформы:
 
 | Платформа | Что это | Язык | Исходники |
 |---|---|---|---|
@@ -35,7 +35,7 @@ Mac и Android повторяют друг друга по функциям и �
 | Накрутка | просмотры постов, вступление в каналы | `settings/views_campaign.*` | `GgtgViews*.kt` |
 | Пуш | пока пустой раздел, функции добавятся позже | `window/window_main_menu.cpp` (секция `push`) | `GgtgPushActivity.kt` |
 | Процессы | все долгие операции с живым журналом | `core/process_manager.h`, `settings/process_box.*` | `GgtgProcess*.kt` |
-| ИИ | ключи бесплатных облачных моделей, профиль, материалы, обучение, лента ответов, агент | `core/ggtg_ai*.h`, `settings/ggtg_ai*.h` | `ai/GgtgAi*.kt` |
+| ИИ | убран из программы, код сохранён в `archive/ai/` (как вернуть: `archive/ai/README.md`) | — | — |
 | Синхронизация | данные между Mac и телефоном через «Избранное» главного аккаунта | `core/ggtg_sync*`, `settings/ggtg_sync_box.h` | `GgtgSync*.kt` |
 
 Названия «Рассылка» и «SMS» в коде означают одно и то же: это личные сообщения в
@@ -113,7 +113,7 @@ GGTG/
 | Журнал Telegram | `~/Library/Application Support/NiceGram Desktop/log.txt` | logcat |
 
 Форматы баз, `.ggtg`, синхронизации и прочего: [`docs/ggtg-formats.md`](docs/ggtg-formats.md).
-ИИ и его ключи: [`docs/ggtg-ai-cloud.md`](docs/ggtg-ai-cloud.md).
+Раздел «ИИ» убран, его код и инструкция по возврату: [`archive/ai/README.md`](archive/ai/README.md).
 
 ## 5. Ключевые механизмы (что важно понимать)
 
@@ -167,7 +167,7 @@ GGTG/
 | Логика рассылки | Mac: `settings/sms_campaign.cpp` + модель `settings/sms_campaign_model.h`; Android: `GgtgSms.kt`, `GgtgSmsRun.kt` |
 | Аккаунты, массовые действия, прокси аккаунта | `settings/bulk_accounts_actions.cpp` / `GgtgAccountManagerActivity.kt`, `GgtgBulk*.kt` |
 | Перенос аккаунтов между устройствами | `settings/ggtg_export.cpp`, `main/session_duplicate.cpp` / `GgtgPackImporter.kt`, `GgtgTdataImport.kt` |
-| ИИ | `core/ggtg_ai.h` (модели, ключи), `settings/ggtg_ai_*.h` (экраны) / `ai/GgtgAiCore.kt` |
+| Панель собеседника (мозг в чате) | `core/ggtg_fake_detector.h` (`ShowFakeDetailsBox`), `core/ggtg_lang.h`, `core/ggtg_replies.h` / `GgtgFakeDetector.kt` |
 | Синхронизация | `core/ggtg_sync*.{h,cpp}` / `GgtgSync.kt`, `GgtgSyncTransport.kt` |
 | Найти файл по смыслу | `docs/FILE_INDEX.md`, граф кода в `tools/graphify-out` |
 

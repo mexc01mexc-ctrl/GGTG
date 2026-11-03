@@ -77,11 +77,7 @@ class GgtgPeerAccountPicker(context: Context) : LinearLayout(context) {
                 setTextColor(Theme.getColor(Theme.key_windowBackgroundWhiteGrayText))
             }
             folderSub[folder] = sub
-            val chevron = TextView(context).apply {
-                text = if (folder in expanded) "▾" else "▸"
-                textSize = 18f
-                setTextColor(Theme.getColor(Theme.key_windowBackgroundWhiteGrayIcon))
-            }
+            val chevron = GgtgUi.chevron(context, folder in expanded)
 
             val header = LinearLayout(context).apply {
                 orientation = HORIZONTAL
@@ -103,7 +99,7 @@ class GgtgPeerAccountPicker(context: Context) : LinearLayout(context) {
                 setOnClickListener {
                     val open = body.visibility != VISIBLE
                     body.visibility = if (open) VISIBLE else GONE
-                    chevron.text = if (open) "▾" else "▸"
+                    GgtgUi.setChevron(chevron, open)
                     if (open) expanded.add(folder) else expanded.remove(folder)
                 }
             }

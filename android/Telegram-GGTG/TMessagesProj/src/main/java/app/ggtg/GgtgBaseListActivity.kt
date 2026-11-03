@@ -311,16 +311,13 @@ class GgtgBaseListActivity(private val baseId: Long, private val isGroups: Boole
 
     private fun showSortDialog() {
         val ctx = context ?: return
-        val items = arrayOf(
-            (if (currentOrder == SortOrder.Base) "● " else "   ") + "Как в базе",
-            (if (currentOrder == SortOrder.Name) "● " else "   ") + "По имени",
-            (if (currentOrder == SortOrder.Username) "● " else "   ") + "По юзернейму",
-            (if (currentOrder == SortOrder.Id) "● " else "   ") + "По ID",
-            (if (currentOrder == SortOrder.Online) "● " else "   ") + "По дате онлайна"
-        )
+        val items = arrayOf("Как в базе", "По имени", "По юзернейму", "По ID", "По дате онлайна")
+        val orders = arrayOf(SortOrder.Base, SortOrder.Name, SortOrder.Username, SortOrder.Id, SortOrder.Online)
+        // The current order is marked with the Telegram check icon.
+        val icons = IntArray(orders.size) { if (orders[it] == currentOrder) org.telegram.messenger.R.drawable.msg_select else 0 }
         org.telegram.ui.ActionBar.AlertDialog.Builder(ctx)
             .setTitle("Сортировка")
-            .setItems(items) { _, which ->
+            .setItems(items, icons) { _, which ->
                 val newOrder = when (which) {
                     0 -> SortOrder.Base
                     1 -> SortOrder.Name
@@ -331,7 +328,7 @@ class GgtgBaseListActivity(private val baseId: Long, private val isGroups: Boole
                 }
                 if (currentOrder != newOrder) {
                     currentOrder = newOrder
-                    sortRowView?.text = "≡  Сортировка: " + sortTitle(currentOrder) + " ▾"
+                    sortRowView?.text = "Сортировка: " + sortTitle(currentOrder)
                     reloadRows()
                 }
             }
@@ -514,7 +511,7 @@ class GgtgBaseListActivity(private val baseId: Long, private val isGroups: Boole
             })
 
         val sortRow = TextView(context).apply {
-            text = "≡  Сортировка: " + sortTitle(currentOrder) + " ▾"
+            text = "Сортировка: " + sortTitle(currentOrder)
             textSize = 14f
             setTypeface(null, Typeface.BOLD)
             setTextColor(Theme.getColor(Theme.key_windowBackgroundWhiteBlueText))
@@ -645,7 +642,7 @@ class GgtgBaseListActivity(private val baseId: Long, private val isGroups: Boole
     private fun mark(row: Row): String {
         if (isGroups || row.username.isEmpty()) return ""
         val r = GgtgDb.findSmsRecord(row.username) ?: return ""
-        return if (r.status == GgtgDb.SmsStatus.Sent) "  ✓ OK" else "  — " + when (r.status) {
+        return if (r.status == GgtgDb.SmsStatus.Sent) "  OK" else "  — " + when (r.status) {
             GgtgDb.SmsStatus.SpamAcc -> "спам-блок аккаунта"
             GgtgDb.SmsStatus.PeerLimit -> "отказ Telegram"
             GgtgDb.SmsStatus.NotFound -> "не найден"

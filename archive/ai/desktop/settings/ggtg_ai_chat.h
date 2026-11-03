@@ -1086,8 +1086,7 @@ inline void ShowAiChatAssistant(
 					for (const auto &[mark, title] : titles) {
 						if (mark == which) {
 							link->setText(
-								(which == state->mode ? u"● "_q : QString())
-									+ title);
+								title);
 						}
 					}
 				}

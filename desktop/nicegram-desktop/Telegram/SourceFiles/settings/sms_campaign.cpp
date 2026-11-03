@@ -8,8 +8,14 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "settings/sms_campaign.h"
 #include "settings/sms_campaign_model.h"
 #include "settings/sms_campaign_widgets.h"
-#include "settings/ggtg_ai_cards.h"
-#include "settings/ggtg_ai_translate.h"
+#include "settings/ggtg_translate.h"
+#include "settings/ggtg_tabs.h"
+#include "data/data_channel.h" // ggtg: used to come with the AI headers
+#include "data/data_chat.h"
+#include "data/data_user.h"
+#include "history/history.h"
+#include "history/history_item.h"
+#include "history/view/history_view_element.h"
 
 #include "api/api_blocked_peers.h"
 #include "api/api_common.h"
@@ -21,9 +27,8 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "base/unixtime.h"
 #include "base/weak_ptr.h"
 #include "core/application.h"
-#include "core/ggtg_ai.h"
-#include "core/ggtg_ai_feedback.h"
-#include "core/ggtg_ai_profile.h"
+#include "core/ggtg_lang.h"
+#include "core/ggtg_replies.h"
 #include "core/ggtg_sms_stats.h"
 #include "core/ggtg_sync_transport.h"
 #include "core/ggtg_fake_detector.h"
@@ -69,10 +74,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "core/ggtg_log.h"
 #include "window/ggtg_click.h"
 #include "window/ggtg_widgets.h"
-#include "settings/ggtg_ai_agent.h"
-#include "settings/ggtg_ai_inbox_box.h"
 #include "core/ggtg_paths.h"
-#include "core/ggtg_ai_profile.h"
 #include <QtCore/QJsonArray>
 #include <QtCore/QSaveFile>
 #include <QtGui/QClipboard>
@@ -458,7 +460,7 @@ struct CampaignState {
 	std::vector<uint64> rotationPromptIds;
 	QPointer<Ui::FlatLabel> rotationLabel;
 
-	// ИИ-ЗАЩИТА АККАУНТОВ
+	// ЗАЩИТА АККАУНТОВ
 	int protectionMode = 1;
 	std::shared_ptr<Ui::RadiobuttonGroup> protectionGroup;
 	QPointer<Ui::Checkbox> nightSleepCheckbox;
@@ -610,7 +612,7 @@ void SaveFormState(not_null<CampaignState*> state) {
 	// profile name, and for an obviously not-a-name ("qqqq", one letter,
 	// "asdf") - "друг" (in the language of the text) unless the template
 	// gave its own [NAME|fallback].
-	const auto greetingName = Core::GgtgAi::CleanPersonName(recipientFirst);
+	const auto greetingName = Core::GgtgLang::CleanPersonName(recipientFirst);
 	auto out = QString();
 	auto last = 0;
 	auto blank = false;
@@ -630,7 +632,7 @@ void SaveFormState(not_null<CampaignState*> state) {
 			: senderLast;
 		auto fallback = match.captured(2);
 		if (which == u"NAME"_q && value.isEmpty() && fallback.isEmpty()) {
-			fallback = Core::GgtgAi::FriendWord(result);
+			fallback = Core::GgtgLang::FriendWord(result);
 		}
 		if (value.isEmpty() && fallback.isEmpty()) {
 			blank = true;
@@ -1730,7 +1732,7 @@ void SendSmsTextMessage(
 	// with its pause, and three times as much with the AI translation (a
 	// model to load, maybe two) - or a long but healthy send was taken for
 	// a lost one.
-	const auto aiNow = Core::GgtgAi::CachedSettings();
+	const auto aiNow = Core::GgtgLang::CachedSettings();
 	const auto extraParts = int(textTemplate.count(u"[SPLIT]"_q));
 	const auto budget = kSmsStepTimeout
 		+ crl::time(extraParts) * crl::time(15'000)
@@ -1867,9 +1869,15 @@ void SendSmsTextMessage(
 			info->photo = user->hasUserpic();
 			info->about = !peer->about().trimmed().isEmpty();
 			info->seen = SeenBucket(user);
-			const auto code = Core::GgtgAi::DetectLanguage(
+			const auto code = Core::GgtgLang::DetectLanguage(
 				user->firstName + ' ' + user->lastName);
-			info->language = (code == u"en"_q) ? u"lat"_q : code;
+			const auto guess = Core::GgtgLang::GuessNameLanguage(
+				user->firstName,
+				user->lastName,
+				user->username());
+			info->language = guess.sure()
+				? guess.code
+				: ((code == u"en"_q) ? u"lat"_q : code);
 		}
 		const auto deliver = [=](const QString &templateToSend) {
 			if (!alive()) {
@@ -1956,12 +1964,12 @@ void SendSmsTextMessage(
 		// Translated once per language for the whole run; when it fails or
 		// takes too long, the template goes out as it is.
 		const auto proceed = [=] {
-			const auto ai = Core::GgtgAi::CachedSettings();
+			const auto ai = Core::GgtgLang::CachedSettings();
 			if (!ai.smsTranslate) {
 				deliver(textTemplate);
 				return;
 			}
-			const auto own = Core::GgtgAi::DetectLanguage(textTemplate);
+			const auto own = Core::GgtgLang::DetectLanguage(textTemplate);
 			auto code = QString();
 			const auto preferredLang = ai.smsTranslateLang.trimmed();
 			if (!preferredLang.isEmpty() && preferredLang != u"auto"_q) {
@@ -1971,35 +1979,38 @@ void SendSmsTextMessage(
 				const auto foreign = [&](const QString &c) {
 					return !c.isEmpty() && c != own;
 				};
-				auto byName = Core::GgtgAi::DetectLanguage(
-					user->firstName + ' ' + user->lastName);
-				if (foreign(byName) && byName != u"en"_q) {
-					code = byName;
+				// The name: its script, or for Latin letters the dictionaries of
+				// surnames and given names (Vietnamese, Korean, Turkish...), with
+				// the language of the group's title as a hint.
+				const auto titleHint = Core::GgtgLang::LanguageFromTitle(groupName);
+				const auto byName = Core::GgtgLang::GuessNameLanguage(
+					user->firstName,
+					user->lastName,
+					user->username(),
+					titleHint);
+				if (byName.sure() && foreign(byName.code)) {
+					code = byName.code;
 				} else {
 					static const auto noiseRe = QRegularExpression(
 						u"(https?://\\S+|www\\.\\S+|\\S+\\.(com|net|org|me|io|ru|kr|cn|jp)\\S*|[@#]\\w+)"_q,
 						QRegularExpression::CaseInsensitiveOption);
 					auto aboutText = peer->about();
 					aboutText.replace(noiseRe, QString());
-					const auto byAbout = Core::GgtgAi::DetectLanguage(aboutText);
+					const auto byAbout = Core::GgtgLang::DetectLanguage(aboutText);
 					if (foreign(byAbout) && byAbout != u"en"_q) {
 						code = byAbout;
 					}
 				}
-				// If name or bio still didn't give a specific non-en language, check group/base title
-				if (code.isEmpty() && !groupName.isEmpty()) {
-					const auto gLower = groupName.toLower();
-					if (gLower.contains(u"коре"_q) || gLower.contains(u"korea"_q) || gLower.contains(u"kr"_q)) {
-						code = u"ko"_q;
-					} else if (gLower.contains(u"кита"_q) || gLower.contains(u"china"_q) || gLower.contains(u"cn"_q)) {
-						code = u"zh-CN"_q;
-					} else if (gLower.contains(u"япон"_q) || gLower.contains(u"japan"_q) || gLower.contains(u"jp"_q)) {
-						code = u"ja"_q;
+				// Neither the name nor the bio gave a language: the title of the group.
+				if (code.isEmpty()) {
+					const auto fromTitle = Core::GgtgLang::LanguageFromTitle(groupName);
+					if (foreign(fromTitle)) {
+						code = fromTitle;
 					}
 				}
 				// If Latin-script text has distinct Spanish/German/French/Turkish words
 				if (code.isEmpty()) {
-					const auto latinLang = Core::GgtgAi::DetectLatinLanguage(peer->about());
+					const auto latinLang = Core::GgtgLang::DetectLatinLanguage(peer->about());
 					if (foreign(latinLang) && latinLang != u"en"_q) {
 						code = latinLang;
 					}
@@ -2010,7 +2021,7 @@ void SendSmsTextMessage(
 				deliver(textTemplate);
 				return;
 			}
-			const auto langObj = Core::GgtgAi::LanguageByCode(code);
+			const auto langObj = Core::GgtgLang::LanguageByCode(code);
 			const auto language = langObj.russian.isEmpty() ? code : langObj.russian;
 			say(u"переводит на "_q + language);
 			const auto settled = std::make_shared<bool>(false);
@@ -2948,7 +2959,7 @@ void SetupLimitsSection(
 	}
 	names.push_back(u"Свой"_q);
 	const auto tabs = addRow(
-		object_ptr<AiTabs>(box, names, 0),
+		object_ptr<GgtgTabs>(box, names, 0),
 		style::margins(
 			st::boxRowPadding.left(),
 			0,
@@ -3776,296 +3787,6 @@ void ShowRotationPicker(
 	}));
 }
 
-// "ИИ-помощник": a local model rewrites, shortens or translates the message
-// template on request. The result is shown first and only goes into the
-// message field when "Вставить" is pressed - nothing is replaced silently.
-// Placeholders ([NAME], {a|b}, [SPLIT]...) are kept as they are.
-void ShowAiTemplateAssistant(
-		not_null<Window::SessionController*> controller,
-		QPointer<Ui::InputField> target) {
-	controller->show(Box([=](not_null<Ui::GenericBox*> box) {
-		box->setTitle(rpl::single(u"ИИ-помощник"_q));
-		box->setWidth(st::boxWideWidth);
-		const auto settings = Core::GgtgAi::Load();
-		if (!settings.enabled || !settings.templateAssistant) {
-			box->addRow(object_ptr<Ui::FlatLabel>(
-				box,
-				u"ИИ-помощник выключен. Подключите модель и включите его в "
-					"разделе «ИИ» окна GGTG."_q,
-				st::boxLabel));
-			box->addButton(rpl::single(u"Закрыть"_q), [=] {
-				box->closeBox();
-			});
-			return;
-		}
-		struct Preset {
-			QString label;
-			QString instruction;
-			QString translateTo;
-			bool picked = false;
-			Ui::RoundButton *plain = nullptr;
-			Ui::RoundButton *active = nullptr;
-		};
-		struct State {
-			QString result;
-			bool busy = false;
-			std::vector<Preset> presets;
-			QPointer<Ui::InputField> instruction;
-			QPointer<Ui::FlatLabel> output;
-		};
-		const auto state = box->lifetime().make_state<State>();
-		const auto source = target ? target->getLastText() : QString();
-		if (source.trimmed().isEmpty()) {
-			box->addRow(object_ptr<Ui::FlatLabel>(
-				box,
-				u"Сначала впишите текст сообщения - помощник будет с ним "
-					"работать."_q,
-				st::boxLabel));
-			box->addButton(rpl::single(u"Закрыть"_q), [=] {
-				box->closeBox();
-			});
-			return;
-		}
-
-		box->addRow(object_ptr<Ui::FlatLabel>(
-			box,
-			u"Выберите одну или несколько команд, например «Короче» и «На "
-				"английский». Перевод выбирается один."_q,
-			st::boxDividerLabel));
-		// The commands: a tap picks or unpicks one (the picked look is a
-		// second, accent-coloured button over the plain one).
-		auto presetsOwned = object_ptr<Ui::RpWidget>(box);
-		const auto presets = presetsOwned.data();
-		const auto addPreset = [=](
-				const QString &label,
-				const QString &instruction,
-				const QString &translateTo = QString()) {
-			state->presets.push_back({
-				.label = label,
-				.instruction = instruction,
-				.translateTo = translateTo,
-			});
-		};
-		addPreset(u"Улучшить"_q, u"Улучшить текст: естественнее и яснее"_q);
-		addPreset(u"Короче"_q, u"Сделать короче, сохранив смысл"_q);
-		addPreset(u"Вежливее"_q, u"Сделать вежливее и дружелюбнее"_q);
-		addPreset(
-			u"Варианты {a|b}"_q,
-			u"Добавить к приветствию и концовке несколько вариантов в "
-				"формате {вариант1|вариант2|вариант3}"_q);
-		// Translation goes to the translator model, after everything else.
-		for (const auto &language : Core::GgtgAi::Languages()) {
-			if (ranges::contains(
-					std::array{
-						u"en"_q, u"ko"_q, u"zh"_q, u"ja"_q, u"ru"_q, u"es"_q,
-					},
-					language.code)) {
-				addPreset(
-					u"На "_q + language.russian,
-					u"Перевести на "_q + language.russian,
-					language.code);
-			}
-		}
-		state->presets.front().picked = true;
-		const auto refresh = [=] {
-			for (const auto &preset : state->presets) {
-				preset.active->setVisible(preset.picked);
-				preset.plain->setVisible(!preset.picked);
-			}
-		};
-		for (auto i = 0; i != int(state->presets.size()); ++i) {
-			auto &preset = state->presets[i];
-			const auto toggle = [=] {
-				auto &chosen = state->presets[i];
-				chosen.picked = !chosen.picked;
-				if (chosen.picked && !chosen.translateTo.isEmpty()) {
-					for (auto &other : state->presets) {
-						if (&other != &chosen && !other.translateTo.isEmpty()) {
-							other.picked = false;
-						}
-					}
-				}
-				refresh();
-			};
-			preset.plain = Ui::CreateChild<Ui::RoundButton>(
-				presets,
-				rpl::single(preset.label),
-				st::ggtgTokenButton);
-			preset.active = Ui::CreateChild<Ui::RoundButton>(
-				presets,
-				rpl::single(preset.label),
-				st::ggtgTokenButtonActive);
-			preset.plain->setClickedCallback(toggle);
-			preset.active->setClickedCallback(toggle);
-		}
-		refresh();
-		presets->widthValue(
-		) | rpl::on_next([=](int width) {
-			const auto gap = style::ConvertScale(6);
-			auto x = 0;
-			auto y = 0;
-			auto lineHeight = 0;
-			for (const auto &preset : state->presets) {
-				const auto w = std::max(
-					preset.plain->width(),
-					preset.active->width());
-				if (x > 0 && x + w > width) {
-					x = 0;
-					y += lineHeight + gap;
-				}
-				preset.plain->moveToLeft(x, y, width);
-				preset.active->moveToLeft(x, y, width);
-				x += w + gap;
-				lineHeight = std::max(lineHeight, preset.plain->height());
-			}
-			presets->resize(width, y + lineHeight);
-		}, presets->lifetime());
-		box->addRow(
-			std::move(presetsOwned),
-			style::margins(
-				st::boxRowPadding.left(),
-				st::defaultVerticalListSkip,
-				st::boxRowPadding.right(),
-				st::defaultVerticalListSkip));
-
-		state->instruction = box->addRow(object_ptr<Ui::InputField>(
-			box,
-			st::defaultInputField,
-			rpl::single(u"Своя команда (необязательно)"_q)));
-
-		state->output = box->addRow(object_ptr<Ui::FlatLabel>(
-			box,
-			u"Результат появится здесь."_q,
-			st::boxLabel));
-		state->output->setSelectable(true);
-
-		const auto run = [=] {
-			if (state->busy) {
-				return;
-			}
-			auto instructions = QStringList();
-			auto translateTo = QString();
-			for (const auto &preset : state->presets) {
-				if (!preset.picked) {
-					continue;
-				} else if (preset.translateTo.isEmpty()) {
-					instructions.push_back(preset.instruction);
-				} else {
-					translateTo = preset.translateTo;
-				}
-			}
-			const auto own = state->instruction
-				? state->instruction->getLastText().trimmed()
-				: QString();
-			if (!own.isEmpty()) {
-				instructions.push_back(own);
-			}
-			if (instructions.isEmpty() && translateTo.isEmpty()) {
-				Ggtg::Notice(box->uiShow(), u"Выберите, что сделать с текстом"_q);
-				return;
-			}
-			state->busy = true;
-			if (const auto label = state->output.data()) {
-				label->setText(u"Думаю..."_q);
-			}
-			const auto finished = crl::guard(box, [=](
-					QString result,
-					QString error) {
-				state->busy = false;
-				if (!error.isEmpty()) {
-					if (const auto label = state->output.data()) {
-						label->setText(u"Не вышло: "_q + error);
-					}
-					return;
-				}
-				state->result = result;
-				if (const auto label = state->output.data()) {
-					label->setText(result);
-				}
-			});
-			// The edits first, then the translation of the edited text by the
-			// translator model (words only, placeholders untouched).
-			const auto translate = [=](QString text) {
-				if (translateTo.isEmpty()) {
-					finished(text, QString());
-					return;
-				}
-				if (const auto label = state->output.data()) {
-					label->setText(u"Перевожу..."_q);
-				}
-				Core::GgtgAi::TranslateTemplate(text, translateTo, finished);
-			};
-			if (instructions.isEmpty()) {
-				translate(source);
-				return;
-			}
-			Core::GgtgAi::Ask(
-				u"Ты помощник по написанию коротких личных сообщений. "
-				"Тебе дают шаблон сообщения и инструкции. Ты ОБЯЗАН "
-				"реально выполнить ВСЕ инструкции: итоговый текст должен "
-				"заметно отличаться от исходного формулировками. Верни "
-				"ТОЛЬКО готовый шаблон: без пояснений, без кавычек, без "
-				"комментариев и заголовков. Служебные части оставь "
-				"символ в символ: [NAME], [SURNAME], [MYNAME], [MYSURNAME], "
-				"[GROUP], [NAME|слово], [SPLIT] и скобки вариантов {a|b|c}. Менять "
-				"можно только обычные слова вокруг них и сами слова внутри "
-				"вариантов. Не добавляй ссылок, цен и обещаний, которых нет "
-				"в исходном тексте."_q
-				+ [] {
-					const auto profile = Core::GgtgAi::Profile::Block(1500);
-					return profile.isEmpty()
-						? QString()
-						: (u"\n\nО пользователе и его деле (его профиль; "
-							"текст должен подходить под это дело, цель и "
-							"аудиторию, соблюдай правила и запреты):\n"_q
-							+ profile);
-				}()
-				+ [] {
-					const auto insights = Core::GgtgSmsStats::LoadInsights();
-					return insights.isEmpty()
-						? QString()
-						: (u"\n\nВыводы из статистики прошлых рассылок "
-							"(учитывай, если подходят к инструкции):\n"_q
-							+ insights.left(1500));
-				}(),
-				u"Инструкции:\n- "_q + instructions.join(u"\n- "_q)
-					+ u"\n\nШаблон:\n"_q + source,
-				crl::guard(box, [=](QString result, QString error) {
-					if (!error.isEmpty() || result.trimmed().isEmpty()) {
-						finished(
-							QString(),
-							error.isEmpty() ? u"пустой ответ"_q : error);
-						return;
-					}
-					translate(result.trimmed());
-				}),
-				0.6,
-				800,
-				Core::GgtgAi::Role::General,
-				QStringList(),
-				true); // The first message people read: the cleverest model.
-		};
-		state->instruction->submits(
-		) | rpl::on_next(run, state->instruction->lifetime());
-		// Every button is always there: a hidden one still takes its place
-		// in the row, which pushed "Закрыть" under the left-hand button.
-		box->addButton(rpl::single(u"Выполнить"_q), run);
-		box->addButton(rpl::single(u"Вставить"_q), [=] {
-			if (state->result.isEmpty()) {
-				Ggtg::Notice(box->uiShow(), u"Сначала нажмите «Выполнить»"_q);
-				return;
-			}
-			if (const auto field = target.data()) {
-				field->setText(state->result);
-			}
-			box->closeBox();
-		});
-		box->addButton(rpl::single(u"Закрыть"_q), [=] {
-			box->closeBox();
-		});
-	}));
-}
-
 void SetupTextSection(
 		not_null<Ui::GenericBox*> box,
 		not_null<Window::SessionController*> controller,
@@ -4205,9 +3926,6 @@ void SetupTextSection(
 			&st::menuIconRestore);
 		(*templatesMenu)->popup(QCursor::pos());
 	});
-	links->add(u"ИИ-помощник"_q, [=] {
-		ShowAiTemplateAssistant(controller, state->messageField);
-	});
 	// Shown only while several saved texts take turns instead of the field.
 	state->rotationLabel = addRow(
 		object_ptr<Ui::FlatLabel>(box, QString(), st::boxDividerLabel),
@@ -4240,7 +3958,7 @@ void SetupTextSection(
 	Ui::AddSkip(content);
 
 	// Each recipient gets the template in their own language (Free Google Translate).
-	const auto aiSettings = Core::GgtgAi::Load();
+	const auto aiSettings = Core::GgtgLang::Load();
 	const auto translateCheckbox = AddRowWithInfo(
 		box,
 		content,
@@ -4252,7 +3970,7 @@ void SetupTextSection(
 			st::defaultToggle),
 		u"Бесплатный перевод шаблона на язык получателя через Google Translate: "
 			"корейцу по-корейски, китайцу по-китайски. Работает быстро, надёжно и "
-			"без расхода ключей ИИ. [NAME], [GROUP], [SPLIT] и {a|b} сохраняются без изменений."_q);
+			"без ключей и лимитов. [NAME], [GROUP], [SPLIT] и {a|b} сохраняются без изменений."_q);
 
 	struct LangOption {
 		QString code;
@@ -4310,25 +4028,25 @@ void SetupTextSection(
 
 	langGroup->setChangedCallback([=](int val) {
 		if (val >= 0 && val < int(langOptions.size())) {
-			auto s = Core::GgtgAi::Load();
+			auto s = Core::GgtgLang::Load();
 			s.smsTranslateLang = langOptions[val].code;
-			Core::GgtgAi::Save(s);
+			Core::GgtgLang::Save(s);
 		}
 	});
 
 	translateCheckbox->checkedChanges(
 	) | rpl::on_next([=](bool checked) {
-		auto settings = Core::GgtgAi::Load();
+		auto settings = Core::GgtgLang::Load();
 		settings.smsTranslate = checked;
-		Core::GgtgAi::Save(settings);
+		Core::GgtgLang::Save(settings);
 		langWrap->toggle(checked, anim::type::normal);
 	}, translateCheckbox->lifetime());
 	Ui::AddSkip(content);
 }
 
-// ---- 4. "ИИ-ЗАЩИТА АККАУНТОВ": 3 режима, ночной сон по гео, эмуляция опечаток ----
+// ---- 4. "ЗАЩИТА АККАУНТОВ": 3 режима, ночной сон по гео, эмуляция опечаток ----
 
-void SetupAiProtectionSection(
+void SetupProtectionSection(
 		not_null<Ui::GenericBox*> box,
 		not_null<CampaignState*> state,
 		not_null<Ui::VerticalLayout*> content) {
@@ -6535,10 +6253,10 @@ object_ptr<Ui::BoxContent> MakeSmsCampaignSetupBox(
 			controller,
 			state,
 			step(2, u"Сообщение"_q, state->textSummary.value()));
-		SetupAiProtectionSection(
+		SetupProtectionSection(
 			box,
 			state,
-			step(3, u"ИИ-Защита"_q, state->protectionSummary.value()));
+			step(3, u"Защита"_q, state->protectionSummary.value()));
 		SetupLimitsSection(
 			box,
 			state,
@@ -7273,7 +6991,7 @@ namespace {
 	} else if (code == u"lat"_q) {
 		return u"латиница"_q;
 	}
-	return Core::GgtgAi::LanguageByCode(code).russian;
+	return Core::GgtgLang::LanguageByCode(code).russian;
 }
 
 // Did the person write back, and what did they say first? Judged by what
@@ -7322,7 +7040,7 @@ namespace {
 // what the user marked as a success. The first words of each answer are kept
 // for the sorting, so they outlive the chat itself.
 void FillReplies(std::vector<Core::GgtgSmsStats::Attempt> &attempts) {
-	namespace Feedback = Core::GgtgAi::Feedback;
+	namespace Feedback = Core::GgtgReplies;
 	auto replies = Feedback::LoadReplies();
 	const auto successes = Feedback::LoadSuccesses();
 	auto changed = false;
@@ -7391,13 +7109,13 @@ void ShowSmsStatsBox(std::shared_ptr<Ui::Show> show) {
 		// Answers sorted by meaning (interest, a question, a refusal,
 		// hostility): the share of good answers, not just of answers, is
 		// what a mailing is judged by.
-		const auto unsorted = Core::GgtgAi::Feedback::UnsortedReplies();
+		const auto unsorted = Core::GgtgReplies::UnsortedReplies();
 		if (!unsorted.empty()) {
 			const auto sorting = std::make_shared<bool>(false);
 			const auto sort = box->addRow(
 				object_ptr<Ui::LinkButton>(
 					box,
-					u"Определить типы ответов (ИИ): "_q
+					u"Определить типы ответов: "_q
 						+ QString::number(unsorted.size()) + u" шт."_q),
 				st::boxRowPadding);
 			sort->setClickedCallback([=] {
@@ -7405,9 +7123,9 @@ void ShowSmsStatsBox(std::shared_ptr<Ui::Show> show) {
 					return;
 				}
 				Ggtg::Notice(box->uiShow(), 
-					u"ИИ читает ответы и определяет, интерес это, вопрос "
+					u"Определяю по словам: интерес, вопрос "
 					"или отказ..."_q);
-				Core::GgtgAi::Feedback::ClassifyReplies(
+				Core::GgtgReplies::ClassifyReplies(
 					unsorted,
 					crl::guard(box, [=](int sorted, QString error) {
 						*sorting = false;
@@ -7480,48 +7198,6 @@ void ShowSmsStatsBox(std::shared_ptr<Ui::Show> show) {
 				errors->setSelectable(true);
 			}
 		}
-		const auto insights = box->addRow(object_ptr<Ui::FlatLabel>(
-			box,
-			[] {
-				const auto saved = Core::GgtgSmsStats::LoadInsights();
-				return saved.isEmpty()
-					? QString()
-					: (u"Прошлые выводы ИИ:\n"_q + saved);
-			}(),
-			st::boxLabel));
-		insights->setSelectable(true);
-		const auto busy = std::make_shared<bool>(false);
-		box->addButton(rpl::single(u"Выводы ИИ"_q), [=] {
-			if (report.isEmpty()) {
-				Ggtg::Notice(box->uiShow(), u"Пока нечего разбирать"_q);
-				return;
-			} else if (std::exchange(*busy, true)) {
-				return;
-			}
-			insights->setText(u"ИИ разбирает статистику..."_q);
-			Core::GgtgAi::Ask(
-				u"Ты аналитик рассылок личных сообщений в Telegram. Тебе "
-				"дают статистику отправок. Дай 5-8 коротких конкретных "
-				"выводов и советов по-русски, списком через «- »: что "
-				"повышает доставку и ответы, что ведёт к отказам Telegram (PEER_FLOOD) и спам-блоку "
-				"аккаунтов, какие страны номеров, аккаунты, языки, время, "
-				"шаблоны, перевод и стикер работают лучше или хуже. "
-				"Опирайся только на цифры. Если в группе меньше 10 попыток, "
-				"так и скажи, что данных мало. Без вступлений."_q,
-				report.left(12000),
-				crl::guard(box, [=](QString result, QString error) {
-					*busy = false;
-					if (!error.isEmpty()) {
-						insights->setText(u"Не вышло: "_q + error);
-						return;
-					}
-					Core::GgtgSmsStats::SaveInsights(result);
-					insights->setText(u"Выводы ИИ (запомнены, помощник "
-						"текста их учитывает):\n"_q + result.trimmed());
-				}),
-				0.3,
-				900);
-		});
 		box->addButton(rpl::single(u"Закрыть"_q), [=] { box->closeBox(); });
 		box->addLeftButton(rpl::single(u"Копировать отчёт"_q), [=] {
 			QGuiApplication::clipboard()->setText(report);
@@ -7529,7 +7205,7 @@ void ShowSmsStatsBox(std::shared_ptr<Ui::Show> show) {
 		});
 		box->addLeftButton(rpl::single(u"Очистить"_q), [=] {
 			box->uiShow()->show(Ui::MakeConfirmBox({
-				.text = u"Удалить всю статистику рассылок и выводы ИИ?"_q,
+				.text = u"Удалить всю статистику рассылок?"_q,
 				.confirmed = [=](Fn<void()> &&close) {
 					close();
 					Core::GgtgSmsStats::Clear();
@@ -7669,12 +7345,12 @@ void AddToFunnel(Funnel &f, const Core::GgtgSmsStats::Attempt &a) {
 		+ QString::number(f.positive);
 }
 
-// "Определить типы ответов (ИИ): N шт." - shown while some answers are
+// "Определить типы ответов: N шт." - shown while some answers are
 // not sorted yet; `reload` rebuilds the screen once they are.
 void AddSortRepliesLink(
 		not_null<Ui::GenericBox*> box,
 		Fn<void()> reload) {
-	const auto unsorted = Core::GgtgAi::Feedback::UnsortedReplies();
+	const auto unsorted = Core::GgtgReplies::UnsortedReplies();
 	if (unsorted.empty()) {
 		return;
 	}
@@ -7682,7 +7358,7 @@ void AddSortRepliesLink(
 	const auto sort = box->addRow(
 		object_ptr<Ui::LinkButton>(
 			box,
-			u"Определить типы ответов (ИИ): "_q
+			u"Определить типы ответов: "_q
 				+ QString::number(unsorted.size()) + u" шт."_q),
 		st::boxRowPadding);
 	sort->setClickedCallback([=] {
@@ -7690,9 +7366,9 @@ void AddSortRepliesLink(
 			return;
 		}
 		Ggtg::Notice(box->uiShow(), 
-			u"ИИ читает ответы и определяет, интерес это, вопрос "
+			u"Определяю по словам: интерес, вопрос "
 			"или отказ..."_q);
-		Core::GgtgAi::Feedback::ClassifyReplies(
+		Core::GgtgReplies::ClassifyReplies(
 			unsorted,
 			crl::guard(box, [=](int sorted, QString error) {
 				*sorting = false;
@@ -7898,98 +7574,10 @@ object_ptr<Ui::BoxContent> MakeSmsResultsBoxStandalone() {
 			full->setClickedCallback([=] {
 				ShowSmsStatsBox(box->uiShow());
 			});
-			const auto ask = wrap->add(
-				object_ptr<Ui::LinkButton>(
-					wrap,
-					u"Разобрать с ИИ-агентом..."_q),
-				st::boxRowPadding);
-			ask->setClickedCallback([=] {
-				ShowAiAgent(box->uiShow());
-			});
 			Ui::AddSkip(wrap);
 		};
 		(*rebuild)();
 	});
-}
-
-// "Предложить ответ (ИИ)": a draft answer to what the person wrote,
-// in the user's own style and with what the AI knows about their business.
-void ShowAiReplyDraft(
-		std::shared_ptr<Ui::Show> show,
-		const QString &username,
-		const QString &theirText) {
-	show->show(Box([=](not_null<Ui::GenericBox*> box) {
-		box->setTitle(rpl::single(u"Ответ для @"_q + username));
-		box->setWidth(st::boxWideWidth);
-		const auto label = box->addRow(object_ptr<Ui::FlatLabel>(
-			box,
-			u"ИИ пишет ответ..."_q,
-			st::boxLabel));
-		label->setSelectable(true);
-		const auto advice = Core::GgtgAi::Feedback::SuggestedAction(
-			Core::GgtgAi::Feedback::ReplyOfUsername(username).kind);
-		if (!advice.isEmpty()) {
-			box->addRow(
-				object_ptr<Ui::FlatLabel>(box, advice, st::boxDividerLabel),
-				st::boxRowPadding);
-		}
-		const auto draft = std::make_shared<QString>();
-		box->addButton(rpl::single(u"Копировать"_q), [=] {
-			if (draft->isEmpty()) {
-				return;
-			}
-			QGuiApplication::clipboard()->setText(*draft);
-			Ggtg::Notice(box->uiShow(), u"Скопировано"_q);
-		}, st::defaultActiveButton);
-		box->addButton(rpl::single(u"Закрыть"_q), [=] { box->closeBox(); });
-		Core::GgtgAi::Profile::WarmFor(
-			theirText,
-			[=] {
-				Core::GgtgAi::Ask(
-				u"Ты помогаешь продавцу ответить человеку, который ответил на "
-				"его рассылку в Telegram. Напиши короткий живой ответ "
-				"(1-3 предложения) на языке собеседника, по делу, без "
-				"давления; если он задал вопрос - ответь на него, если "
-				"интересуется - предложи следующий шаг. Только текст ответа. "
-				"Что известно о продавце и его деле:\n"_q
-					+ Core::GgtgAi::Profile::Block(1500, theirText)
-					+ [&] {
-						const auto materials
-							= Core::GgtgAi::Knowledge::Block(2500, theirText);
-						return materials.isEmpty()
-							? QString()
-							: (u"\n\nИз его материалов (опирайся как на факты, "
-								"ничего не выдумывай сверх них):\n"_q
-								+ materials);
-					}(),
-				u"Человек написал: "_q + theirText,
-				crl::guard(box, [=](QString result, QString error) {
-					if (!error.isEmpty()) {
-						label->setText(u"Не вышло: "_q + error);
-						return;
-					}
-					*draft = result.trimmed();
-					// Nothing is invented here: a link, name or number that is
-					// neither in their message nor in what the assistant knows
-					// of the seller is pointed out before it is sent.
-					const auto invented = Core::GgtgAi::UngroundedFacts(
-						*draft,
-						theirText
-							+ Core::GgtgAi::Profile::Block(4000)
-							+ Core::GgtgAi::Knowledge::AllText());
-					label->setText(invented.isEmpty()
-						? *draft
-						: (*draft + u"\n\nПроверьте, этого нет в вашем "
-							"профиле и в сообщении человека: "_q
-							+ invented.join(u", "_q)));
-				}),
-				0.6,
-				400,
-				Core::GgtgAi::Role::General,
-				QStringList(),
-				true);
-			});
-	}));
 }
 
 object_ptr<Ui::BoxContent> MakeSmsRepliesBox(
@@ -8007,7 +7595,7 @@ object_ptr<Ui::BoxContent> MakeSmsRepliesBox(
 		*rebuild = [=] {
 			const Ggtg::ScrollKeeper keepScroll(wrap);
 			wrap->clear();
-			namespace Feedback = Core::GgtgAi::Feedback;
+			namespace Feedback = Core::GgtgReplies;
 			auto attempts = Core::GgtgSmsStats::Load();
 			FillReplies(attempts);
 			const auto replies = Feedback::LoadReplies();
@@ -8104,12 +7692,6 @@ object_ptr<Ui::BoxContent> MakeSmsRepliesBox(
 							});
 						},
 						&st::menuIconProfile);
-					(*menu)->addAction(
-						u"Предложить ответ (ИИ)"_q,
-						[=] {
-							ShowAiReplyDraft(box->uiShow(), username, text);
-						},
-						&st::menuIconBot);
 					(*menu)->addAction(
 						success
 							? u"Снять отметку «Успех»"_q

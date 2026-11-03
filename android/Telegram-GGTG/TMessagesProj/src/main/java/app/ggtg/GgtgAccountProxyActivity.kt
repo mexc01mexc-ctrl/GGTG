@@ -104,6 +104,7 @@ class GgtgAccountProxyActivity : BaseFragment(), NotificationCenter.Notification
         countryRow.addView(GgtgUi.body(context, "Изменить", 13f).apply { setTextColor(Theme.getColor(Theme.key_windowBackgroundWhiteGrayText)) })
         countryRow.setOnClickListener {
             val act = org.telegram.ui.CountrySelectActivity(true)
+            act.setGgtgPinning(true)
             act.setCountrySelectActivityDelegate { country ->
                 selectedCountryIso = country.shortname
                 selectedCountryName = "${country.name} (+${country.code})"

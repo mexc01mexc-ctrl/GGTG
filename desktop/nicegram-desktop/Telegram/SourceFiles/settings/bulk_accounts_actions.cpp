@@ -36,7 +36,8 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "data/data_user.h"
 #include "data/data_peer_values.h"
 #include "data/account_spam_status.h"
-#include "core/ggtg_ai_feedback.h"
+#include "core/ggtg_replies.h"
+#include "core/ggtg_lang.h"
 #include "core/ggtg_name_sort.h"
 #include "core/ggtg_fake_detector.h"
 #include "data/scraped_members_db.h"
@@ -88,6 +89,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "styles/palette.h"
 #include "styles/style_layers.h"
 #include "styles/style_window_main_menu.h"
+#include "styles/style_media_player.h"
 #include "styles/style_menu_icons.h"
 #include "styles/style_widgets.h"
 
@@ -657,13 +659,13 @@ struct BulkRunState {
 };
 
 [[nodiscard]] rpl::variable<BulkActionIndicator> &BulkIndicatorState() {
-	static auto result = rpl::variable<BulkActionIndicator>(
+	static auto &result = *new rpl::variable<BulkActionIndicator>( // ggtg: leaked, no exit() destructor
 		BulkActionIndicator::None);
 	return result;
 }
 
 [[nodiscard]] std::shared_ptr<BulkRunState> &CurrentBulkRun() {
-	static auto result = std::shared_ptr<BulkRunState>();
+	static auto &result = *new std::shared_ptr<BulkRunState>(); // ggtg: leaked, no exit() destructor
 	return result;
 }
 
@@ -2571,7 +2573,7 @@ protected:
 		}
 
 		if (!_details.isEmpty() && curX < textLeft + avail) {
-			p.setPen((_details == u"✓ OK"_q) ? st::boxTextFgGood : st::windowSubTextFg);
+			p.setPen((_details == u"OK"_q) ? st::boxTextFgGood : st::windowSubTextFg);
 			const auto maxW = std::max(0, avail - (curX - textLeft));
 			p.drawTextLeft(curX, line3Y, maxW, st::normalFont->elided(_details, maxW));
 		}
@@ -3152,7 +3154,7 @@ void ShowClickableUsernamesBox(
 				: nullptr;
 
 			const auto updateSortBtn = [=] {
-				sortBtn->setText(u"≡  Сортировка: "_q + sortTitles.at(*order) + u" ▾"_q);
+				sortBtn->setText(u"Сортировка: "_q + sortTitles.at(*order));
 			};
 			updateSortBtn();
 
@@ -3180,15 +3182,14 @@ void ShowClickableUsernamesBox(
 				};
 				for (const auto choice : choices) {
 					const auto isCurrent = (*order == choice);
-					const auto label = (isCurrent ? u"● "_q : u"   "_q) + sortTitles.at(choice);
-					(*sortMenu)->addAction(label, [=] {
+					(*sortMenu)->addAction(sortTitles.at(choice), [=] {
 						if (*order != choice) {
 							*order = choice;
 							updateSortBtn();
 							relayoutControls();
 							(*rebuild)();
 						}
-					}, &st::menuIconReorder);
+					}, isCurrent ? &st::mediaPlayerMenuCheck : &st::menuIconReorder);
 				}
 				(*sortMenu)->popup(sortBtn->mapToGlobal(QPoint(0, sortBtn->height())));
 			});
@@ -3356,7 +3357,7 @@ void ShowClickableUsernamesBox(
 						return extraMark(username);
 					} else if (const auto record = Data::FindSmsSendRecord(username)) {
 						return (record->status == Data::SmsSendStatus::Sent)
-							? u"✓ OK"_q
+							? u"OK"_q
 							: (u"— "_q + SentStatusText(record->status)
 								+ (record->note.isEmpty()
 									? QString()
@@ -4045,9 +4046,21 @@ void ShowEditBaseBox(
 				auto unknown = QStringList();
 				for (const auto &username : usernames) {
 					const auto name = Data::KnownPeerName(username);
-					const auto code = name.isEmpty()
-						? QString()
-						: Core::GgtgAi::DetectLanguage(name);
+					// The script of the name, and for Latin letters the name
+					// dictionaries (a Vietnamese or Korean name in Latin) with the
+					// base's title as a hint.
+					const auto guess = name.isEmpty()
+						? Core::GgtgLang::LanguageGuess()
+						: Core::GgtgLang::GuessNameLanguage(
+							name,
+							QString(),
+							username,
+							Core::GgtgLang::LanguageFromTitle(title));
+					const auto code = guess.sure()
+						? guess.code
+						: (name.isEmpty()
+							? QString()
+							: Core::GgtgLang::DetectLanguage(name));
 					if (code.isEmpty()) {
 						unknown.push_back(username);
 					} else {
@@ -4068,7 +4081,7 @@ void ShowEditBaseBox(
 				const auto label = [](const QString &code) {
 					return (code == u"en"_q)
 						? u"латиница"_q
-						: Core::GgtgAi::LanguageByCode(code).russian;
+						: Core::GgtgLang::LanguageByCode(code).russian;
 				};
 				// One checkbox per language found (all ticked at first): only
 				// the ticked ones get a base of their own, the people of the
@@ -4362,7 +4375,7 @@ void ShowEditGroupsBaseBox(
 									meta.title,
 									username,
 									name)) {
-								return u"  ✓ есть в получателях"_q;
+								return u"  есть в получателях"_q;
 							}
 						}
 						return QString();
@@ -5113,7 +5126,7 @@ object_ptr<Ui::BoxContent> MakeScrapedGroupsDbBox(
 
 			// Who has answered, from the saved answers ("sender:name").
 			auto answered = base::flat_set<QString>();
-			for (const auto &[key, reply] : Core::GgtgAi::Feedback::LoadReplies()) {
+			for (const auto &[key, reply] : Core::GgtgReplies::LoadReplies()) {
 				answered.emplace(key.mid(key.indexOf(':') + 1));
 			}
 			// Per base: the registry already knows which base each
@@ -5307,7 +5320,7 @@ object_ptr<Ui::BoxContent> MakeScrapedGroupsDbBox(
 		if (actions.searchGroups) {
 			addBarButton(u"Поиск групп"_q, actions.searchGroups);
 		}
-		addBarButton(u"Ещё ▾"_q, showMore);
+		addBarButton(u"Ещё"_q, showMore);
 		bar->widthValue(
 		) | rpl::on_next([=](int width) {
 			const auto skip = st::defaultVerticalListSkip;
@@ -5327,7 +5340,7 @@ object_ptr<Ui::BoxContent> MakeScrapedGroupsDbBox(
 		}, bar->lifetime());
 		Ui::AddSkip(box->verticalLayout());
 		box->addRow(object_ptr<Ggtg::ActionRow>(
-			box, sortText->value(), u"≡"_q, &st::menuIconReorder)
+			box, sortText->value(), QString(), &st::menuIconReorder)
 		)->setClickedCallback([=] {
 			BaseSortMode() = (BaseSortMode() + 1) % 4;
 			*sortText = sortLabel(BaseSortMode());
@@ -5507,7 +5520,7 @@ void ShowBulkProxyBox(
 namespace {
 
 [[nodiscard]] rpl::event_stream<> &TrashChangesStream() {
-	static auto result = rpl::event_stream<>();
+	static auto &result = *new rpl::event_stream<>(); // ggtg: leaked, no exit() destructor
 	return result;
 }
 
@@ -10485,12 +10498,11 @@ object_ptr<Ui::BoxContent> MakeAccountManagerBox(
 			}
 			for (const auto &folder : folders) {
 				const auto isCurrent = (account->folderTag() == folder);
-				const auto label = (isCurrent ? u"✓ "_q : u"   "_q) + folder;
-				(*folderMenu)->addAction(label, [=] {
+				(*folderMenu)->addAction(folder, [=] {
 					account->setFolderTag(folder);
 					state->rebuildCards();
 					state->rebuildTable();
-				});
+				}, isCurrent ? &st::mediaPlayerMenuCheck : nullptr);
 			}
 			(*folderMenu)->addAction(u"Без папки"_q, [=] {
 				account->setFolderTag(QString());
@@ -10522,7 +10534,7 @@ object_ptr<Ui::BoxContent> MakeAccountManagerBox(
 						});
 					});
 				} else {
-					menu->addAction(u"✓ Активен сейчас"_q, [] {})->setEnabled(false);
+					menu->addAction(u"Активен сейчас"_q, [] {}, &st::mediaPlayerMenuCheck)->setEnabled(false);
 				}
 			}
 
@@ -10676,13 +10688,12 @@ object_ptr<Ui::BoxContent> MakeAccountManagerBox(
 
 			const auto addSortAction = [&](const QString &title, AccountSortMode mode) {
 				const auto isCurrent = (state->sortMode == mode);
-				const auto text = (isCurrent ? u"● "_q : u"   "_q) + title;
-				(*headerMenu)->addAction(text, [=] {
+				(*headerMenu)->addAction(title, [=] {
 					state->sortMode = mode;
 					GlobalSavedManagerFilter().sortMode = mode;
 					state->header->setSortMode(mode);
 					state->rebuildTable();
-				});
+				}, isCurrent ? &st::mediaPlayerMenuCheck : nullptr);
 			};
 
 			addSortAction(u"По номеру (1 → 9)"_q, AccountSortMode::NumberAsc);
@@ -11568,7 +11579,7 @@ void RebuildAccountAccordion(
 			+ style::ConvertScale(12);
 		const auto label = Ui::CreateChild<Ui::FlatLabel>(
 			header,
-			(expanded ? u"▾ "_q : u"▸ "_q) + name
+			name
 				+ u" — "_q + QString::number(accounts.size()),
 			st::boxLabel);
 		label->setAttribute(Qt::WA_TransparentForMouseEvents);
@@ -12268,6 +12279,7 @@ void RestoreFromStoredSession(
 
 void AddAccountPicker(
 		not_null<Ui::GenericBox*> box,
+		not_null<Ui::VerticalLayout*> container,
 		not_null<AccountPickerState*> state,
 		const QString &emptyText) {
 	const auto refresh = [=] {
@@ -12290,8 +12302,9 @@ void AddAccountPicker(
 				: emptyText,
 		});
 	};
-	box->addRow(object_ptr<Ggtg::ActionRow>(
-		box, state->selectAllText.value(), u"✓"_q, &st::menuIconSelect)
+	container->add(object_ptr<Ggtg::ActionRow>(
+		container, state->selectAllText.value(), QString(), &st::menuIconSelect),
+		st::boxRowPadding
 	)->setClickedCallback([=] {
 		const auto select = state->selected.empty();
 		for (const auto &account : Core::App().domain().orderedAccounts()) {
@@ -12307,16 +12320,25 @@ void AddAccountPicker(
 		rebuild();
 		refresh();
 	});
-	state->accordion = box->addRow(object_ptr<Ui::VerticalLayout>(box));
+	state->accordion = container->add(
+		object_ptr<Ui::VerticalLayout>(container),
+		st::boxRowPadding);
 	rebuild();
-	state->selectedLabel = box->addRow(
-		object_ptr<Ui::FlatLabel>(box, QString(), st::boxLabel),
+	state->selectedLabel = container->add(
+		object_ptr<Ui::FlatLabel>(container, QString(), st::boxLabel),
 		style::margins(
 			st::boxRowPadding.left(),
 			st::defaultVerticalListSkip,
 			st::boxRowPadding.right(),
 			st::defaultVerticalListSkip));
 	refresh();
+}
+
+void AddAccountPicker(
+		not_null<Ui::GenericBox*> box,
+		not_null<AccountPickerState*> state,
+		const QString &emptyText) {
+	AddAccountPicker(box, box->verticalLayout(), state, emptyText);
 }
 
 Window::SessionController *CurrentSessionController(

@@ -205,6 +205,41 @@ object GgtgUi {
             colorFilter = android.graphics.PorterDuffColorFilter(tint, android.graphics.PorterDuff.Mode.MULTIPLY)
         }
 
+    /** Telegram's expand / collapse arrows; replaces the old text glyphs of folders and folded blocks. */
+    private fun chevronRes(open: Boolean) =
+        if (open) org.telegram.messenger.R.drawable.arrow_more else org.telegram.messenger.R.drawable.msg_arrowright
+
+    fun chevron(context: Context, open: Boolean, tint: Int = color(Theme.key_windowBackgroundWhiteGrayIcon)): android.widget.ImageView =
+        android.widget.ImageView(context).apply {
+            scaleType = android.widget.ImageView.ScaleType.CENTER
+            setImageDrawable(icon(context, chevronRes(open), tint))
+            tag = tint
+        }
+
+    fun setChevron(view: android.widget.ImageView, open: Boolean) {
+        val tint = (view.tag as? Int) ?: color(Theme.key_windowBackgroundWhiteGrayIcon)
+        view.setImageDrawable(icon(view.context, chevronRes(open), tint))
+    }
+
+    /** The arrow at the end of a text view (after any leading icon it already has). */
+    fun trailingChevron(view: TextView, open: Boolean): TextView = view.apply {
+        val d = icon(context, chevronRes(open), color(Theme.key_windowBackgroundWhiteGrayIcon))
+        d.setBounds(0, 0, dp(18f), dp(18f))
+        setCompoundDrawablesRelative(compoundDrawablesRelative[0], null, d, null)
+        compoundDrawablePadding = dp(8f)
+    }
+
+    /** The Telegram check icon at the end of the chosen row of a list (instead of a «●» / «○» prefix). */
+    fun markSelected(view: TextView, selected: Boolean): TextView = view.apply {
+        if (selected) {
+            val d = icon(context, org.telegram.messenger.R.drawable.msg_select, accent)
+            d.setBounds(0, 0, dp(20f), dp(20f))
+            setCompoundDrawablesRelative(null, null, d, null)
+        } else {
+            setCompoundDrawablesRelative(null, null, null, null)
+        }
+    }
+
     /** The «Корзина» icon (Telegram's trash can) set as the leading icon of a text view. */
     fun withTrashIcon(view: TextView, tint: Int, sizeDp: Float = 18f): TextView = view.apply {
         val d = icon(context, org.telegram.messenger.R.drawable.msg_delete, tint)

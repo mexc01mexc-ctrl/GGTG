@@ -2278,6 +2278,7 @@ object GgtgRegistration {
 
                 if (cancelled.get()) return false
 
+                var signedUpNow = false // a new account was created (not a sign-in): its id and time calibrate the age estimate
                 var auth = signed as? TLRPC.TL_auth_authorization
 
                 if (signErr != null) {
@@ -2311,6 +2312,7 @@ object GgtgRegistration {
                                 return false
                             }
                             auth = signedUp as? TLRPC.TL_auth_authorization
+                            if (auth != null) signedUpNow = true
                         }
                         "SESSION_PASSWORD_NEEDED" -> {
                             if (config.reset2faOnOccupied) {
@@ -2368,6 +2370,7 @@ object GgtgRegistration {
                 if (final2fa.isNotEmpty()) {
                     UserConfig.getInstance(slot).ncgTwoFactor = final2fa
                     GgtgTwoFaStore.save(user.id, final2fa)
+                    if (signedUpNow) GgtgIdDate.calibrate(user.id, System.currentTimeMillis() / 1000L)
                     log("[Поток $threadId] Пароль 2FA установлен: $final2fa (сохранён в хранилище приложения)")
                 }
 
@@ -2775,7 +2778,8 @@ object GgtgRegistration {
                         phone_code = code.trim()
                     }, flags, ConnectionsManager.DEFAULT_DATACENTER_ID, "signIn") ?: (null to null)
 
-                    var auth = signed as? TLRPC.TL_auth_authorization
+                    var signedUpNow = false // a new account was created (not a sign-in): its id and time calibrate the age estimate
+                var auth = signed as? TLRPC.TL_auth_authorization
 
                     if (signErr != null) {
                         when (signErr.text) {
@@ -2810,6 +2814,7 @@ object GgtgRegistration {
                                     return@launch
                                 }
                                 auth = signedUp as? TLRPC.TL_auth_authorization
+                            if (auth != null) signedUpNow = true
                             }
                             else -> {
                                 log("Ошибка входа: ${signErr.text}")
@@ -2839,6 +2844,7 @@ object GgtgRegistration {
                     if (final2fa.isNotEmpty()) {
                         UserConfig.getInstance(slot).ncgTwoFactor = final2fa
                         GgtgTwoFaStore.save(user.id, final2fa)
+                    if (signedUpNow) GgtgIdDate.calibrate(user.id, System.currentTimeMillis() / 1000L)
                         log("Пароль 2FA установлен: $final2fa")
                     }
 

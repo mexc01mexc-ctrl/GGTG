@@ -11,7 +11,6 @@
 #include "core/file_utilities.h"
 #include "core/ggtg_paths.h"
 #include "core/ggtg_log.h"
-#include "core/ggtg_ai.h"
 #include "core/process_manager.h"
 #include "data/data_histories.h"
 #include "data/data_session.h"
@@ -332,7 +331,7 @@ struct WarmupConfig {
 // -----------------------------------------------------------------------------
 
 inline rpl::variable<WarmupIndicator> &WarmupIndicatorVariable() {
-	static auto variable = rpl::variable<WarmupIndicator>(WarmupIndicator::None);
+	static auto &variable = *new rpl::variable<WarmupIndicator>(WarmupIndicator::None); // ggtg: leaked, no exit() destructor
 	return variable;
 }
 
@@ -466,7 +465,7 @@ private:
 	void processNextAccount() {
 		if (_cancelled) return;
 		if (_currentStep >= int(_accounts.size())) {
-			log(u"✓ Все аккаунты успешно прогреты!"_q);
+			log(u"Все аккаунты успешно прогреты!"_q);
 			finish(true);
 			return;
 		}
@@ -479,7 +478,7 @@ private:
 
 		const auto name = account->sessionExists()
 			? account->session().user()->name()
-			: u"Аккаунт %1"_q.arg(account->session().userId().bare);
+			: u"Аккаунт без сессии"_q; // ggtg: session() asserts when there is none
 		log(u"--- Прогрев: %1 (%2 из %3) ---"_q.arg(name).arg(_currentStep).arg(_totalSteps));
 
 		if (!account->sessionExists()) {
@@ -538,7 +537,7 @@ private:
 					0,
 					*joinsAcc);
 				const auto st = GetAccountWarmupStats(account);
-				log(u"✓ Аккаунт прогрет. Новый Траст: %1% (Прочитано постов: %2, Реакций: %3, Подписок: %4)"_q
+				log(u"Аккаунт прогрет. Новый Траст: %1% (Прочитано постов: %2, Реакций: %3, Подписок: %4)"_q
 					.arg(st.trustScore)
 					.arg(st.postsRead)
 					.arg(st.reactionsGiven)
@@ -554,6 +553,11 @@ private:
 			const auto openDelay = QRandomGenerator::global()->bounded(3000, 6000);
 			delayCall(openDelay, [=, this] {
 				if (_cancelled) { done(); return; }
+				if (!Main::AccountHasSession(account)) { // ggtg: logged out during the pause
+					log(u"Аккаунт вышел во время прогрева, пропуск."_q);
+					done();
+					return;
+				}
 				log(u"Открытие канала @%1..."_q.arg(chUsername));
 
 				const auto api = static_cast<MTP::Sender*>(&account->session().api());
@@ -663,7 +667,7 @@ private:
 													)).done([=, this](const MTPUpdates &) {
 														auto self6 = weak.lock();
 														if (!self6 || self6->isCancelled()) return;
-														log(u"✓ Поставлена реакция %1 на пост в @%2"_q.arg(pickedEmoji).arg(chUsername));
+														log(u"Поставлена реакция %1 на пост в @%2"_q.arg(pickedEmoji).arg(chUsername));
 														(*reactionsAcc)++;
 													}).send();
 												});
@@ -691,7 +695,7 @@ private:
 										)).done([=, this](const MTPmessages_ChatInviteJoinResult &) {
 											auto self3 = weak.lock();
 											if (!self3 || self3->isCancelled()) return;
-											log(u"✓ Подписка на канал @%1"_q.arg(chUsername));
+											log(u"Подписка на канал @%1"_q.arg(chUsername));
 											(*joinsAcc)++;
 											delayCall(2000, afterJoin);
 										}).fail([=, this](const MTP::Error &) {
@@ -743,7 +747,7 @@ private:
 		auto runNextPair = std::make_shared<Fn<void()>>();
 		*runNextPair = [=, this]() {
 			if (_cancelled || *pairIdx >= pairs.size()) {
-				log(u"✓ Все взаимные P2P диалоги завершены. Траст аккаунтов на максимуме!"_q);
+				log(u"Все взаимные P2P диалоги завершены. Траст аккаунтов на максимуме!"_q);
 				finish(true);
 				return;
 			}
@@ -1010,7 +1014,7 @@ private:
 };
 
 inline std::shared_ptr<WarmupRunner> &CurrentWarmupRunner() {
-	static auto runner = std::shared_ptr<WarmupRunner>();
+	static auto &runner = *new std::shared_ptr<WarmupRunner>(); // ggtg: leaked, no exit() destructor
 	return runner;
 }
 

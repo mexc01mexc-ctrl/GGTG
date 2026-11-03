@@ -201,8 +201,9 @@ class GgtgSquidwardActivity @JvmOverloads constructor(private val autoQuery: Str
             val unfolded = !foldable || searching || title in open
             if (foldable) {
                 val header = GgtgUi.card(context) { if (!open.remove(title)) open.add(title); rebuildList() }
-                val headerTitle = GgtgUi.title(context, (if (unfolded) "▾  " else "▸  ") + "$title · ${slots.size}", 15f)
+                val headerTitle = GgtgUi.title(context, "$title · ${slots.size}", 15f)
                 if (trashIcon) GgtgUi.withTrashIcon(headerTitle, Theme.getColor(Theme.key_windowBackgroundWhiteBlackText), 16f)
+                GgtgUi.trailingChevron(headerTitle, unfolded)
                 header.addView(headerTitle)
                 list.addView(header, LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT).apply { topMargin = GgtgUi.dp(8f) })
             } else {
@@ -221,7 +222,7 @@ class GgtgSquidwardActivity @JvmOverloads constructor(private val autoQuery: Str
                 val notes = ArrayList<String>()
                 notes += if (trashed) "Корзина" else (uc.ncgFolder?.takeIf { it.isNotEmpty() } ?: "Без папки")
                 if (org.telegram.tgnet.ConnectionsManager.getInstance(slot).isAsleep) notes += "не подключён"
-                if (slot == current) notes += "✓ сейчас"
+                if (slot == current) notes += "сейчас"
                 card.addView(GgtgUi.body(context, notes.joinToString(" · ")))
                 list.addView(card, LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT).apply { topMargin = GgtgUi.dp(6f) })
             }
@@ -310,8 +311,8 @@ class GgtgSquidwardActivity @JvmOverloads constructor(private val autoQuery: Str
         val date = java.text.SimpleDateFormat("dd.MM.yyyy HH:mm", java.util.Locale.getDefault())
             .format(java.util.Date(saved.savedAt * 1000))
         val details = if (r.details.isNotEmpty()) r.details.joinToString("\n") else r.rawText
-        val list = saved.groups?.let { "\n\n✓ " + GgtgSquidward.groupsSummary(it).removePrefix("Сохранено групп: ").let { s -> "Групп: $s" } }
-            ?: saved.users?.let { "\n\n✓ Юзернеймов: ${it.size}" }
+        val list = saved.groups?.let { "\n\n" + GgtgSquidward.groupsSummary(it).removePrefix("Сохранено групп: ").let { s -> "Групп: $s" } }
+            ?: saved.users?.let { "\n\nЮзернеймов: ${it.size}" }
             ?: ""
         result.text = "Сохранённый результат от $date — бот не запрашивался\n\n$details$list"
         refreshCell.visibility = View.VISIBLE

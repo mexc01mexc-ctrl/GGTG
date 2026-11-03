@@ -513,6 +513,10 @@ bool ExportAccountAsSessionJson(
 		return false;
 	}
 
+	if (!account->sessionExists()) { // ggtg:
+		if (outError) *outError = u"У аккаунта нет активной сессии"_q;
+		return false;
+	}
 	const auto user = account->session().user();
 	auto phone = user->phone();
 	phone.remove('+');
@@ -674,7 +678,7 @@ void ImportSessionJsonFolder(std::shared_ptr<Ui::Show> show) {
 			nextProxy,
 			[=](not_null<::Main::Account*> account, const QString &source) {
 				for (const auto &acc : notYetAdded) {
-					if (acc.accountDir == source || acc.userId == account->session().userId().bare) {
+					if (acc.accountDir == source || (account->sessionExists() && acc.userId == account->session().userId().bare)) {
 						if (!acc.twoFactor.isEmpty()) {
 							account->setTwoFactorPassword(acc.twoFactor);
 						}

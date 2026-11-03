@@ -44,6 +44,23 @@ object GgtgWakeLock {
         }
     }
 
+    // The CPU lock has a safety timeout (an hour); a run that lasts longer renews it, so the lock never
+    // runs out in the middle of a long operation (called by the foreground service every few seconds).
+    @Synchronized
+    fun renew() {
+        if (refCount <= 0) return
+        val lock = wakeLock
+        if (lock == null || !lock.isHeld) {
+            val pm = ApplicationLoader.applicationContext?.getSystemService(Context.POWER_SERVICE) as? PowerManager ?: return
+            wakeLock = pm.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "ggtg:wake_lock").apply {
+                setReferenceCounted(false)
+                acquire(3600_000L)
+            }
+        } else {
+            lock.acquire(3600_000L)
+        }
+    }
+
     @Synchronized
     fun release(tag: String = "ggtg:task") {
         if (refCount <= 0) return

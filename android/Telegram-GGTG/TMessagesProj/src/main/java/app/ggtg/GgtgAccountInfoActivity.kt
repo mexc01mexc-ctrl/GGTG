@@ -29,7 +29,6 @@ import org.telegram.ui.ActionBar.Theme
 import org.telegram.ui.Components.AvatarDrawable
 import org.telegram.ui.Components.BackupImageView
 import org.telegram.ui.SessionsActivity
-import app.ggtg.ai.GgtgAiUi
 
 // ggtg: the "i" of an account in "Менеджер аккаунтов": everything about one account on a screen of its own,
 // in cards that follow the theme (the old window was a white system dialog that clashed with a dark
@@ -44,7 +43,7 @@ class GgtgAccountInfoActivity(private val slot: Int, private val onChanged: () -
     private var column: LinearLayout? = null
 
     override fun createView(context: Context): View {
-        val (frame, col) = GgtgAiUi.page(this, context, "Информация об аккаунте")
+        val (frame, col) = GgtgPageUi.page(this, context, "Информация об аккаунте")
         column = col
         rebuild()
         return frame
@@ -587,7 +586,7 @@ class GgtgAccountInfoActivity(private val slot: Int, private val onChanged: () -
                             bld.setNegativeButton("Закрыть", null).show()
                         }
                         chosen == "Смена номера (миграция)" -> {
-                            presentFragment(GgtgPhoneMigrationActivity(listOf(slot)))
+                            presentFragment(GgtgRegistrationActivity(2, listOf(slot)))
                         }
                         chosen == "Принять сессию с Desktop" -> {
                             if (GgtgSyncTransport.mainSlot() == null || GgtgSync.loadSettings().passphrase.isEmpty()) {
@@ -732,7 +731,7 @@ class GgtgAccountInfoActivity(private val slot: Int, private val onChanged: () -
                 ", Telegram закрыл сессию)")
         if (uc.ncgTwoFactor.isNotEmpty()) line(context, session, "Пароль 2FA", uc.ncgTwoFactor, "нажмите, чтобы скопировать", accent = true) { copy(context, uc.ncgTwoFactor) }
         else line(context, session, "Пароль 2FA", "не сохранён")
-        col.addView(GgtgAiUi.gap(context, 24f))
+        col.addView(GgtgPageUi.gap(context, 24f))
     }
 
     private fun showEditDeviceDialog(context: Context, slot: Int) {

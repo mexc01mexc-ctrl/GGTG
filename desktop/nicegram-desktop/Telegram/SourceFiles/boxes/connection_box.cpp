@@ -2138,16 +2138,32 @@ object_ptr<Ui::BoxContent> MakeProxyListEditorBox(int listIndex) {
 				QString(),
 				Ui::CountrySelectBox::Type::Countries);
 			const auto weak = base::make_weak(countryBox.data());
+			// ggtg: the editor must still be there when a country is chosen (it used to be closed by
+			// showing the country box, and its field was used after that: a crash), so the country box
+			// is shown over it, and a closed editor is never touched.
+			const auto editorWeak = base::make_weak(box.get());
+			const auto nameFieldWeak = QPointer<Ui::InputField>(nameField);
 			countryBox->entryChosen(
 			) | rpl::on_next([=](const Ui::CountrySelectBox::Entry &entry) {
+				const auto name = entry.country + (entry.code.isEmpty() ? QString() : (u" (+"_q + entry.code + u")"_q));
 				if (weak) {
 					weak->closeBox();
 				}
-				const auto name = entry.country + (entry.code.isEmpty() ? QString() : (u" (+"_q + entry.code + u")"_q));
-				nameField->setText(name);
-				MTP::GlobalProxyPool().renameList(listIndex, name);
+				const auto editor = editorWeak.get();
+				if (!editor) {
+					MTP::GlobalProxyPool().renameList(listIndex, name);
+					return;
+				}
+				// Rename after the country box has finished handling the click; the pool's
+				// change stream must not fire while this subscription is being delivered.
+				Ui::PostponeCall(editor, [=] {
+					if (const auto field = nameFieldWeak.data()) {
+						field->setText(name);
+					}
+					MTP::GlobalProxyPool().renameList(listIndex, name);
+				});
 			}, countryBox->lifetime());
-			Ui::show(std::move(countryBox));
+			Ui::show(std::move(countryBox), Ui::LayerOption::KeepOther);
 		});
 
 		Ui::AddSkip(box->verticalLayout());

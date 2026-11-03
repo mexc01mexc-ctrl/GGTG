@@ -2,7 +2,7 @@
 
 #include "core/ggtg_id_date.h"
 #include "core/ggtg_paths.h"
-#include "core/ggtg_ai.h"
+#include "window/ggtg_widgets.h"
 #include "data/scraped_members_db.h"
 #include "boxes/abstract_box.h"
 #include "ui/layers/generic_box.h"
@@ -21,6 +21,8 @@
 #include "styles/style_boxes.h"
 
 #include <QtCore/QString>
+#include <QtGui/QClipboard>
+#include <QtGui/QGuiApplication>
 #include <QtCore/QStringList>
 #include <QtCore/QJsonObject>
 #include <QtCore/QJsonDocument>
@@ -184,6 +186,22 @@ inline void ClearMark(uint64 userId, const QString &username) {
 		data.markedAliveUsernames.removeAll(cleanUser);
 	}
 	SaveStoredPatterns(data);
+}
+
+// The date of the first profile photo seen (unix seconds, 0 - unknown): the account is not younger
+// than it, which bounds the estimate of the registration date.
+[[nodiscard]] inline int64 FirstPhotoDate(not_null<UserData*> user) {
+	if (!user->hasUserpic()) {
+		return 0;
+	}
+	if (const auto photoId = user->userpicPhotoId()) {
+		if (photoId != PeerData::kUnknownPhotoId) {
+			if (const auto photo = user->owner().photo(photoId)) {
+				return photo->date() > 0 ? int64(photo->date()) : int64(0);
+			}
+		}
+	}
+	return 0;
 }
 
 inline AnalysisResult AnalyzeUsername(const QString &rawUsername) {
@@ -579,300 +597,215 @@ inline AnalysisResult AnalyzeUserData(
 		now);
 }
 
+// What the detector learns from the marks of the person (no models, no keys): the words that
+// repeat in the usernames marked as fakes and are not in the usernames marked as alive become
+// keywords of the detector.
+struct LearnResult {
+	QStringList added;
+	int fakes = 0;
+	int alive = 0;
+};
+
+inline LearnResult LearnFromMarks() {
+	auto patterns = LoadStoredPatterns();
+	auto fakes = patterns.markedFakeUsernames;
+	// the pre-send checks also write down people that look like bots
+	for (const auto &rec : Data::LoadAllSmsSendRecords()) {
+		if (rec.status == Data::SmsSendStatus::SuspectedFake && !fakes.contains(rec.username)) {
+			fakes.push_back(rec.username);
+		}
+	}
+	static const auto wordRe = QRegularExpression(u"[a-zA-Zа-яА-ЯёЁ]{4,}"_q);
+	const auto count = [&](const QStringList &names) {
+		auto result = std::map<QString, int>();
+		for (const auto &name : names) {
+			auto seen = QStringList();
+			auto it = wordRe.globalMatch(name);
+			while (it.hasNext()) {
+				const auto token = it.next().captured().toLower();
+				if (!seen.contains(token)) {
+					seen.push_back(token);
+					result[token]++;
+				}
+			}
+		}
+		return result;
+	};
+	const auto inFakes = count(fakes);
+	const auto inAlive = count(patterns.markedAliveUsernames);
+	auto result = LearnResult();
+	result.fakes = int(fakes.size());
+	result.alive = int(patterns.markedAliveUsernames.size());
+	for (const auto &[token, n] : inFakes) {
+		const auto aliveN = [&] {
+			const auto it = inAlive.find(token);
+			return (it == inAlive.end()) ? 0 : it->second;
+		}();
+		// at least twice among the fakes and at least three times more often than among the alive
+		if (n >= 2 && n >= 3 * aliveN && !patterns.customKeywords.contains(token)) {
+			patterns.customKeywords.push_back(token);
+			result.added.push_back(token);
+		}
+	}
+	if (!result.added.isEmpty()) {
+		SaveStoredPatterns(patterns);
+	}
+	return result;
+}
+
 inline void TrainDetectorFromMarked(
 		std::shared_ptr<Ui::Show> show,
 		Fn<void(int newRulesCount)> onDone = nullptr) {
-	const auto patterns = LoadStoredPatterns();
-	auto fakesList = patterns.markedFakeUsernames;
-	// Also collect usernames marked as SuspectedFake in the database
-	const auto records = Data::LoadAllSmsSendRecords();
-	for (const auto &rec : records) {
-		if (rec.status == Data::SmsSendStatus::SuspectedFake && !fakesList.contains(rec.username)) {
-			fakesList.push_back(rec.username);
-		}
-	}
-
-	if (fakesList.isEmpty()) {
-		show->showToast(u"Нет помеченных фейков для обучения ИИ"_q);
+	const auto result = LearnFromMarks();
+	if (result.fakes == 0) {
+		show->showToast(u"Нет помеченных фейков, на которых можно учиться"_q);
 		return;
 	}
-
-	show->showToast(u"ИИ анализирует базу фейков..."_q);
-
-	// Statistical token extraction
-	static const auto wordRe = QRegularExpression(u"[a-zA-Zа-яА-ЯёЁ]{3,}"_q);
-	auto tokenCounts = std::map<QString, int>();
-	for (const auto &u : fakesList) {
-		auto it = wordRe.globalMatch(u);
-		while (it.hasNext()) {
-			const auto tok = it.next().captured().toLower();
-			if (tok.size() >= 3) {
-				tokenCounts[tok]++;
-			}
+	show->showBox(Box([=](not_null<Ui::GenericBox*> box) {
+		box->setTitle(rpl::single(u"Детектор пересчитан"_q));
+		auto text = u"Фейков в метках: %1\nЖивых в метках: %2\n\n"_q
+			.arg(result.fakes)
+			.arg(result.alive);
+		if (!result.added.isEmpty()) {
+			text += u"Новые признаки (%1):\n• %2\n\n"_q
+				.arg(result.added.size())
+				.arg(result.added.join(u"\n• "_q));
+		} else {
+			text += u"Новых повторяющихся признаков нет: все известные уже учтены.\n\n"_q;
 		}
-	}
-
-	auto statisticalCandidates = QStringList();
-	for (const auto &[tok, count] : tokenCounts) {
-		if (count >= 2 && !patterns.markedAliveUsernames.contains(tok) && !patterns.customKeywords.contains(tok)) {
-			statisticalCandidates.push_back(tok);
-		}
-	}
-
-	const auto finishTraining = [=](QStringList foundKeywords, QString explanation) {
-		auto updated = LoadStoredPatterns();
-		auto added = QStringList();
-		for (const auto &kw : foundKeywords) {
-			const auto clean = kw.trimmed().toLower();
-			if (!clean.isEmpty() && !updated.customKeywords.contains(clean)) {
-				updated.customKeywords.push_back(clean);
-				added.push_back(clean);
-			}
-		}
-		for (const auto &kw : statisticalCandidates) {
-			if (!updated.customKeywords.contains(kw)) {
-				updated.customKeywords.push_back(kw);
-				added.push_back(kw);
-			}
-		}
-		SaveStoredPatterns(updated);
-
-		// Save knowledge json for AI memory
-		auto kObj = QJsonObject();
-		kObj[u"updated_at"_q] = QString::number(base::unixtime::now());
-		kObj[u"fakes_count"_q] = int(fakesList.size());
-		auto kwArr = QJsonArray();
-		for (const auto &kw : updated.customKeywords) kwArr.push_back(kw);
-		kObj[u"keywords"_q] = kwArr;
-		kObj[u"summary"_q] = explanation;
-
-		QDir().mkpath(Core::GgtgPaths::DbDir() + u"ai_knowledge/"_q);
-		auto kFile = QFile(Core::GgtgPaths::DbDir() + u"ai_knowledge/fake_patterns.json"_q);
-		if (kFile.open(QIODevice::WriteOnly | QIODevice::Truncate)) {
-			kFile.write(QJsonDocument(kObj).toJson(QJsonDocument::Indented));
-		}
-
-		show->showBox(Box([=](not_null<Ui::GenericBox*> resBox) {
-			resBox->setTitle(rpl::single(u"Обучение детектора завершено"_q));
-			auto text = u"Проанализировано фейков: %1\nЖивых аккаунтов: %2\n\n"_q
-				.arg(fakesList.size())
-				.arg(patterns.markedAliveUsernames.size());
-			if (!added.isEmpty()) {
-				text += u"Выявлено новых спам-токенов (%1):\n• %2\n\n"_q
-					.arg(added.size())
-					.arg(added.join(u"\n• "_q));
-			} else {
-				text += u"Новых повторяющихся паттернов не обнаружено (все известные правила уже учтены).\n\n"_q;
-			}
-			if (!explanation.isEmpty()) {
-				text += u"ИИ-заключение:\n"_q + explanation + u"\n\n"_q;
-			}
-			text += u"Все новые критерии сохранены и применяются при фильтрации и в рассылках."_q;
-
-			resBox->addRow(
-				object_ptr<Ui::FlatLabel>(resBox, text, st::boxLabel),
-				st::boxRowPadding);
-
-			resBox->addButton(rpl::single(u"Отлично"_q), [=] {
-				resBox->closeBox();
-			});
-		}));
-
-		if (onDone) onDone(int(added.size()));
-	};
-
-	const auto ai = Core::GgtgAi::CachedSettings();
-	if (ai.enabled) {
-		const auto sampleFakes = fakesList.mid(0, 40).join(u", "_q);
-		const auto prompt = u"Проанализируй список спам-ботов и фейковых Telegram-юзернеймов, помеченных пользователем:\n"_q
-			+ sampleFakes + u"\n\nВыяви общие спам-шаблоны и назови 3-7 характерных ключевых слов или подозрительных корней слов. "
-			"Ответь в формате JSON:\n{\n  \"keywords\": [\"слово1\", \"слово2\"],\n  \"summary\": \"краткое описание шаблонов ботов\"\n}"_q;
-
-		Core::GgtgAi::Ask(
-			u"Ты эксперт по машинному обучению и выявлению ботов в Telegram. Анализируй шаблоны имен и возвращай строго JSON."_q,
-			prompt,
-			[=](QString reply, QString error) {
-				if (!error.isEmpty() || reply.isEmpty()) {
-					finishTraining({}, u"Анализ проведён по статистической частотности слов."_q);
-					return;
-				}
-				auto extractedKws = QStringList();
-				auto explanation = QString();
-				auto jsonStr = reply.trimmed();
-				const auto startIdx = jsonStr.indexOf('{');
-				const auto endIdx = jsonStr.lastIndexOf('}');
-				if (startIdx >= 0 && endIdx > startIdx) {
-					jsonStr = jsonStr.mid(startIdx, endIdx - startIdx + 1);
-					const auto doc = QJsonDocument::fromJson(jsonStr.toUtf8());
-					if (doc.isObject()) {
-						const auto o = doc.object();
-						for (const auto &v : o.value(u"keywords"_q).toArray()) {
-							extractedKws.push_back(v.toString());
-						}
-						explanation = o.value(u"summary"_q).toString();
-					}
-				}
-				finishTraining(extractedKws, explanation);
-			});
-	} else {
-		finishTraining({}, u"Анализ проведён локально по статистической частотности токенов."_q);
+		text += u"Признаки применяются при проверке профилей и в рассылках."_q;
+		box->addRow(
+			object_ptr<Ui::FlatLabel>(box, text, st::boxLabel),
+			st::boxRowPadding);
+		box->addButton(rpl::single(u"Готово"_q), [=] { box->closeBox(); });
+	}));
+	if (onDone) {
+		onDone(int(result.added.size()));
 	}
 }
 
-// Dialog with detailed report and feedback buttons
+// The panel of a person (the brain next to the compose field, the profile): the verdict of the
+// detector, where we wrote them from, which account and when, how old the account is, and
+// the marks "фейк" / "живой" that the detector learns from.
 inline void ShowFakeDetailsBox(
 		std::shared_ptr<Ui::Show> show,
 		not_null<UserData*> user,
 		Fn<void()> onUpdated = nullptr) {
 	show->showBox(Box([=](not_null<Ui::GenericBox*> box) {
-		box->setTitle(rpl::single(u"Анализ профиля: @"_q + user->username()));
-
+		box->setTitle(rpl::single(user->name()));
+		box->setWidth(st::boxWideWidth + style::ConvertScale(120));
+		const auto layout = box->verticalLayout();
 		const auto result = AnalyzeUserData(user);
+		const auto username = user->username().toLower();
+		const auto record = username.isEmpty()
+			? std::optional<Data::SmsSendRecord>()
+			: Data::FindSmsSendRecord(username);
+		const auto now = int64(base::unixtime::now());
 
-		auto headerColor = (result.verdict == Verdict::Fake)
-			? u"red"_q
-			: (result.verdict == Verdict::Suspicious)
-			? u"orange"_q
-			: u"green"_q;
+		const auto addRow = [&](Ggtg::InfoRowData data, Fn<void()> onClick = nullptr) {
+			const auto row = layout->add(object_ptr<Ggtg::InfoRow>(layout, rpl::single(std::move(data))));
+			if (onClick) {
+				row->setClickedCallback(std::move(onClick));
+			}
+		};
 
-		box->addRow(
-			object_ptr<Ui::FlatLabel>(
-				box,
-				u"Вердикт: %1"_q.arg(result.verdictText),
-				st::boxTitle),
-			st::boxRowPadding);
-
-		if (!result.reasons.isEmpty()) {
-			box->addRow(
-				object_ptr<Ui::FlatLabel>(
-					box,
-					u"Факторы оценки:\n• "_q + result.reasons.join(u"\n• "_q),
-					st::boxLabel),
-				st::boxRowPadding);
+		addRow({
+			.title = result.verdictText,
+			.subtitle = u"Оценка профиля"_q,
+			.chip = QString::number(result.fakeProbability) + '%',
+			.chipGood = (result.verdict == Verdict::Alive),
+		});
+		if (record) {
+			const auto source = !record->source.isEmpty()
+				? record->source
+				: Data::SmsSourceOf(username);
+			// A click copies the full name of the group (with its @username).
+			addRow({
+				.title = source.isEmpty() ? u"база неизвестна"_q : source,
+				.subtitle = u"Из какой базы написали (нажмите, чтобы скопировать)"_q,
+			}, source.isEmpty() ? Fn<void()>() : Fn<void()>([=] {
+				QGuiApplication::clipboard()->setText(source);
+				show->showToast(u"Скопировано: "_q + source.left(80));
+			}));
+			addRow({
+				.title = record->account.isEmpty() ? u"аккаунт неизвестен"_q : record->account,
+				.subtitle = u"Кто писал"_q,
+			});
+			addRow({
+				.title = QDateTime::fromSecsSinceEpoch(record->at).toString(u"dd.MM.yyyy HH:mm"_q),
+				.subtitle = u"Когда"_q,
+				.chip = Data::SmsMarkTitle(record->status),
+				.chipGood = (record->status == Data::SmsSendStatus::Sent),
+			});
 		} else {
-			box->addRow(
-				object_ptr<Ui::FlatLabel>(
-					box,
-					u"Подозрительных признаков не обнаружено."_q,
-					st::boxLabel),
-				st::boxRowPadding);
+			addRow({
+				.title = u"из программы этому человеку не писали"_q,
+				.subtitle = u"История отправки"_q,
+			});
+		}
+		const auto photoBound = FirstPhotoDate(user);
+		const auto created = EstimateIdTime(user->id.value, photoBound);
+		if (created > 0) {
+			addRow({
+				.title = FormatAccountAge(created, now),
+				.subtitle = u"Возраст аккаунта (по ID, примерно): "_q + EstimateIdDate(user->id.value, photoBound),
+			});
 		}
 
-		Ui::AddSkip(box->verticalLayout(), st::defaultVerticalListSkip);
-
-		// AI Analysis Section
-		const auto aiButton = box->addRow(
-			object_ptr<Ui::RoundButton>(
-				box,
-				rpl::single(u"Запросить разбор у ИИ-нейросети"_q),
-				st::defaultBoxButton),
-			st::boxRowPadding);
-
-		const auto aiAnswerLabel = box->addRow(
-			object_ptr<Ui::FlatLabel>(
-				box,
-				QString(),
-				st::boxLabel),
-			st::boxRowPadding);
-		aiAnswerLabel->hide();
-
-		aiButton->setClickedCallback([=] {
-			aiButton->setText(rpl::single(u"Анализирую профиль..."_q));
-			aiButton->setEnabled(false);
-
-			const auto prompt = u"Оцени Telegram-профиль пользователя:\n"
-				"ID: %1\n"
-				"Username: @%2\n"
-				"Имя: %3 %4\n"
-				"Описание: %5\n"
-				"Премиум: %6\n"
-				"Дай краткий вердикт: живой человек, бот или спам-аккаунт, и назови главную причину (до 2 предложений)."_q
-				.arg(user->id.value)
-				.arg(user->username())
-				.arg(user->firstName)
-				.arg(user->lastName)
-				.arg(user->about())
-				.arg(user->isPremium() ? u"Да"_q : u"Нет"_q);
-
-			Core::GgtgAi::Ask(
-				u"Ты эксперт по выявлению спам-ботов и фейковых аккаунтов в Telegram. Отвечай кратко и аргументированно."_q,
-				prompt,
-				[=](QString text, QString error) {
-					aiButton->setText(rpl::single(u"Повторить ИИ-разбор"_q));
-					aiButton->setEnabled(true);
-					if (!error.isEmpty()) {
-						aiAnswerLabel->setText(u"Ошибка ИИ: "_q + error);
-					} else {
-						aiAnswerLabel->setText(u"ИИ-вердикт:\n"_q + text.trimmed());
-					}
-					aiAnswerLabel->show();
-				});
-		});
-
-		Ui::AddDivider(box->verticalLayout());
-
-		// Feedback Buttons: "Пометить как фейк" / "Пометить как живой"
+		Ui::AddSkip(layout, st::defaultVerticalListSkip);
 		box->addRow(
 			object_ptr<Ui::FlatLabel>(
 				box,
-				u"Обучение детектора (ваша обратная связь):"_q,
-				st::boxDividerLabel),
+				result.reasons.isEmpty()
+					? u"Подозрительных признаков не обнаружено."_q
+					: (u"Признаки:\n• "_q + result.reasons.join(u"\n• "_q)),
+				st::boxLabel),
 			st::boxRowPadding);
 
-		const auto markRow = box->addRow(
-			object_ptr<Ui::VerticalLayout>(box),
-			st::boxRowPadding);
+		Ui::AddSkip(layout, st::defaultVerticalListSkip);
+		Ui::AddDivider(layout);
+		Ui::AddSubsectionTitle(layout, rpl::single(u"Ваша метка (детектор учится на ней)"_q));
 
-		const auto fakeBtn = markRow->add(
-			object_ptr<Ui::SettingsButton>(
-				markRow,
-				rpl::single(result.isMarkedFake ? u"✓ Помечен вами как фейк"_q : u"Пометить: «Это фейк / бот»"_q)));
-
-		fakeBtn->setClickedCallback([=] {
-			MarkAsFake(user->id.value, user->username());
-			show->showToast(u"Профиль добавлен в список фейков. Веса обновлены."_q);
+		const auto done = [=](const QString &toast) {
+			const auto learned = LearnFromMarks();
+			show->showToast(learned.added.isEmpty()
+				? toast
+				: (toast + u" Новых признаков: "_q + QString::number(learned.added.size())));
 			box->closeBox();
 			if (onUpdated) onUpdated();
-		});
-
-		const auto aliveBtn = markRow->add(
-			object_ptr<Ui::SettingsButton>(
-				markRow,
-				rpl::single(result.isMarkedAlive ? u"✓ Помечен вами как живой"_q : u"Пометить: «Живой человек»"_q)));
-
-		aliveBtn->setClickedCallback([=] {
-			MarkAsAlive(user->id.value, user->username());
-			show->showToast(u"Профиль добавлен в белый список."_q);
-			box->closeBox();
-			if (onUpdated) onUpdated();
-		});
-
+		};
+		const auto addAction = [&](const QString &title, Fn<void()> callback) {
+			layout->add(object_ptr<Ui::SettingsButton>(
+				layout,
+				rpl::single(title)))->setClickedCallback(std::move(callback));
+		};
+		addAction(
+			result.isMarkedFake ? u"Помечен как фейк"_q : u"Пометить как фейк или бота"_q,
+			[=] {
+				MarkAsFake(user->id.value, user->username());
+				done(u"Помечен как фейк."_q);
+			});
+		addAction(
+			result.isMarkedAlive ? u"Помечен как живой"_q : u"Пометить как живого человека"_q,
+			[=] {
+				MarkAsAlive(user->id.value, user->username());
+				done(u"Помечен как живой."_q);
+			});
 		if (result.isMarkedFake || result.isMarkedAlive) {
-			const auto resetBtn = markRow->add(
-				object_ptr<Ui::SettingsButton>(
-					markRow,
-					rpl::single(u"Сбросить мою метку"_q)));
-			resetBtn->setClickedCallback([=] {
+			addAction(u"Сбросить метку"_q, [=] {
 				ClearMark(user->id.value, user->username());
 				show->showToast(u"Метка сброшена."_q);
 				box->closeBox();
 				if (onUpdated) onUpdated();
 			});
 		}
-
-		const auto trainBtn = markRow->add(
-			object_ptr<Ui::SettingsButton>(
-				markRow,
-				rpl::single(u"Обучить ИИ на помеченных"_q)));
-		trainBtn->setClickedCallback([=] {
-			TrainDetectorFromMarked(show, [=](int count) {
+		addAction(u"Пересчитать признаки по всем меткам"_q, [=] {
+			TrainDetectorFromMarked(show, [=](int) {
 				if (onUpdated) onUpdated();
 			});
 		});
 
-		box->addButton(rpl::single(u"Закрыть"_q), [=] {
-			box->closeBox();
-		});
+		box->addButton(rpl::single(u"Закрыть"_q), [=] { box->closeBox(); });
 	}));
 }
 

@@ -44,10 +44,8 @@ class GgtgHubActivity @JvmOverloads constructor(private val inTab: Boolean = fal
             R.drawable.msg_language) { it.presentFragment(GgtgProxyActivity()) },
         Section("Процессы", "Все идущие и завершённые операции с логом.",
             R.drawable.msg_recent) { it.presentFragment(GgtgProcessesActivity()) },
-        Section("ИИ", "Чат с вашим помощником: подключение, разговор, обучение и настройки в одном месте. Бесплатно и без карты.",
-            R.drawable.msg_bots) { it.presentFragment(app.ggtg.ai.GgtgAiBrainActivity(false)) },
         Section("Списки чатов", "Свои списки переписок (заинтересованные, подумать, клиенты): открыть чат в один клик или написать сразу всем.",
-            R.drawable.msg_list) { it.presentFragment(app.ggtg.ai.GgtgChatListsActivity()) },
+            R.drawable.msg_list) { it.presentFragment(app.ggtg.chatlists.GgtgChatListsActivity()) },
         Section("Импорт Сессия + JSON", "Файлы .session и .json (Telethon, Pyrogram, софт): 2FA, параметры устройства и прокси.",
             R.drawable.msg_download) { it.presentFragment(GgtgSessionJsonImportActivity()) },
         Section("Импорт .ggtg", "Аккаунты из GGTG Desktop: сессия, папка, прокси и 2FA — сразу.",
@@ -56,12 +54,12 @@ class GgtgHubActivity @JvmOverloads constructor(private val inTab: Boolean = fal
             R.drawable.msg_folders) { it.presentFragment(GgtgTdataImportActivity()) },
         Section("Экспорт аккаунтов", "Экспорт в TData (ПК), Сессия + JSON (Android) или .ggtg: основные, с дубликацией или резервные.",
             R.drawable.msg_forward) { it.presentFragment(GgtgTdataExportActivity()) },
-        Section("Синхронизация", "Базы, отправленные, шаблоны и память ИИ между этим телефоном и GGTG Desktop через один главный аккаунт.",
+        Section("Синхронизация", "Базы, отправленные и шаблоны между этим телефоном и GGTG Desktop через один главный аккаунт.",
             R.drawable.msg_retry) { it.presentFragment(GgtgSyncActivity()) }
     )
 
     // Group headings, shown above the section at that index.
-    private val groups = mapOf(0 to "Аккаунты и данные", 3 to "Рассылка и накрутка", 9 to "ИИ и списки", 11 to "Импорт и экспорт")
+    private val groups = mapOf(0 to "Аккаунты и данные", 3 to "Рассылка и накрутка", 8 to "Списки", 10 to "Импорт и экспорт")
 
     private var root: LinearLayout? = null
     private val processListener = { AndroidUtilities.runOnUIThread { rebuild() } }

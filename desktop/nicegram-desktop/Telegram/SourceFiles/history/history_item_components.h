@@ -438,7 +438,7 @@ private:
 };
 
 // GGTG: a translation of one message made by the free online translator
-// (see settings/ggtg_ai_translate.h): shown in the message itself instead of
+// (see settings/ggtg_translate.h): shown in the message itself instead of
 // the original, one click brings the original back.
 struct HistoryMessageFreeTranslation
 : RuntimeComponent<HistoryMessageFreeTranslation, HistoryItem> {

@@ -571,6 +571,9 @@ inline void ShowAiTrainingBox(std::shared_ptr<Ui::Show> show) {
 				base::flat_set<not_null<Main::Account*>>>();
 			const auto unfolded = std::make_shared<base::flat_set<QString>>();
 			for (const auto &account : accounts) {
+				if (!Main::AccountHasSession(account)) {
+					continue;
+				}
 				const auto id = qint64(account->session().user()->id.value);
 				const auto &chosen = Train::Current().accounts;
 				if (std::find(chosen.begin(), chosen.end(), id)
@@ -587,12 +590,18 @@ inline void ShowAiTrainingBox(std::shared_ptr<Ui::Show> show) {
 			const auto sync = [=] {
 				auto &ids = Train::Current().accounts;
 				for (const auto &account : accounts) {
+					if (!Main::AccountHasSession(account)) {
+						continue;
+					}
 					const auto id = qint64(account->session().user()->id.value);
 					ids.erase(
 						std::remove(ids.begin(), ids.end(), id),
 						ids.end());
 				}
 				for (const auto &account : *picked) {
+					if (!Main::AccountHasSession(account)) {
+						continue;
+					}
 					ids.push_back(
 						qint64(account->session().user()->id.value));
 				}
@@ -787,10 +796,10 @@ inline void ShowAiSettingsBox(std::shared_ptr<Ui::Show> show) {
 			const auto text = [=](const QString &value) {
 				for (const auto &[key, name] : choices) {
 					if (key == value) {
-						return title + u": "_q + name + u" ▾"_q;
+						return title + u": "_q + name;
 					}
 				}
-				return title + u" ▾"_q;
+				return title;
 			};
 			const auto link = box->addRow(
 				object_ptr<Ui::LinkButton>(box, text(current)),
@@ -858,7 +867,7 @@ inline void ShowAiSettingsBox(std::shared_ptr<Ui::Show> show) {
 					Core::GgtgAi::TestKey(key, crl::guard(box, [=](
 							bool ok,
 							QString message) {
-						(*results)[key] = (ok ? u"✓ "_q : u"✗ "_q) + message;
+						(*results)[key] = (ok ? u"Готово: "_q : u"Ошибка: "_q) + message;
 						(*rebuild)();
 					}));
 				};

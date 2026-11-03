@@ -102,7 +102,10 @@ object GgtgAnalysis {
     private fun classify(slot: Int, user: TLRPC.User): Item {
         if (user.deleted) return Item(State.Deleted)
         if (user.bot) return Item(State.Bot)
-        val code = GgtgNames.detectLanguage((user.first_name ?: "") + " " + (user.last_name ?: ""))
+        val first = user.first_name ?: ""
+        val last = user.last_name ?: ""
+        val guess = GgtgNames.guessNameLanguage(first, last, user.username ?: "")
+        val code = if (guess.sure) guess.code else GgtgNames.detectLanguage("$first $last")
         return Item(State.Ok, if (code == "en") "lat" else code, seenBucket(slot, user), user.premium)
     }
 
@@ -316,7 +319,7 @@ object GgtgAnalysis {
             row("Разделить по языкам имён…") {
                 val labels = splittable.map { GgtgNames.languageLabel(it.key) + " - " + it.value + " чел." }.toTypedArray()
                 val checked = BooleanArray(splittable.size) { splittable[it].key != "lat" } // Latin is a mix, not a language
-                app.ggtg.ai.GgtgAiUi.multiChoice(context, "Разделить по языкам", labels.toList(), checked, "Разделить") {
+                GgtgPageUi.multiChoice(context, "Разделить по языкам", labels.toList(), checked, "Разделить") {
                     run {
                         var made = 0
                         for ((index, entry) in splittable.withIndex()) {

@@ -168,10 +168,7 @@ class GgtgBasesActivity : BaseFragment() {
                 setTypeface(null, Typeface.BOLD)
                 setTextColor(color(Theme.key_windowBackgroundWhiteGrayText))
             }, LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f))
-            addView(TextView(context).apply {
-                text = if (open) "▾" else "▸"; textSize = 15f
-                setTextColor(color(Theme.key_windowBackgroundWhiteGrayIcon))
-            })
+            addView(GgtgUi.chevron(context, open))
             setOnClickListener { onClick() }
         }
 

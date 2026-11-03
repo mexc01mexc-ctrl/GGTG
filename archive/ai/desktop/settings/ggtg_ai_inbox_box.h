@@ -299,8 +299,7 @@ inline void FillAiInbox(
 				});
 				Ui::AddSkip(wrap);
 				AiInboxUi::AddButtons(wrap, {
-					{ (*showSkipped ? u"▾ "_q : u"▸ "_q)
-						+ u"Пропущенные ("_q
+					{ (*showSkipped ? u"Скрыть пропущенные ("_q : u"Показать пропущенные ("_q)
 						+ QString::number(skipped.size()) + ')', [=] {
 						*showSkipped = !*showSkipped;
 						again();

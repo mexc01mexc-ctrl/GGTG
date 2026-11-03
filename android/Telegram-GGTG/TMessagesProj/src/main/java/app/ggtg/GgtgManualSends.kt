@@ -19,7 +19,6 @@ object GgtgManualSends : NotificationCenter.NotificationCenterDelegate {
 
     @JvmStatic
     fun track(account: Int) {
-        app.ggtg.ai.GgtgAiInbox.startBackground() // the feed's own timers (the autopilot, the morning brief)
         if (!tracked.add(account)) return
         NotificationCenter.getInstance(account).addObserver(this, NotificationCenter.messageReceivedByServer)
         NotificationCenter.getInstance(account).addObserver(this, NotificationCenter.didReceiveNewMessages)
@@ -72,8 +71,6 @@ object GgtgManualSends : NotificationCenter.NotificationCenterDelegate {
             if (username.isNullOrEmpty()) continue
             if (GgtgDb.findSmsRecord(username)?.status != GgtgDb.SmsStatus.Sent) continue
             GgtgDb.saveReply(username, text, message.date.toLong())
-            // the feed of answers ("ИИ" → «5. Лента ответов»): the person is waiting for a word
-            app.ggtg.ai.GgtgAiInbox.onIncoming(slot, dialogId, username, UserObject.getUserName(user), text, message.id.toLong(), message.date.toLong())
         }
     }
 

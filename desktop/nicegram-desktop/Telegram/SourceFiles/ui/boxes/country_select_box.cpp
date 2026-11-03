@@ -8,6 +8,13 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "ui/boxes/country_select_box.h"
 
 #include "base/event_filter.h"
+#include "base/unique_qptr.h"
+#include <QtCore/QDir> // ggtg: settings.h needs these before ggtg_paths.h
+#include <QtCore/QFile>
+#include <QtCore/QFileDevice>
+#include "core/ggtg_paths.h" // ggtg:
+#include "ui/widgets/popup_menu.h" // ggtg:
+#include "styles/style_menu_icons.h" // ggtg:
 #include "base/invoke_queued.h"
 #include "countries/countries_instance.h"
 #include "lang/lang_keys.h"
@@ -23,11 +30,58 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "styles/style_layers.h"
 
 #include <QtCore/QRegularExpression>
+#include <QtCore/QFile>
+#include <QtCore/QFileInfo>
+#include <QtCore/QJsonArray>
+#include <QtCore/QJsonDocument>
 
 namespace Ui {
 namespace {
 
 QString LastValidISO;
+
+// ggtg: pinned countries live in tdata/ggtg_db/pinned_countries.json
+// (a JSON array of ISO2 codes, newest first; same format on Android).
+[[nodiscard]] QString PinnedCountriesPath() {
+	const auto dir = Core::GgtgPaths::DbDir();
+	return dir.isEmpty() ? QString() : (dir + u"pinned_countries.json"_q);
+}
+
+[[nodiscard]] QStringList LoadPinnedCountries() {
+	auto result = QStringList();
+	const auto path = PinnedCountriesPath();
+	if (path.isEmpty()) {
+		return result;
+	}
+	auto file = QFile(path);
+	if (!file.open(QIODevice::ReadOnly)) {
+		return result;
+	}
+	for (const auto &value : QJsonDocument::fromJson(file.readAll()).array()) {
+		const auto iso = value.toString();
+		if (!iso.isEmpty() && !result.contains(iso)) {
+			result.push_back(iso);
+		}
+	}
+	return result;
+}
+
+void SavePinnedCountries(const QStringList &list) {
+	const auto path = PinnedCountriesPath();
+	if (path.isEmpty()) {
+		return;
+	}
+	QDir().mkpath(QFileInfo(path).absolutePath());
+	auto file = QFile(path);
+	if (!file.open(QIODevice::WriteOnly | QIODevice::Truncate)) {
+		return;
+	}
+	auto array = QJsonArray();
+	for (const auto &iso : list) {
+		array.push_back(iso);
+	}
+	file.write(QJsonDocument(array).toJson(QJsonDocument::Compact));
+}
 
 } // namespace
 
@@ -102,6 +156,12 @@ private:
 	[[nodiscard]] int rowTop(int index) const;
 	[[nodiscard]] const std::vector<Entry> &current() const;
 
+	// ggtg: pin a country to the top of the list (right click).
+	[[nodiscard]] bool isPinned(const QString &iso) const;
+	void showPinMenu();
+	void togglePin(const QString &iso);
+	void rebuild();
+
 	Type _type = Type::Phones;
 	int _rowHeight = 0;
 
@@ -116,6 +176,9 @@ private:
 	std::vector<Entry> _filtered;
 	base::flat_map<QChar, std::vector<int>> _byLetter;
 	std::vector<std::vector<QString>> _namesList;
+
+	QStringList _pinned; // ggtg:
+	base::unique_qptr<PopupMenu> _menu; // ggtg:
 
 	rpl::event_stream<Entry> _countryChosen;
 	rpl::event_stream<ScrollToRequest> _mustScrollTo;
@@ -244,6 +307,9 @@ CountrySelectBox::Inner::Inner(
 	if (Countries::Instance().byISO2().contains(iso)) {
 		LastValidISO = iso;
 	}
+	if (_type == Type::Countries) {
+		_pinned = LoadPinnedCountries(); // ggtg:
+	}
 
 	rpl::single(
 	) | rpl::then(
@@ -280,12 +346,18 @@ void CountrySelectBox::Inner::init() {
 	_list.reserve(byISO2.size());
 	_namesList.reserve(byISO2.size());
 
+	// ggtg: pinned countries go first, newest pin on top.
+	for (const auto &pinnedIso : _pinned) {
+		if (const auto info = byISO2.value(pinnedIso, nullptr)) {
+			extractEntries(*info);
+		}
+	}
 	const auto lastValid = byISO2.value(LastValidISO, nullptr);
-	if (lastValid) {
+	if (lastValid && !isPinned(lastValid->iso2)) {
 		extractEntries(*lastValid);
 	}
 	for (const auto &entry : Countries::Instance().list()) {
-		if (&entry != lastValid) {
+		if (&entry != lastValid && !isPinned(entry.iso2)) {
 			extractEntries(entry);
 		}
 	}
@@ -403,6 +475,15 @@ void CountrySelectBox::Inner::paintEvent(QPaintEvent *e) {
 		p.setPen(st::countryRowNameFg);
 		p.drawTextLeft(padding.left(), y + padding.top(), width(), name);
 
+		if (isPinned(list[i].iso2)) { // ggtg:
+			const auto &pin = st::menuIconPin;
+			pin.paint(
+				p,
+				width() - st::boxScroll.width - pin.width() - padding.right(),
+				y + (_rowHeight - pin.height()) / 2,
+				width());
+		}
+
 		if (_type == Type::Phones) {
 			p.setFont(codeFont);
 			p.setPen(selected
@@ -457,6 +538,10 @@ void CountrySelectBox::Inner::mouseMoveEvent(QMouseEvent *e) {
 void CountrySelectBox::Inner::mousePressEvent(QMouseEvent *e) {
 	_mouseSelection = true;
 	updateSelected(e->pos());
+	if (e->button() == Qt::RightButton) { // ggtg:
+		showPinMenu();
+		return;
+	}
 
 	setPressed(_selected);
 	const auto index = _pressed;
@@ -587,6 +672,49 @@ int CountrySelectBox::Inner::rowTop(int index) const {
 auto CountrySelectBox::Inner::current() const
 -> const std::vector<CountrySelectBox::Entry> & {
 	return _filter.isEmpty() ? _list : _filtered;
+}
+
+bool CountrySelectBox::Inner::isPinned(const QString &iso) const {
+	return _type == Type::Countries && _pinned.contains(iso);
+}
+
+void CountrySelectBox::Inner::showPinMenu() {
+	if (_type != Type::Countries) {
+		return;
+	}
+	const auto &list = current();
+	if (_selected < 0 || _selected >= int(list.size())) {
+		return;
+	}
+	const auto iso = list[_selected].iso2;
+	const auto pinned = isPinned(iso);
+	_menu = base::make_unique_q<PopupMenu>(this, st::popupMenuWithIcons);
+	_menu->addAction(
+		pinned ? u"Открепить"_q : u"Закрепить вверху"_q,
+		[=] { togglePin(iso); },
+		pinned ? &st::menuIconUnpin : &st::menuIconPin);
+	_menu->popup(QCursor::pos());
+}
+
+void CountrySelectBox::Inner::togglePin(const QString &iso) {
+	if (_pinned.contains(iso)) {
+		_pinned.removeAll(iso);
+	} else {
+		_pinned.push_front(iso);
+	}
+	SavePinnedCountries(_pinned);
+	rebuild();
+	_mustScrollTo.fire(ScrollToRequest(0, 0));
+}
+
+void CountrySelectBox::Inner::rebuild() {
+	_list.clear();
+	_namesList.clear();
+	_byLetter.clear();
+	init();
+	const auto filter = _filter;
+	_filter = u"a"_q;
+	updateFilter(filter);
 }
 
 void CountrySelectBox::Inner::updateSelectedRow() {

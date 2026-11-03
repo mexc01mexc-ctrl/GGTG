@@ -76,7 +76,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "boxes/send_gif_with_caption_box.h"
 #include "boxes/sticker_set_box.h"
 #include "boxes/translate_box.h"
-#include "settings/ggtg_ai_translate.h"
+#include "settings/ggtg_translate.h"
 #include "chat_helpers/message_field.h"
 #include "chat_helpers/emoji_interactions.h"
 #include "history/history_widget.h"
@@ -3683,7 +3683,7 @@ void HistoryInner::showContextMenu(QContextMenuEvent *e, bool showFromTouch) {
 						}
 					}
 					// GGTG: the free online translation shown in the message
-					// itself (see settings/ggtg_ai_translate.h).
+					// itself (see settings/ggtg_translate.h).
 					if (!hasRestriction
 						&& (view->hasVisibleText() || mediaHasTextForCopy)
 						&& !item->originalText().text.trimmed().isEmpty()) {

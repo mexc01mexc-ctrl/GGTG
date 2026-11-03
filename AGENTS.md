@@ -21,5 +21,6 @@ Read `docs/UI_STYLE_GUIDE.md` for UI and design system conventions (STRICT).
    - Desktop code must also build on Windows with Qt 5 (no Qt 6-only APIs).
 4. **Environment & Builds:**
    - Do not delete the hidden links `~/Desktop/ggtg-macos` and `~/Desktop/ggtg-Android`: the build caches depend on them.
-   - Built artifacts go to `APP/` (`APP/GGTG.dmg` and `APP/GGTG-Android.apk`).
+   - DMG, APK and EXE are built ONLY on GitHub Actions (never locally). Push to `main`, or run `tools/ci.sh run [android|macos|windows|all]`; fetch results with `tools/ci.sh get`.
+   - Fetched artifacts go to `APP/` (`APP/GGTG.dmg`, `APP/GGTG-Android.apk`, `APP/GGTG-Windows-x64.zip`); macOS crash symbols to `APP/symbols/<UUID>/GGTG`.
    - Run `python3 tools/update_file_index.py` after creating or removing any files.

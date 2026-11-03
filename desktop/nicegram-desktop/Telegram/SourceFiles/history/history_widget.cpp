@@ -189,12 +189,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "ui/widgets/checkbox.h"
 #include "ui/widgets/elastic_scroll.h"
 #include "ui/widgets/popup_menu.h"
-#include "core/ggtg_ai.h"
-#include "core/ggtg_ai_feedback.h"
-#include "core/ggtg_ai_profile.h"
-#include "settings/ggtg_ai_chat.h"
-#include "settings/ggtg_ai_dialog.h"
-#include "settings/ggtg_ai_agent.h"
+#include "settings/ggtg_translate.h" // ggtg:
 #include "window/window_main_menu.h"
 #include "data/sms_prompts.h"
 #include "settings/sms_campaign.h"
@@ -329,7 +324,6 @@ HistoryWidget::HistoryWidget(
 , _botKeyboardHide(this, st::historyBotKeyboardHide)
 , _botCommandStart(this, st::historyBotCommandStart)
 , _smsTemplates(this, st::historySmsTemplates)
-, _aiAssist(this, st::historyAiAssist)
 , _voiceRecordBar(std::make_unique<VoiceRecordBar>(
 	this,
 	controller->uiShow(),
@@ -678,7 +672,6 @@ HistoryWidget::HistoryWidget(
 	_botKeyboardHide->hide();
 	_botCommandStart->hide();
 	_smsTemplates->hide();
-	_aiAssist->hide();
 
 	session().attachWebView().requestBots();
 	rpl::merge(
@@ -704,10 +697,6 @@ HistoryWidget::HistoryWidget(
 		_smsHoverTimer.cancel();
 		toggleSmsTemplates();
 	});
-	// The robot shows what the engine is doing, so nobody has to open the
-	// "ИИ" section to know.
-	_aiStateTimer.setCallback([=] { updateAiAssistState(); });
-	_aiStateTimer.callEach(450);
 	// Text selected in the input field can be translated in a window of its
 	// own (the field itself is left alone).
 	_field->addContextMenuHook([=](Ui::InputField::ContextMenuRequest request) {
@@ -725,19 +714,9 @@ HistoryWidget::HistoryWidget(
 			Settings::ShowTextTranslation(
 				this->controller(),
 				selected,
-				Settings::AiChat::ConversationLanguage(history));
+				Settings::ConversationLanguage(history));
 		});
 	});
-	// "ИИ": a click suggests replies, a right click opens more actions.
-	_aiAssist->setAcceptBoth(true);
-	_aiAssist->clicks(
-	) | rpl::on_next([=](Qt::MouseButton button) {
-		if (button == Qt::RightButton) {
-			showAiAssistMenu();
-		} else {
-			writeAiReply();
-		}
-	}, lifetime());
 
 	_topShadow->hide();
 
@@ -1270,7 +1249,6 @@ HistoryWidget::HistoryWidget(
 	_botKeyboardHide->setAccessibleName(tr::lng_bot_keyboard_hide(tr::now));
 	_botCommandStart->setAccessibleName(tr::lng_bot_commands_start(tr::now));
 	_smsTemplates->setAccessibleName(u"Шаблоны сообщений"_q);
-	_aiAssist->setAccessibleName(u"ИИ-помощник"_q);
 	_fieldBarCancel->setAccessibleName(tr::lng_cancel(tr::now));
 
 	session().data().botCommandsChanges(
@@ -5895,24 +5873,6 @@ void HistoryWidget::sendVoice(const VoiceToSend &data) {
 }
 
 void HistoryWidget::send(Api::SendOptions options) {
-	// A message sent after the assistant's draft, but changed by the user,
-	// is how they really write: it is kept as an example for the next
-	// answers. A draft sent as it is says nothing new - the assistant would
-	// only learn to copy itself.
-	if (!_aiLastDraft.isEmpty() && !_editMsgId) {
-		const auto sent = _field->getLastText().trimmed();
-		const auto simple = [](QString text) {
-			return text.simplified();
-		};
-		if (simple(sent) != simple(_aiLastDraft)) {
-			Core::GgtgAi::AddStyleExample(sent);
-			// The pair "draft -> what was sent": the AI learns from the
-			// difference once a few of them have come together.
-			Core::GgtgAi::Feedback::RecordEdit(_aiLastDraft, sent);
-			Core::GgtgAi::Feedback::MaybeLearnFromEdits();
-		}
-		_aiLastDraft.clear();
-	}
 	if (!_history) {
 		return;
 	} else if (options.imitateTyping) {
@@ -7750,256 +7710,6 @@ void HistoryWidget::showSmsTemplatesMenu() {
 	showSmsTemplates();
 }
 
-// Next to the paperclip, whenever the plain compose row is shown and the
-// assistant is on in the "ИИ" section.
-void HistoryWidget::updateAiAssistVisibility() {
-	const auto shown = _canSendTexts
-		&& Core::GgtgAi::CachedSettings().chatAssistant
-		&& !_attachToggle->isHidden()
-		&& !_tabbedSelectorToggle->isHidden()
-		&& !_voiceRecordBar->isActive();
-	if (_aiAssist->isHidden() == shown) {
-		_aiAssist->setVisible(shown);
-	}
-}
-
-// Plain: no key. Green: a key can take a job. Amber: every key rests after a
-// limit. Green and blinking: it is reading the chat and thinking about an
-// answer.
-void HistoryWidget::updateAiAssistState() {
-	if (_aiAssist->isHidden()) {
-		return;
-	}
-	using Level = Core::GgtgAi::EngineLevel;
-	const auto level = Core::GgtgAi::EngineLevelNow();
-	const auto busy = _aiWriting
-		|| Core::GgtgAi::details::SlotState().busy;
-	_aiBlink = !_aiBlink;
-	const style::icon *icon = nullptr;
-	auto shown = 0;
-	if (level == Level::Starting) {
-		// Every key rests: that comes first, even with a job waiting.
-		shown = 2;
-		icon = &st::historyAiAssistIconStarting;
-	} else if (busy) {
-		// Reading and thinking: blinks between green and the plain robot.
-		shown = _aiBlink ? 3 : 0;
-		icon = _aiBlink ? &st::historyAiAssistIconOn : nullptr;
-	} else if (level == Level::Ready) {
-		shown = 1;
-		icon = &st::historyAiAssistIconOn;
-	}
-	if (_aiStateShown == shown) {
-		return;
-	}
-	_aiStateShown = shown;
-	_aiAssist->setIconOverride(icon, icon);
-}
-
-// The assistant reads the chat and types one reply into the input field, a
-// few letters at a time, like a person would. Whatever it writes stays in
-// the field: sending (or erasing) it is up to the user. Typing stops at
-// once if the user starts typing themselves.
-void HistoryWidget::writeAiReply() {
-	if (!_history || !_peer || !_canSendTexts) {
-		return;
-	}
-	if (!Core::GgtgAi::Load().enabled) {
-		controller()->showToast(
-			u"ИИ выключен - подключите его в разделе «ИИ» окна GGTG"_q);
-		return;
-	}
-	if (_aiWriting) {
-		controller()->showToast(u"ИИ уже пишет ответ..."_q);
-		return;
-	}
-	_aiWriting = true;
-	const auto peer = _peer;
-	controller()->showToast(u"ИИ читает переписку и пишет ответ..."_q);
-	Settings::AiChat::WriteReply(
-		_history,
-		_field->getLastText(),
-		crl::guard(this, [=](QString text, QString error) {
-			_aiWriting = false;
-			if (_peer != peer) {
-				return;
-			}
-			if (text.isEmpty()) {
-				controller()->showToast(error.isEmpty()
-					? u"ИИ не смог написать ответ"_q
-					: (u"ИИ: "_q + error));
-				return;
-			}
-			typeAiText(text);
-		}));
-}
-
-void HistoryWidget::typeAiText(const QString &text) {
-	const auto peer = _peer;
-	_aiLastDraft = text;
-	const auto generation = ++_aiTypingGeneration;
-	_field->setFocus();
-	_field->setText(QString());
-	const auto step = std::make_shared<Fn<void(int)>>();
-	const auto weak = std::weak_ptr<Fn<void(int)>>(step);
-	*step = [=](int from) {
-		if (generation != _aiTypingGeneration || _peer != peer) {
-			return;
-		}
-		// The user started typing themselves: the field is theirs again.
-		if (_field->getLastText() != text.left(from)) {
-			return;
-		}
-		const auto to = std::min(
-			int(text.size()),
-			from + 2 + int(text.size() / 80));
-		_field->setText(text.left(to));
-		if (to >= text.size()) {
-			return;
-		}
-		// The delayed call keeps the step alive until it runs.
-		if (const auto strong = weak.lock()) {
-			base::call_delayed(crl::time(22), this, [=] {
-				(*strong)(to);
-			});
-		}
-	};
-	(*step)(0);
-}
-
-// "Научиться": reads this whole conversation and learns from it how the
-// user writes (see Settings::AiChat::LearnFromChat); a small window shows
-// the progress and what was learned.
-void HistoryWidget::learnFromThisChat() {
-	if (!_history) {
-		return;
-	}
-	const auto history = _history;
-	controller()->show(Box([=](not_null<Ui::GenericBox*> box) {
-		box->setTitle(rpl::single(u"Научиться на переписке"_q));
-		box->setWidth(st::boxWideWidth);
-		const auto status = box->addRow(object_ptr<Ui::FlatLabel>(
-			box,
-			u"ИИ читает переписку (первый раз модели нужно несколько "
-				"секунд на запуск)..."_q,
-			st::boxLabel));
-		const auto result = box->addRow(object_ptr<Ui::FlatLabel>(
-			box,
-			QString(),
-			st::boxDividerLabel));
-		result->setSelectable(true);
-		box->addButton(rpl::single(u"Закрыть"_q), [=] {
-			box->closeBox();
-		});
-		Settings::AiChat::LearnFromChat(
-			history,
-			crl::guard(box, [=](QString text) {
-				status->setText(text);
-			}),
-			crl::guard(box, [=](QString error) {
-				if (!error.isEmpty()) {
-					status->setText(u"Не вышло: "_q + error);
-					return;
-				}
-				status->setText(u"✓ Готово. ИИ изучил, как вы пишете и что "
-					"работает, и записал это в профиль. Теперь его ответы "
-					"будут ближе к вашему стилю."_q);
-				result->setText(u"Что ИИ знает теперь:\n"_q
-					+ Core::GgtgAi::Profile::Block(1500).trimmed()
-					+ u"\n\nПримеров вашего стиля: "_q
-					+ QString::number(Core::GgtgAi::LoadExamples().size()));
-			}));
-	}));
-}
-
-void HistoryWidget::showAiAssist(Settings::AiChatMode mode) {
-	if (!_history || !_peer || !_canSendTexts) {
-		return;
-	}
-	const auto peer = _peer;
-	Settings::ShowAiChatAssistant(
-		controller(),
-		_history,
-		mode,
-		_field->getLastText(),
-		crl::guard(this, [=](QString text) {
-			if (_peer != peer) {
-				return;
-			}
-			// The reply goes into the field for the user to edit and send
-			// themselves - nothing is sent by the assistant.
-			_field->setFocus();
-			_field->setText(text);
-		}));
-}
-
-// What else the "ИИ" button does on a right click.
-void HistoryWidget::showAiAssistMenu() {
-	if (!_history || !_peer) {
-		return;
-	}
-	const auto history = _history;
-	_aiAssistMenu = base::make_unique_q<Ui::PopupMenu>(
-		this,
-		st::popupMenuWithIcons);
-	const auto add = [&](
-			const QString &text,
-			Fn<void()> callback,
-			const style::icon *icon = nullptr) {
-		_aiAssistMenu->addAction(text, std::move(callback), icon);
-	};
-	using Mode = Settings::AiChatMode;
-	// What the assistant can do with this chat is one window (variants, the
-	// last message, what the person wants, fixing my text - switched inside
-	// it); everything about the AI itself is in the chat with the AI.
-	add(
-		u"Написать ответ в поле"_q,
-		[=] { writeAiReply(); },
-		&st::menuIconBot);
-	add(
-		u"Помощь ИИ в этом чате..."_q,
-		[=] { showAiAssist(Mode::Suggest); },
-		&st::menuIconReplace);
-	_aiAssistMenu->addSeparator();
-	add(
-		Settings::AiChat::IsMarkedSuccess(history)
-			? u"Снять отметку «Успех»"_q
-			: u"✓ Это успех (ИИ учится)"_q,
-		[=] { Settings::AiChat::ToggleSuccess(controller(), history); },
-		&st::menuIconSelect);
-	add(u"Научиться на этой переписке"_q, [=] {
-		Ui::PostponeCall(this, [=] {
-			learnFromThisChat();
-		});
-	}, &st::menuIconDownload);
-	add(u"Забыть эту переписку"_q, [=] {
-		Settings::AiChat::ForgetChat(history);
-		controller()->showToast(u"Помощник забыл эту переписку"_q);
-	}, &st::menuIconDelete);
-	if (const auto user = history->peer->asUser()) {
-		const auto source = Data::SmsSourceOf(user->username());
-		if (!source.isEmpty()) {
-			_aiAssistMenu->addSeparator();
-			// A click copies the full name of the group with its @username
-			// (the base is titled "Название (@username)").
-			add(u"Откуда контакт: "_q + source.left(40), [=] {
-				QGuiApplication::clipboard()->setText(source);
-				controller()->showToast(
-					u"Скопировано: "_q + source.left(80));
-			}, &st::menuIconCopy);
-		}
-	}
-	_aiAssistMenu->addSeparator();
-	add(u"Чат с ИИ..."_q, [=] {
-		Ui::PostponeCall(this, [=] {
-			Window::OpenGgtgSection(controller(), u"ai"_q);
-		});
-	}, &st::menuIconBot);
-	_aiAssistMenu->setForcedVerticalOrigin(
-		Ui::PopupMenu::VerticalOrigin::Bottom);
-	_aiAssistMenu->popup(QCursor::pos());
-}
-
 void HistoryWidget::showSmsTemplateContextMenu(
 		uint64 id,
 		const QString &name,
@@ -8110,7 +7820,6 @@ void HistoryWidget::saveFieldAsSmsTemplate() {
 
 void HistoryWidget::moveFieldControls() {
 	updateSmsTemplatesVisibility();
-	updateAiAssistVisibility();
 	auto keyboardHeight = 0;
 	auto bottom = height();
 	auto maxKeyboardHeight = computeMaxFieldHeight() - fieldHeight();
@@ -8137,10 +7846,6 @@ void HistoryWidget::moveFieldControls() {
 	}
 	_attachToggle->moveToLeft(left, buttonsBottom);
 	left += _attachToggle->width();
-	if (!_aiAssist->isHidden()) {
-		_aiAssist->moveToLeft(left, buttonsBottom);
-		left += _aiAssist->width();
-	}
 	if (_sendAs) {
 		_sendAs->moveToLeft(left, buttonsBottom);
 		left += _sendAs->width();
@@ -8239,10 +7944,6 @@ void HistoryWidget::updateFieldSize() {
 	updateSmsTemplatesVisibility();
 	if (!_smsTemplates->isHidden()) {
 		fieldWidth -= _smsTemplates->width();
-	}
-	updateAiAssistVisibility();
-	if (!_aiAssist->isHidden()) {
-		fieldWidth -= _aiAssist->width();
 	}
 	if (_botMenu) {
 		fieldWidth -= st::historyBotMenuSkip + _botMenu->width();

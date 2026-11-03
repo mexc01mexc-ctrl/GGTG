@@ -643,8 +643,8 @@ inline void FillGgtgSyncBox(
 						object_ptr<Ui::LinkButton>(
 							list,
 							((id == settings->mainUserId)
-								? u"● "_q
-								: u"○ "_q) + label),
+								? (label + u" (основной)"_q)
+								: label)),
 						style::margins(
 							st::boxRowPadding.left(),
 							st::defaultVerticalListSkip,
@@ -724,7 +724,7 @@ inline void FillGgtgSyncBox(
 	const auto manual = box->addRow(
 		object_ptr<Ui::LinkButton>(
 			box,
-			u"Ключ шифрования вручную (без QR-кода)  ▾"_q),
+			u"Ключ шифрования вручную (без QR-кода)"_q),
 		st::boxRowPadding);
 	const auto phraseWrap = box->addRow(
 		object_ptr<Ui::SlideWrap<Ui::VerticalLayout>>(

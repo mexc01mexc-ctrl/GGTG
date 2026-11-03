@@ -89,11 +89,10 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "data/scraped_members_db.h"
 #include "data/account_spam_status.h"
 #include "settings/sms_campaign.h"
-#include "settings/ggtg_ai_cards.h"
+#include "settings/ggtg_tabs.h"
 #include "mtproto/proxy_pool.h"
 #include "ui/layers/generic_box.h"
 #include "ui/layers/layer_widget.h"
-#include "settings/ggtg_ai_box.h"
 #include "settings/ggtg_sync_box.h"
 #include "settings/ggtg_add_accounts.h"
 #include "settings/ggtg_registration.h"
@@ -1583,30 +1582,6 @@ public:
 			row->show();
 			const auto key = section.key;
 			row->setClickedCallback([=] { showSection(key); });
-			if (key == u"ai"_q) {
-				// Green while a key can take a job (amber while every key
-				// rests after a limit): no need to open the section.
-				// The night training runs by itself (when switched on).
-				Settings::AiInbox::StartBackground();
-				const auto timer = Ui::CreateChild<QTimer>(row);
-				const auto refresh = [=] {
-					using Level = Core::GgtgAi::EngineLevel;
-					switch (Core::GgtgAi::EngineLevelNow()) {
-					case Level::Ready:
-						row->setTint(QColor(0x3f, 0xc2, 0x5c));
-						break;
-					case Level::Starting:
-						row->setTint(QColor(0xe8, 0xa8, 0x2c));
-						break;
-					default:
-						row->setTint(std::nullopt);
-						break;
-					}
-				};
-				QObject::connect(timer, &QTimer::timeout, row, refresh);
-				timer->start(1000);
-				refresh();
-			}
 			_entries.push_back({
 				.key = key,
 				.group = section.group,
@@ -2124,7 +2099,7 @@ private:
 			names.push_back(tab.title);
 		}
 		const auto tab = std::clamp(LastGgtgTabs()[key], 0, int(names.size()) - 1);
-		_tabsWidget = base::make_unique_q<Settings::AiTabs>(this, names, tab);
+		_tabsWidget = base::make_unique_q<Settings::GgtgTabs>(this, names, tab);
 		_tabsWidget->activeChanges(
 		) | rpl::on_next([=](int index) {
 			LastGgtgTabs()[key] = index;
@@ -2170,7 +2145,7 @@ private:
 	base::unique_qptr<FloatingBoxHost> _content;
 	Ui::FlatLabel *_title = nullptr;
 	Ui::FlatLabel *_subtitle = nullptr;
-	base::unique_qptr<Settings::AiTabs> _tabsWidget;
+	base::unique_qptr<Settings::GgtgTabs> _tabsWidget;
 	std::vector<Group> _groupLabels;
 	QString _subtitleText;
 	QString _description;
@@ -2545,8 +2520,6 @@ void OpenGgtgShell(not_null<Window::SessionController*> controller) {
 			}
 			const auto lastRun = cache->lastRun;
 			const auto proxyLists = int(MTP::GlobalProxyPool().lists().size());
-			using Level = Core::GgtgAi::EngineLevel;
-			const auto level = Core::GgtgAi::EngineLevelNow();
 			auto running = std::vector<Core::ProcessSnapshot>();
 			for (const auto &process : Core::App().processes().list()) {
 				if (process.status == Core::ProcessStatus::Running) {
@@ -2570,11 +2543,6 @@ void OpenGgtgShell(not_null<Window::SessionController*> controller) {
 					"остальное оживёт."_q;
 				button = u"Добавить аккаунт"_q;
 				target = [=] { go(u"accounts"_q); };
-			} else if (level != Level::Ready && level != Level::Starting) {
-				text = u"Подключите бесплатный ключ ИИ: без него ответы "
-					"людям не готовятся."_q;
-				button = u"Открыть ИИ"_q;
-				target = [=] { go(u"ai"_q); };
 			} else if (!running.empty()) {
 				text = u"Сейчас идёт: "_q + running.front().title
 					+ (running.size() > 1
@@ -2648,19 +2616,6 @@ void OpenGgtgShell(not_null<Window::SessionController*> controller) {
 				runSub,
 				accent,
 				[=] { go(u"sms"_q); });
-			const auto aiReady = (level == Level::Ready);
-			grid->add(
-				u"ИИ"_q,
-				aiReady
-					? u"Работает"_q
-					: (level == Level::Starting)
-					? u"Отдыхает"_q
-					: u"Нужен ключ"_q,
-				(level == Level::Starting)
-					? u"ключи ждут после лимита"_q
-					: (aiReady ? u"всё в порядке"_q : u"бесплатный, за минуту"_q),
-				aiReady ? good : warn,
-				[=] { go(u"ai"_q); });
 
 			// What is running right now.
 			Ui::AddSkip(top);
@@ -2895,22 +2850,10 @@ void FillGgtgShell(
 		.icon = &st::menuIconPhone,
 		.label = rpl::single(u"Регистрация"_q),
 		.title = u"Регистрация аккаунтов"_q,
-		.subtitle = u"Автоматическая (по SMS) и ручная регистрация аккаунтов."_q,
-		.description = u"Регистрация новых аккаунтов Telegram: автоматическая через сервисы SMS-активаций (SMS-Activate, 5SIM, Vak-SMS, SMSHub и др.) или ручная по введённому номеру телефона. Программа эмулирует мобильные профили, использует прокси, защитные Push-токены (FCM), решает капчу, устанавливает 2FA и сохраняет сессии."_q,
+		.subtitle = u"Авто, ручная регистрация и замена номера на существующих аккаунтах."_q,
+		.description = u"Три режима. Авто: регистрация новых аккаунтов через сервисы SMS-активаций (SMS-Activate, 5SIM, Vak-SMS, SMSHub и др.). Ручной: по введённому номеру телефона. Замена номера: перенос существующих аккаунтов на новые номера (Telegram требует мобильную сессию старше 24 часов). Программа эмулирует мобильные профили, использует прокси, защитные Push-токены (FCM), решает капчу, устанавливает 2FA и сохраняет сессии."_q,
 		.makeBox = [=](not_null<Ui::SeparatePanel*>) {
 			return Settings::MakeRegistrationBox(controller);
-		},
-	});
-	sections.push_back({
-		.key = u"phone_migration"_q,
-		.group = u"Аккаунты"_q,
-		.icon = &st::menuIconReplace,
-		.label = rpl::single(u"Смена номера"_q),
-		.title = u"Смена номера (миграция)"_q,
-		.subtitle = u"Замена страны и номера на существующих аккаунтах через SMS."_q,
-		.description = u"Перенос существующих аккаунтов на новые номера телефонов через сервисы SMS-активаций (SMS-Activate, 5SIM, Vak-SMS, SMSHub и др.). Сервер Telegram требует мобильную сессию (Android/iOS) старше 24 часов (иначе FRESH_CHANGE_PHONE_FORBIDDEN). Программа проверяет наличие сессии, при необходимости создает её и запускает таймер отлёжки, заказывает номер, принимает SMS и переносит аккаунт."_q,
-		.makeBox = [=](not_null<Ui::SeparatePanel*>) {
-			return Settings::MakePhoneMigrationBox(controller);
 		},
 	});
 	sections.push_back({
@@ -3091,23 +3034,6 @@ void FillGgtgShell(
 			return Settings::MakeProcessesBox();
 		},
 	});
-	sections.push_back({
-		.key = u"ai"_q,
-		.group = u"Контроль"_q,
-		.icon = &st::menuIconBot,
-		.label = rpl::single(u"ИИ"_q),
-		.title = u"ИИ"_q,
-		.subtitle = u"Ваш помощник: говорите с ним обычными словами."_q,
-		.description = u"Чат с ИИ: подключение, разговор, обучение и настройки в одном месте. Бесплатные облачные модели без карты (Gemini, Groq, OpenRouter, NVIDIA, LLM7)."_q,
-		// The whole section is the chat with the AI: talking, connecting a
-		// key, teaching and the settings are all there.
-		.makeBox = [=](not_null<Ui::SeparatePanel*>) {
-			return Box([=](not_null<Ui::GenericBox*> box) {
-				Settings::FillAiAgent(box, false);
-			});
-		},
-	});
-
 	sections.push_back({
 		.key = u"sync"_q,
 		.group = u"Контроль"_q,

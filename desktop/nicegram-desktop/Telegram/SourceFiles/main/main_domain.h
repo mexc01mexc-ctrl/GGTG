@@ -268,6 +268,10 @@ private:
 // Shorthand for Core::App().domain().isLive(account).
 [[nodiscard]] bool AccountIsLive(not_null<Account*> account);
 
+// ggtg: the account is still in the domain and has a session, so
+// `account->session()` is safe to call (long jobs re-check it after delays).
+[[nodiscard]] bool AccountHasSession(not_null<Account*> account);
+
 // The accounts from `chosen` that are still live, in the app's own order.
 [[nodiscard]] std::vector<not_null<Account*>> LiveAccounts(
 	const base::flat_set<not_null<Account*>> &chosen);

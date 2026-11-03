@@ -5,6 +5,7 @@ the official desktop application for the Telegram messaging service.
 For license and copyright information please follow this link:
 https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
+#include <QtWidgets/QApplication> // ggtg: QApplication::startDragDistance below
 #include "info/profile/info_profile_actions.h"
 
 #include "api/api_blocked_peers.h"
@@ -34,6 +35,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "core/click_handler_types.h"
 #include "core/ui_integration.h"
 #include "core/ggtg_id_date.h"
+#include "data/scraped_members_db.h" // ggtg: where we wrote the person from
 #include "core/ggtg_fake_detector.h"
 #include "data/business/data_business_common.h"
 #include "data/business/data_business_info.h"
@@ -1765,11 +1767,19 @@ Section DetailsFiller::makeInfo() {
 		{
 			const auto rawUserId = user->id.value;
 			if (rawUserId > 0) {
-				const auto idDate = Ggtg::EstimateIdDate(rawUserId);
+				const auto photoBound = Ggtg::FakeDetector::FirstPhotoDate(user);
+				const auto idDate = Ggtg::EstimateIdDate(rawUserId, photoBound);
 				if (!idDate.isEmpty()) {
+					// "~август 2024 · около 2 лет": the date and how old the account is.
+					const auto ageText = Ggtg::FormatAccountAge(
+						Ggtg::EstimateIdTime(rawUserId, photoBound),
+						int64(base::unixtime::now()));
+					const auto dateValue = ageText.isEmpty()
+						? idDate
+						: (idDate + u" · "_q + ageText);
 					const auto dateLine = addInfoOneLine(
 						u"Примерная дата регистрации"_q,
-						rpl::single(TextWithEntities{ idDate }),
+						rpl::single(TextWithEntities{ dateValue }),
 						u"Копировать дату"_q,
 						st::infoProfileLabeledPadding,
 						st::popupMenuWithIcons);
@@ -1847,6 +1857,111 @@ Section DetailsFiller::makeInfo() {
 					}
 				}
 
+				// ggtg: where we wrote this person from (the base), which account did it and when.
+				// A click on a line copies it, a right click opens the same menu.
+				if (const auto username = user->username().toLower(); !username.isEmpty()) {
+					if (const auto record = Data::FindSmsSendRecord(username)) {
+						const auto addCopyLine = [&](
+								const QString &label,
+								const QString &value,
+								const QString &copyText,
+								const QString &toast) {
+							const auto line = addInfoOneLine(
+								label,
+								rpl::single(TextWithEntities{ value }),
+								u"Копировать"_q,
+								st::infoProfileLabeledPadding,
+								st::popupMenuWithIcons);
+							const auto text = line.text;
+							const auto subtext = line.subtext;
+							const auto container = text->parentWidget();
+							text->setSelectable(false);
+							text->setCursor(style::cur_pointer);
+							subtext->setCursor(style::cur_pointer);
+							if (container) {
+								container->setCursor(style::cur_pointer);
+							}
+							struct CopyState {
+								base::unique_qptr<Ui::PopupMenu> menu;
+								QPoint pressPos;
+							};
+							const auto state = text->lifetime().make_state<CopyState>();
+							const auto copy = [=] {
+								TextUtilities::SetClipboardText(
+									TextForMimeData::Simple(copyText));
+								controller->showToast(toast);
+							};
+							const auto showMenu = [=](const QPoint &globalPos) {
+								state->menu = base::make_unique_q<Ui::PopupMenu>(
+									text,
+									st::popupMenuWithIcons);
+								state->menu->addAction(
+									u"Копировать"_q,
+									copy,
+									&st::menuIconCopy);
+								state->menu->popup(globalPos);
+							};
+							const auto filter = [=](not_null<QEvent*> e) {
+								switch (e->type()) {
+								case QEvent::MouseButtonPress: {
+									const auto me = static_cast<QMouseEvent*>(e.get());
+									if (me->button() == Qt::LeftButton) {
+										state->pressPos = me->globalPos();
+									}
+									break;
+								}
+								case QEvent::MouseButtonRelease: {
+									const auto me = static_cast<QMouseEvent*>(e.get());
+									if (me->button() == Qt::LeftButton
+										&& (me->globalPos() - state->pressPos).manhattanLength()
+											< QApplication::startDragDistance()) {
+										copy();
+										return base::EventFilterResult::Cancel;
+									}
+									break;
+								}
+								case QEvent::ContextMenu: {
+									const auto ce = static_cast<QContextMenuEvent*>(e.get());
+									showMenu(ce->globalPos());
+									return base::EventFilterResult::Cancel;
+								}
+								default:
+									break;
+								}
+								return base::EventFilterResult::Continue;
+							};
+							base::install_event_filter(text, filter, text->lifetime());
+							base::install_event_filter(subtext, filter, text->lifetime());
+							if (container) {
+								base::install_event_filter(container, filter, text->lifetime());
+							}
+						};
+						const auto source = !record->source.isEmpty()
+							? record->source
+							: Data::SmsSourceOf(username);
+						if (!source.isEmpty()) {
+							addCopyLine(
+								u"Из какой базы написали"_q,
+								source,
+								source,
+								u"Название базы скопировано"_q);
+						}
+						const auto who = (record->account.isEmpty()
+							? u"аккаунт неизвестен"_q
+							: record->account)
+							+ u" · "_q
+							+ QDateTime::fromSecsSinceEpoch(record->at)
+								.toString(u"dd.MM.yyyy HH:mm"_q)
+							+ u" · "_q
+							+ Data::SmsMarkTitle(record->status);
+						addCopyLine(
+							u"Кто писал и когда"_q,
+							who,
+							who,
+							u"Скопировано"_q);
+					}
+				}
+
 				const auto fakeResult = Ggtg::FakeDetector::AnalyzeUserData(user);
 				const auto summaryText = fakeResult.verdictText
 					+ (fakeResult.reasons.isEmpty()
@@ -1887,7 +2002,7 @@ Section DetailsFiller::makeInfo() {
 						fakeText,
 						st::popupMenuWithIcons);
 					fakeMenuState->menu->addAction(
-						u"Разбор профиля и ИИ"_q,
+						u"Подробный разбор"_q,
 						openFakeDetails,
 						&st::menuIconShowInChat);
 					fakeMenuState->menu->addAction(

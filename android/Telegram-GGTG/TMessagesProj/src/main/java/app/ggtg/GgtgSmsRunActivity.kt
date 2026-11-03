@@ -259,7 +259,7 @@ class GgtgSmsRunActivity : BaseFragment() {
             setTypeface(null, if (folded) Typeface.BOLD else Typeface.NORMAL)
         }, LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f))
         val detail = when {
-            folded -> row.account + if (row.indices[0] in expanded) "  ▴" else "  ▾"
+            folded -> row.account
             row.inProgress -> "в работе · ${row.account}"
             else -> listOfNotNull(
                 o?.takeIf { it != SmsOutcome.Sent }?.let { first.reason.ifEmpty { it.inline } },

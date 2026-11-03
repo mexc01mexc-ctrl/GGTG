@@ -74,7 +74,7 @@ struct Run {
 };
 
 [[nodiscard]] inline std::shared_ptr<Run> &Active() {
-	static auto result = std::shared_ptr<Run>();
+	static auto &result = *new std::shared_ptr<Run>(); // ggtg: leaked, no exit() destructor
 	return result;
 }
 

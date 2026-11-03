@@ -263,7 +263,7 @@ val icon = R.drawable.msg_delete    // удаление
 - [ ] Все радиокнопки и чекбоксы визуально меняют состояние при клике.
 - [ ] Аккаунты сгруппированы по папкам через стандартный компонент аккордеона.
 - [ ] Текст нигде не содержит сырых тегов `<b>...</b>`.
-- [ ] Проект успешно собирается на macOS (`xcodebuild` + `make_dmg.sh` -> `APP/GGTG.dmg`).
-- [ ] Проект успешно собирается на Android (`./android/build_release.sh` -> `APP/GGTG-Android.apk`).
+- [ ] Проект успешно собирается на macOS в GitHub Actions (`tools/ci.sh run macos`, `tools/ci.sh get macos` -> `APP/GGTG.dmg`).
+- [ ] Проект успешно собирается на Android в GitHub Actions (`tools/ci.sh run android`, `tools/ci.sh get android` -> `APP/GGTG-Android.apk`).
 - [ ] Обновлён индекс файлов: `python3 tools/update_file_index.py`.
 

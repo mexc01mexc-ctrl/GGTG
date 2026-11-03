@@ -9,7 +9,6 @@ import android.widget.RadioGroup
 import android.widget.ScrollView
 import android.widget.TextView
 import android.widget.Toast
-import app.ggtg.ai.GgtgAi
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -451,112 +450,90 @@ object GgtgFakeDetector {
         return Pair(alive, fakes)
     }
 
-    @JvmStatic
-    fun trainFromMarked(context: Context, onDone: ((Int) -> Unit)? = null) {
+    class LearnResult(val added: List<String>, val fakes: Int, val alive: Int)
+
+    // What the detector learns from the marks of the person (no models, no keys): the words that repeat in
+    // the usernames marked as fakes and are not in the usernames marked as alive become keywords.
+    fun learnFromMarks(): LearnResult {
         val patterns = loadPatterns()
-        val fakesList = patterns.markedFakeUsernames.toMutableList()
-        // Collect from GgtgDb as well
+        val fakes = patterns.markedFakeUsernames.toMutableList()
         for (rec in GgtgDb.loadAllSmsRecords()) {
-            if (rec.status == GgtgDb.SmsStatus.SuspectedFake && !fakesList.contains(rec.username)) {
-                fakesList.add(rec.username)
-            }
+            if (rec.status == GgtgDb.SmsStatus.SuspectedFake && !fakes.contains(rec.username)) fakes.add(rec.username)
         }
-        if (fakesList.isEmpty()) {
-            Toast.makeText(context, "Нет помеченных фейков для обучения ИИ", Toast.LENGTH_SHORT).show()
-            return
-        }
-
-        Toast.makeText(context, "ИИ анализирует базу фейков...", Toast.LENGTH_SHORT).show()
-
-        val wordRe = Regex("[a-zA-Zа-яА-ЯёЁ]{3,}")
-        val tokenCounts = HashMap<String, Int>()
-        for (u in fakesList) {
-            for (m in wordRe.findAll(u)) {
-                val tok = m.value.lowercase()
-                tokenCounts[tok] = (tokenCounts[tok] ?: 0) + 1
-            }
-        }
-        val statisticalCandidates = tokenCounts.filter { (tok, count) ->
-            count >= 2 && !patterns.markedAliveUsernames.contains(tok) && !patterns.customKeywords.contains(tok)
-        }.keys.toList()
-
-        val finish = { newKws: List<String>, summary: String ->
-            val p = loadPatterns()
-            val added = mutableListOf<String>()
-            for (kw in newKws + statisticalCandidates) {
-                val clean = kw.trim().lowercase()
-                if (clean.isNotEmpty() && p.customKeywords.add(clean)) {
-                    added.add(clean)
+        val wordRe = Regex("[a-zA-Zа-яА-ЯёЁ]{4,}")
+        fun count(names: Collection<String>): Map<String, Int> {
+            val result = HashMap<String, Int>()
+            for (name in names) {
+                for (token in wordRe.findAll(name).map { it.value.lowercase() }.toSet()) {
+                    result[token] = (result[token] ?: 0) + 1
                 }
             }
-            savePatterns(p)
-
-            val dir = File(ApplicationLoader.applicationContext.filesDir, "ggtg_bulk_db/ai_knowledge")
-            dir.mkdirs()
-            val kFile = File(dir, "fake_patterns.json")
-            val kJson = JSONObject().apply {
-                put("updated_at", System.currentTimeMillis() / 1000L)
-                put("fakes_count", fakesList.size)
-                put("keywords", JSONArray(p.customKeywords))
-                put("summary", summary)
-            }
-            kFile.writeText(kJson.toString(2))
-
-            val msg = buildString {
-                append("Проанализировано фейков: ${fakesList.size}\nЖивых аккаунтов: ${patterns.markedAliveUsernames.size}\n\n")
-                if (added.isNotEmpty()) {
-                    append("Выявлено новых спам-токенов (${added.size}):\n• " + added.joinToString("\n• ") + "\n\n")
-                } else {
-                    append("Новых повторяющихся паттернов не обнаружено (все известные правила уже учтены).\n\n")
-                }
-                if (summary.isNotEmpty()) {
-                    append("ИИ-заключение:\n$summary\n\n")
-                }
-                append("Все новые критерии сохранены и применяются при фильтрации и в рассылках.")
-            }
-
-            AlertDialog.Builder(context)
-                .setTitle("Обучение детектора завершено")
-                .setMessage(msg)
-                .setPositiveButton("Отлично", null)
-                .show()
-
-            onDone?.invoke(added.size)
+            return result
         }
-
-        val sampleFakes = fakesList.take(40).joinToString(", ")
-        val prompt = "Проанализируй список спам-ботов и фейковых Telegram-юзернеймов, помеченных пользователем:\n" +
-            sampleFakes + "\n\nВыяви общие спам-шаблоны и назови 3-7 характерных ключевых слов или подозрительных корней слов. " +
-            "Ответь в формате JSON:\n{\n  \"keywords\": [\"слово1\", \"слово2\"],\n  \"summary\": \"краткое описание шаблонов ботов\"\n}"
-
-        scope.launch {
-            val answer = withContext(Dispatchers.IO) {
-                GgtgAi.ask(
-                    "Ты эксперт по машинному обучению и выявлению ботов в Telegram. Анализируй шаблоны имен и возвращай строго JSON.",
-                    prompt,
-                    0.2,
-                    500,
-                    hard = false
-                )
-            }
-            val text = answer.text.trim()
-            val kws = mutableListOf<String>()
-            var sum = ""
-            val startIdx = text.indexOf('{')
-            val endIdx = text.lastIndexOf('}')
-            if (startIdx >= 0 && endIdx > startIdx) {
-                try {
-                    val obj = JSONObject(text.substring(startIdx, endIdx + 1))
-                    obj.optJSONArray("keywords")?.let { arr ->
-                        for (i in 0 until arr.length()) kws.add(arr.optString(i))
-                    }
-                    sum = obj.optString("summary")
-                } catch (_: Throwable) {}
-            }
-            finish(kws, sum.ifEmpty { "Анализ проведён по частотности спам-токенов." })
+        val inFakes = count(fakes)
+        val inAlive = count(patterns.markedAliveUsernames)
+        val added = mutableListOf<String>()
+        for ((token, n) in inFakes) {
+            val aliveN = inAlive[token] ?: 0
+            // at least twice among the fakes and at least three times more often than among the alive
+            if (n >= 2 && n >= 3 * aliveN && patterns.customKeywords.add(token)) added.add(token)
         }
+        if (added.isNotEmpty()) savePatterns(patterns)
+        return LearnResult(added, fakes.size, patterns.markedAliveUsernames.size)
     }
 
+    @JvmStatic
+    fun trainFromMarked(context: Context, onDone: ((Int) -> Unit)? = null) {
+        val result = learnFromMarks()
+        if (result.fakes == 0) {
+            Toast.makeText(context, "Нет помеченных фейков, на которых можно учиться", Toast.LENGTH_SHORT).show()
+            return
+        }
+        val msg = buildString {
+            append("Фейков в метках: ${result.fakes}\nЖивых в метках: ${result.alive}\n\n")
+            if (result.added.isNotEmpty()) append("Новые признаки (${result.added.size}):\n• " + result.added.joinToString("\n• ") + "\n\n")
+            else append("Новых повторяющихся признаков нет: все известные уже учтены.\n\n")
+            append("Признаки применяются при проверке профилей и в рассылках.")
+        }
+        AlertDialog.Builder(context).setTitle("Детектор пересчитан").setMessage(msg).setPositiveButton("Готово", null).show()
+        onDone?.invoke(result.added.size)
+    }
+
+    /** The date of the profile photo of a person when it is known (unix seconds): the account is not younger. */
+    @JvmStatic
+    fun photoBound(fullUser: TLRPC.UserFull?): Long = (fullUser?.profile_photo?.date ?: 0).toLong()
+
+    /** The base (group) this person was written from, "" when the program never wrote to them. */
+    @JvmStatic
+    fun sourceOf(user: TLRPC.User?): String {
+        val name = user?.username?.lowercase().orEmpty()
+        if (name.isEmpty()) return ""
+        return GgtgDb.findSmsRecord(name)?.source.orEmpty()
+    }
+
+    /** "account · 12.11.2026 14:05 · Отправлено" for the profile; "" when the program never wrote to them. */
+    @JvmStatic
+    fun writerLineOf(user: TLRPC.User?): String {
+        val name = user?.username?.lowercase().orEmpty()
+        if (name.isEmpty()) return ""
+        val record = GgtgDb.findSmsRecord(name) ?: return ""
+        val whenText = java.text.SimpleDateFormat("dd.MM.yyyy HH:mm", java.util.Locale.getDefault()).format(java.util.Date(record.at * 1000L))
+        return record.account.ifEmpty { "аккаунт неизвестен" } + " · " + whenText + " · " + smsStatusTitle(record.status)
+    }
+
+    private fun smsStatusTitle(status: GgtgDb.SmsStatus) = when (status) {
+        GgtgDb.SmsStatus.Sent -> "Отправлено"
+        GgtgDb.SmsStatus.SpamAcc -> "Аккаунт в спам-блоке"
+        GgtgDb.SmsStatus.NotFound -> "Не найден"
+        GgtgDb.SmsStatus.Restricted -> "Закрыл личные сообщения"
+        GgtgDb.SmsStatus.PeerLimit -> "Лимит Telegram"
+        GgtgDb.SmsStatus.SuspectedFake -> "Похож на фейк"
+        GgtgDb.SmsStatus.LongAgo -> "Был в сети давно"
+    }
+
+    // The panel of a person (the brain next to the compose field, the profile): the verdict of the detector,
+    // where we wrote them from, which account and when, how old the account is, and the marks
+    // "фейк" / "живой" that the detector learns from.
     @JvmStatic
     fun showFakeDetailsDialog(
         context: Context,
@@ -566,108 +543,81 @@ object GgtgFakeDetector {
     ) {
         if (user == null) return
         val analysis = analyzeUser(user, fullUser)
-
         val root = LinearLayout(context).apply {
             orientation = LinearLayout.VERTICAL
             val pad = AndroidUtilities.dp(16f)
             setPadding(pad, pad, pad, pad)
         }
-
-        val verdictView = TextView(context).apply {
-            text = "Вердикт: ${analysis.verdictText}"
-            textSize = 17f
-            setTypeface(null, android.graphics.Typeface.BOLD)
-            setTextColor(Theme.getColor(Theme.key_windowBackgroundWhiteBlackText))
-            setPadding(0, 0, 0, AndroidUtilities.dp(8f))
-        }
-        root.addView(verdictView)
-
-        val reasonsText = if (analysis.reasons.isNotEmpty()) {
-            "Факторы оценки:\n• " + analysis.reasons.joinToString("\n• ")
-        } else {
-            "Подозрительных признаков не обнаружено."
-        }
-        val reasonsView = TextView(context).apply {
-            text = reasonsText
-            textSize = 14f
-            setTextColor(Theme.getColor(Theme.key_windowBackgroundWhiteGrayText))
-            setPadding(0, 0, 0, AndroidUtilities.dp(16f))
-        }
-        root.addView(reasonsView)
-
-        val aiStatusView = TextView(context).apply {
-            textSize = 14f
-            setTextColor(Theme.getColor(Theme.key_windowBackgroundWhiteBlackText))
-            visibility = View.GONE
-            setPadding(0, AndroidUtilities.dp(8f), 0, AndroidUtilities.dp(12f))
-        }
-
-        val aiButton = GgtgUi.button(context, "Запросить разбор у ИИ-нейросети") {
-            aiStatusView.visibility = View.VISIBLE
-            aiStatusView.text = "Анализирую профиль..."
-            val prompt = "Оцени Telegram-профиль пользователя:\n" +
-                "ID: ${user.id}\n" +
-                "Username: @${user.username.orEmpty()}\n" +
-                "Имя: ${UserObject.getUserName(user)}\n" +
-                "Описание: ${fullUser?.about.orEmpty()}\n" +
-                "Премиум: ${if (user.premium) "Да" else "Нет"}\n" +
-                "Дай краткий вердикт: живой человек, бот или спам-аккаунт, и назови главную причину (до 2 предложений)."
-
-            scope.launch {
-                val answer = withContext(Dispatchers.IO) {
-                    GgtgAi.ask(
-                        "Ты эксперт по выявлению спам-ботов и фейковых аккаунтов в Telegram. Отвечай кратко и аргументированно.",
-                        prompt,
-                        0.2,
-                        400,
-                        hard = false
-                    )
+        fun row(label: String, value: String, copyable: Boolean = false) {
+            root.addView(TextView(context).apply {
+                text = label
+                textSize = 12f
+                setTextColor(Theme.getColor(Theme.key_windowBackgroundWhiteGrayText))
+                setPadding(0, AndroidUtilities.dp(8f), 0, 0)
+            })
+            root.addView(TextView(context).apply {
+                text = value
+                textSize = 15f
+                setTextColor(Theme.getColor(if (copyable) Theme.key_windowBackgroundWhiteBlueText4 else Theme.key_windowBackgroundWhiteBlackText))
+                if (copyable) {
+                    // a tap copies the full name of the group (with its @username)
+                    setOnClickListener {
+                        AndroidUtilities.addToClipboard(value)
+                        Toast.makeText(context, "Скопировано: " + value.take(80), Toast.LENGTH_SHORT).show()
+                    }
                 }
-                aiStatusView.text = "ИИ-вердикт:\n${answer.text.trim().ifEmpty { "Нет ответа от ИИ" }}"
-            }
+            })
         }
-        root.addView(aiButton)
-        root.addView(aiStatusView)
-
-        val markFakeBtn = GgtgUi.button(context, if (analysis.isMarkedFake) "✓ Помечен вами как фейк" else "Пометить: «Это фейк / бот»") {
-            markAsFake(user.id, user.username)
-            Toast.makeText(context, "Профиль добавлен в чёрный список фейков", Toast.LENGTH_SHORT).show()
-            onUpdated?.run()
+        row("Оценка профиля", "${analysis.verdictText} (${analysis.fakeProbability}%)")
+        val username = user.username.orEmpty().lowercase()
+        val record = if (username.isEmpty()) null else GgtgDb.findSmsRecord(username)
+        if (record != null) {
+            row("Из какой базы написали (нажмите, чтобы скопировать)", record.source.ifEmpty { "база неизвестна" }, copyable = record.source.isNotEmpty())
+            row("Кто писал", record.account.ifEmpty { "аккаунт неизвестен" })
+            val whenText = java.text.SimpleDateFormat("dd.MM.yyyy HH:mm", java.util.Locale.getDefault()).format(java.util.Date(record.at * 1000L))
+            row("Когда", whenText + " · " + smsStatusTitle(record.status))
+        } else {
+            row("История отправки", "из программы этому человеку не писали")
         }
-        root.addView(GgtgUi.spacer(context, 10f))
-        root.addView(markFakeBtn)
-
-        val markAliveBtn = GgtgUi.button(context, if (analysis.isMarkedAlive) "✓ Помечен вами как живой" else "Пометить: «Живой человек»") {
-            markAsAlive(user.id, user.username)
-            Toast.makeText(context, "Профиль добавлен в белый список проверенных", Toast.LENGTH_SHORT).show()
-            onUpdated?.run()
-        }
-        root.addView(GgtgUi.spacer(context, 8f))
-        root.addView(markAliveBtn)
-
-        if (analysis.isMarkedFake || analysis.isMarkedAlive) {
-            val clearBtn = GgtgUi.button(context, "Сбросить мою метку") {
-                clearMark(user.id, user.username)
-                Toast.makeText(context, "Метка сброшена", Toast.LENGTH_SHORT).show()
-                onUpdated?.run()
-            }
-            root.addView(GgtgUi.spacer(context, 8f))
-            root.addView(clearBtn)
-        }
-
-        val trainBtn = GgtgUi.button(context, "Обучить ИИ на помеченных") {
-            trainFromMarked(context) { onUpdated?.run() }
-        }
-        root.addView(GgtgUi.spacer(context, 8f))
-        root.addView(trainBtn)
+        val photoBound = photoBound(fullUser)
+        val age = GgtgIdDate.ageText(user.id, photoBound)
+        if (age.isNotEmpty()) row("Возраст аккаунта (по ID, примерно): " + GgtgIdDate.estimate(user.id, photoBound), age)
+        row("Признаки", if (analysis.reasons.isNotEmpty()) "• " + analysis.reasons.joinToString("\n• ") else "Подозрительных признаков не обнаружено.")
 
         val scroll = ScrollView(context).apply { addView(root) }
-
-        AlertDialog.Builder(context)
-            .setTitle("Анализ профиля: @${user.username ?: user.id}")
+        val dialog = AlertDialog.Builder(context)
+            .setTitle(UserObject.getUserName(user))
             .setView(scroll)
             .setPositiveButton("Закрыть", null)
-            .show()
+            .create()
+        fun done(toast: String) {
+            val learned = learnFromMarks()
+            Toast.makeText(context, if (learned.added.isEmpty()) toast else toast + " Новых признаков: " + learned.added.size, Toast.LENGTH_SHORT).show()
+            dialog.dismiss()
+            onUpdated?.run()
+        }
+        root.addView(GgtgUi.spacer(context, 12f))
+        root.addView(GgtgUi.button(context, if (analysis.isMarkedFake) "Помечен как фейк" else "Пометить как фейк или бота") {
+            markAsFake(user.id, user.username); done("Помечен как фейк.")
+        })
+        root.addView(GgtgUi.spacer(context, 8f))
+        root.addView(GgtgUi.button(context, if (analysis.isMarkedAlive) "Помечен как живой" else "Пометить как живого человека") {
+            markAsAlive(user.id, user.username); done("Помечен как живой.")
+        })
+        if (analysis.isMarkedFake || analysis.isMarkedAlive) {
+            root.addView(GgtgUi.spacer(context, 8f))
+            root.addView(GgtgUi.button(context, "Сбросить метку") {
+                clearMark(user.id, user.username)
+                Toast.makeText(context, "Метка сброшена.", Toast.LENGTH_SHORT).show()
+                dialog.dismiss()
+                onUpdated?.run()
+            })
+        }
+        root.addView(GgtgUi.spacer(context, 8f))
+        root.addView(GgtgUi.button(context, "Пересчитать признаки по всем меткам") {
+            trainFromMarked(context) { onUpdated?.run() }
+        })
+        dialog.show()
     }
 
     @JvmStatic

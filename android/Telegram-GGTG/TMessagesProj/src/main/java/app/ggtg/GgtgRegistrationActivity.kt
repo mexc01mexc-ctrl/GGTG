@@ -34,10 +34,15 @@ import org.telegram.ui.Components.LayoutHelper
 import android.text.Spannable
 import android.text.SpannableStringBuilder
 import android.text.style.ForegroundColorSpan
+import android.text.style.RelativeSizeSpan
+import android.text.style.StyleSpan
 import java.io.File
 
 // GGTG: In-app Registration Activity for Android — full feature parity with Mac version
-class GgtgRegistrationActivity : BaseFragment() {
+class GgtgRegistrationActivity(
+    private val initialMode: Int = -1,
+    private val initialSlots: List<Int> = emptyList()
+) : BaseFragment() {
 
     companion object {
         private const val REQ_PICK_FIRST_NAMES = 1001
@@ -47,10 +52,14 @@ class GgtgRegistrationActivity : BaseFragment() {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
 
     // Mode switcher
-    private lateinit var modeHeaderView: View
-    private lateinit var modeCardView: LinearLayout
-    private lateinit var autoModeRadio: RadioButton
-    private lateinit var manualModeRadio: RadioButton
+    private val modeTabs = mutableListOf<TextView>() // Авто / Ручной / Замена номера, side by side
+    private lateinit var modeDescView: TextView
+    private lateinit var migPicker: GgtgAccountPicker
+    private lateinit var migStatusView: TextView
+    private val replaceTopViews = mutableListOf<View>() // "Замена номера": the rule and the accounts
+    private val replaceBottomViews = mutableListOf<View>() // "Замена номера": the start
+    private val advRegWraps = mutableListOf<View>() // advanced blocks of the registration modes (not the number change)
+    private val commonViews = mutableListOf<View>() // what the auto and the manual modes share (proxy, names)
 
     // Step 1: SMS Service & Number (Auto)
     private lateinit var step1HeaderView: View
@@ -115,6 +124,8 @@ class GgtgRegistrationActivity : BaseFragment() {
     // Step 5: Plan & Execution (Auto)
     private lateinit var step5HeaderView: View
     private lateinit var step5CardView: LinearLayout
+    private lateinit var advAutoWrap: View
+    private lateinit var advPlanWrap: View
     private lateinit var targetCountInput: EditText
     private lateinit var threadsCountInput: EditText
     private lateinit var stepDelayMinInput: EditText
@@ -142,7 +153,7 @@ class GgtgRegistrationActivity : BaseFragment() {
     override fun createView(context: Context): View {
         actionBar.setBackButtonImage(R.drawable.ic_ab_back)
         actionBar.setAllowOverlayTitle(true)
-        actionBar.setTitle("Регистрация аккаунтов")
+        actionBar.setTitle("Регистрация и смена номера")
         actionBar.setActionBarMenuOnItemClick(object : ActionBarMenuOnItemClick() {
             override fun onItemClick(id: Int) {
                 if (id == -1) finishFragment()
@@ -166,80 +177,129 @@ class GgtgRegistrationActivity : BaseFragment() {
 
     private fun updateModeVisibility(mode: Int) {
         val isAuto = (mode == 0)
-        if (::autoModeRadio.isInitialized) autoModeRadio.isChecked = isAuto
-        if (::manualModeRadio.isInitialized) manualModeRadio.isChecked = !isAuto
+        val isManual = (mode == 1)
+        val isReplace = (mode == 2)
+        fun show(v: View, on: Boolean) { v.visibility = if (on) View.VISIBLE else View.GONE }
+        // the tabs: the open one is filled with the accent colour
+        modeTabs.forEachIndexed { i, tab ->
+            val active = (i == mode)
+            tab.background = if (active) GgtgUi.rounded(GgtgUi.accent, GgtgUi.dp(18f).toFloat()) else null
+            tab.setTextColor(if (active) 0xFFFFFFFF.toInt() else GgtgUi.color(Theme.key_windowBackgroundWhiteGrayText))
+            tab.setTypeface(null, if (active) Typeface.BOLD else Typeface.NORMAL)
+        }
+        if (::modeDescView.isInitialized) {
+            modeDescView.text = when (mode) {
+                1 -> "Свой номер телефона: код из Telegram вводите сами."
+                2 -> "Перенос существующих аккаунтов на новые номера через SMS-сервис."
+                else -> "Номера из SMS-сервиса, код принимается сам, несколько потоков."
+            }
+        }
 
-        if (::step1HeaderView.isInitialized) step1HeaderView.visibility = if (isAuto) View.VISIBLE else View.GONE
-        if (::step1CardView.isInitialized) step1CardView.visibility = if (isAuto) View.VISIBLE else View.GONE
-        if (::step5HeaderView.isInitialized) step5HeaderView.visibility = if (isAuto) View.VISIBLE else View.GONE
-        if (::step5CardView.isInitialized) step5CardView.visibility = if (isAuto) View.VISIBLE else View.GONE
+        // the SMS service and the country are the same for registering and for changing a number
+        if (::step1HeaderView.isInitialized) show(step1HeaderView, isAuto || isReplace)
+        if (::step1CardView.isInitialized) show(step1CardView, isAuto || isReplace)
+        if (::step5HeaderView.isInitialized) show(step5HeaderView, isAuto)
+        if (::step5CardView.isInitialized) show(step5CardView, isAuto)
+        if (::advAutoWrap.isInitialized) show(advAutoWrap, isAuto || isReplace)
+        if (::advPlanWrap.isInitialized) show(advPlanWrap, isAuto)
 
-        if (::manualHeaderView.isInitialized) manualHeaderView.visibility = if (!isAuto) View.VISIBLE else View.GONE
-        if (::manualCardView.isInitialized) manualCardView.visibility = if (!isAuto) View.VISIBLE else View.GONE
+        if (::manualHeaderView.isInitialized) show(manualHeaderView, isManual)
+        if (::manualCardView.isInitialized) show(manualCardView, isManual)
+        for (v in replaceTopViews) show(v, isReplace)
+        for (v in replaceBottomViews) show(v, isReplace)
+        for (v in commonViews) show(v, !isReplace)
+        for (v in advRegWraps) show(v, !isReplace)
     }
 
     // =============================================================================
     // BUILD REGISTRATION UI (Steps 1 to 5 + Live Log)
     // =============================================================================
     private fun buildRegistrationUi(context: Context, container: LinearLayout) {
+        if (initialMode >= 0) currentConfig = currentConfig.copy(mode = initialMode)
+        // Дополнительные настройки (свернуты по умолчанию)
+        val advancedBox = LinearLayout(context).apply {
+            orientation = LinearLayout.VERTICAL
+            visibility = View.GONE
+        }
+        fun advancedSection(title: String, subtitle: String, iconRes: Int): Pair<LinearLayout, LinearLayout> {
+            val wrap = LinearLayout(context).apply { orientation = LinearLayout.VERTICAL }
+            wrap.addView(sectionHeader(context, title, subtitle, iconRes))
+            val card = GgtgUi.card(context)
+            GgtgUi.addCard(wrap, card)
+            advancedBox.addView(wrap, LinearLayout.LayoutParams(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT))
+            return wrap to card
+        }
+        fun moveToAdvanced(from: LinearLayout, startIndex: Int, to: LinearLayout) {
+            val moved = (startIndex until from.childCount).map { from.getChildAt(it) }
+            for (v in moved) {
+                from.removeView(v)
+                to.addView(v)
+            }
+        }
+        val (advAutoW, advAutoCard) = advancedSection("Оператор и фильтр номеров", "Оператор связи, макс. цена и отказ от занятых номеров", R.drawable.msg_settings)
+        advAutoWrap = advAutoW
+        val (advProxyW, advProxyCard) = advancedSection("Папка и проверка прокси", "Куда сохранять аккаунты и проверка прокси перед заказом", R.drawable.msg_settings)
+        val (advProfileW, advProfileCard) = advancedSection("Пол, аватар, Bio и 2FA", "Необязательные настройки профиля и облачный пароль", R.drawable.msg_settings)
+        val advTokensSlot = LinearLayout(context).apply { orientation = LinearLayout.VERTICAL }
+        advancedBox.addView(advTokensSlot, LinearLayout.LayoutParams(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT))
+        val (advPlanW, advPlanCard) = advancedSection("Потоки, паузы и ожидание SMS", "Скорость регистрации и сброс чужих сессий", R.drawable.msg_settings)
+        advPlanWrap = advPlanW
+        advRegWraps.add(advProxyW); advRegWraps.add(advProfileW)
+
         // -------------------------------------------------------------------------
-        // РЕЖИМ РЕГИСТРАЦИИ (Авто / Ручной)
+        // РЕЖИМ: три раздела сверху (Авто / Ручной / Замена номера)
         // -------------------------------------------------------------------------
-        modeHeaderView = sectionHeader(context, "Режим регистрации", "Способ получения номера и кода подтверждения", R.drawable.msg_settings)
-        container.addView(modeHeaderView)
-        modeCardView = GgtgUi.card(context)
+        val tabsRow = LinearLayout(context).apply {
+            orientation = LinearLayout.HORIZONTAL
+            background = GgtgUi.rounded(Theme.getColor(Theme.key_windowBackgroundWhite), GgtgUi.dp(22f).toFloat())
+            setPadding(GgtgUi.dp(4f), GgtgUi.dp(4f), GgtgUi.dp(4f), GgtgUi.dp(4f))
+        }
+        listOf("Авто", "Ручной", "Замена номера").forEachIndexed { i, title ->
+            val tab = TextView(context).apply {
+                text = title
+                textSize = 14f
+                gravity = Gravity.CENTER
+                setPadding(GgtgUi.dp(6f), GgtgUi.dp(10f), GgtgUi.dp(6f), GgtgUi.dp(10f))
+                setSingleLine(true)
+                setOnClickListener {
+                    currentConfig = currentConfig.copy(mode = i)
+                    GgtgRegistration.saveConfig(currentConfig)
+                    updateModeVisibility(i)
+                }
+            }
+            modeTabs.add(tab)
+            tabsRow.addView(tab, LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f))
+        }
+        container.addView(tabsRow, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT, 12f, 10f, 12f, 0f))
+        modeDescView = GgtgUi.body(context, "", 13f).apply { setPadding(GgtgUi.dp(20f), GgtgUi.dp(8f), GgtgUi.dp(16f), 0) }
+        container.addView(modeDescView)
 
-        val radioGroup = RadioGroup(context).apply {
-            orientation = RadioGroup.VERTICAL
-        }
+        // "Замена номера": the rule of Telegram and the accounts (chosen only here; nothing is chosen unless
+        // the screen was opened with accounts). The service and the country are the card below, shared.
+        val replaceTopFrom = container.childCount
+        val infoCard = GgtgUi.card(context)
+        infoCard.addView(GgtgUi.title(context, "Правило безопасности Telegram", 15f))
+        val infoText = GgtgUi.body(context,
+            "Telegram требует отлёжку мобильной сессии не менее 24 часов перед сменой номера телефона.\n\n" +
+            "Если у выбранного аккаунта ещё нет доверенной мобильной сессии старше 24 часов, программа автоматически создаст её (Android Session) и запустит таймер отлёжки. Повторите процедуру через 24 часа.",
+            13f
+        )
+        infoText.setPadding(0, GgtgUi.dp(4f), 0, 0)
+        infoCard.addView(infoText)
+        GgtgUi.addCard(container, infoCard)
 
-        autoModeRadio = RadioButton(context).apply {
-            text = "Авторегистрация (через SMS-сервисы с автоприёмом кода)"
-            textSize = 14f
-            typeface = Typeface.DEFAULT_BOLD
-            setTextColor(GgtgUi.color(Theme.key_windowBackgroundWhiteBlackText))
-            isChecked = (currentConfig.mode == 0)
-            setPadding(GgtgUi.dp(6f), GgtgUi.dp(6f), GgtgUi.dp(6f), GgtgUi.dp(2f))
-        }
-        val autoModeDesc = GgtgUi.body(context, "Автоматический заказ номеров через API, ожидание сотового SMS, многопоточная регистрация и сохранение сессий.", 12f).apply {
-            setPadding(GgtgUi.dp(32f), 0, GgtgUi.dp(8f), GgtgUi.dp(8f))
-        }
-
-        manualModeRadio = RadioButton(context).apply {
-            text = "Ручная регистрация (по номеру с ручным вводом кода)"
-            textSize = 14f
-            typeface = Typeface.DEFAULT_BOLD
-            setTextColor(GgtgUi.color(Theme.key_windowBackgroundWhiteBlackText))
-            isChecked = (currentConfig.mode == 1)
-            setPadding(GgtgUi.dp(6f), GgtgUi.dp(6f), GgtgUi.dp(6f), GgtgUi.dp(2f))
-        }
-        val manualModeDesc = GgtgUi.body(context, "Регистрация по введённому номеру с запросом кода в Telegram и ручным подтверждением.", 12f).apply {
-            setPadding(GgtgUi.dp(32f), 0, GgtgUi.dp(8f), GgtgUi.dp(8f))
-        }
-
-        autoModeRadio.setOnClickListener {
-            currentConfig = currentConfig.copy(mode = 0)
-            GgtgRegistration.saveConfig(currentConfig)
-            updateModeVisibility(0)
-        }
-        manualModeRadio.setOnClickListener {
-            currentConfig = currentConfig.copy(mode = 1)
-            GgtgRegistration.saveConfig(currentConfig)
-            updateModeVisibility(1)
-        }
-
-        radioGroup.addView(autoModeRadio)
-        radioGroup.addView(autoModeDesc)
-        radioGroup.addView(manualModeRadio)
-        radioGroup.addView(manualModeDesc)
-
-        modeCardView.addView(radioGroup)
-        GgtgUi.addCard(container, modeCardView)
+        container.addView(sectionHeader(context, "Аккаунты для замены номера", "Выберите аккаунты, на которых нужно изменить номер телефона", R.drawable.msg_contacts))
+        val pickCard = GgtgUi.card(context)
+        migPicker = GgtgAccountPicker(context)
+        if (initialSlots.isNotEmpty()) migPicker.setSelected(initialSlots)
+        pickCard.addView(migPicker)
+        GgtgUi.addCard(container, pickCard)
+        for (i in replaceTopFrom until container.childCount) replaceTopViews.add(container.getChildAt(i))
 
         // -------------------------------------------------------------------------
         // ШАГ 1: SMS-сервис и номер
         // -------------------------------------------------------------------------
-        step1HeaderView = sectionHeader(context, "Шаг 1: SMS-сервис и номер", "Сервис, ключ, баланс, страна и оператор связи", R.drawable.msg2_devices)
+        step1HeaderView = sectionHeader(context, "SMS-сервис и страна", "Сервис, ключ, баланс, страна и оператор связи", R.drawable.msg2_devices)
         container.addView(step1HeaderView)
         val s1Card = GgtgUi.card(context)
         step1CardView = s1Card
@@ -274,6 +334,7 @@ class GgtgRegistrationActivity : BaseFragment() {
 
         countryView = pickerRow(context, s1Card, "Страна номеров", GgtgRegistration.currentCountryTitle(currentConfig)) { showCountryPicker(context) }
 
+        val advS1From = s1Card.childCount
         val currentOpTitle = GgtgRegistration.operatorDisplayTitle(currentConfig.smsOperator)
         operatorView = pickerRow(context, s1Card, "Оператор связи", currentOpTitle) { showOperatorPicker(context) }
 
@@ -289,12 +350,14 @@ class GgtgRegistrationActivity : BaseFragment() {
         s1Card.addView(filterCheck)
         s1Card.addView(GgtgUi.body(context, "Программа помнит номера, которые уже не подошли (заняты, заблокированы, неверные), и сразу отменяет их при повторной выдаче.", 12f))
 
+        moveToAdvanced(s1Card, advS1From, advAutoCard)
+
         GgtgUi.addCard(container, s1Card)
 
         // -------------------------------------------------------------------------
         // ШАГ 1 (Ручной): Номер телефона и подтверждение
         // -------------------------------------------------------------------------
-        manualHeaderView = sectionHeader(context, "Шаг 1: Номер телефона и подтверждение", "Введите номер телефона вручную, запросите код и подтвердите регистрацию", R.drawable.msg_contacts)
+        manualHeaderView = sectionHeader(context, "Номер телефона и код", "Введите номер телефона вручную, запросите код и подтвердите регистрацию", R.drawable.msg_contacts)
         container.addView(manualHeaderView)
         val mCard = GgtgUi.card(context)
         manualCardView = mCard
@@ -359,9 +422,30 @@ class GgtgRegistrationActivity : BaseFragment() {
         GgtgUi.addCard(container, manualCardView)
 
         // -------------------------------------------------------------------------
+        // ЗАМЕНА НОМЕРА: запуск
+        // -------------------------------------------------------------------------
+        val replaceBottomFrom = container.childCount
+        container.addView(sectionHeader(context, "Запуск замены номера", "Статус выполнения, журнал внизу", R.drawable.msg_retry))
+        val execCard = GgtgUi.card(context)
+        migStatusView = GgtgUi.title(context, "Готов к запуску", 15f)
+        setStatus(migStatusView, "Готов к запуску", R.drawable.msg_info)
+        execCard.addView(migStatusView)
+        val migBtn = GgtgUi.button(context, "Запустить смену номера", false) { startPhoneMigration() }
+        migBtn.setCompoundDrawablesWithIntrinsicBounds(R.drawable.msg_select, 0, 0, 0)
+        migBtn.compoundDrawablePadding = GgtgUi.dp(8f)
+        migBtn.setPadding(GgtgUi.dp(16f), GgtgUi.dp(10f), GgtgUi.dp(16f), GgtgUi.dp(10f))
+        execCard.addView(migBtn, LinearLayout.LayoutParams(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT).apply {
+            topMargin = GgtgUi.dp(10f)
+            bottomMargin = GgtgUi.dp(8f)
+        })
+        GgtgUi.addCard(container, execCard)
+        for (i in replaceBottomFrom until container.childCount) replaceBottomViews.add(container.getChildAt(i))
+
+        val commonFrom = container.childCount
+        // -------------------------------------------------------------------------
         // ШАГ 2: Прокси и сохранение
         // -------------------------------------------------------------------------
-        container.addView(sectionHeader(context, "Шаг 2: Прокси и сохранение", "Пулы прокси и папка для сохранения аккаунтов", R.drawable.msg2_permissions))
+        container.addView(sectionHeader(context, "Прокси", "Пулы прокси и папка для сохранения аккаунтов", R.drawable.msg2_permissions))
         val s2Card = GgtgUi.card(context)
 
         proxyView = pickerRow(context, s2Card, "Список прокси", getProxyDisplayTitle()) { showProxyPicker(context) }
@@ -380,6 +464,7 @@ class GgtgRegistrationActivity : BaseFragment() {
         proxyManageRow.addView(manageProxyBtn)
         s2Card.addView(proxyManageRow)
 
+        val advS2From = s2Card.childCount
         folderInput = GgtgUi.input(context, "Регистрация", currentConfig.folderTag)
         bindAutoSave(folderInput) { currentConfig = currentConfig.copy(folderTag = it) }
         GgtgUi.labeled(context, s2Card, "Папка в GGTG", "Куда сохранять новые аккаунты", folderInput)
@@ -392,12 +477,14 @@ class GgtgRegistrationActivity : BaseFragment() {
         s2Card.addView(precheckProxyCheck)
         s2Card.addView(GgtgUi.body(context, "Исключает списание средств за номер, если прокси из пула внезапно перестал отвечать.", 12f))
 
+        moveToAdvanced(s2Card, advS2From, advProxyCard)
+
         GgtgUi.addCard(container, s2Card)
 
         // -------------------------------------------------------------------------
         // ШАГ 3: Профиль и безопасность (2FA)
         // -------------------------------------------------------------------------
-        container.addView(sectionHeader(context, "Шаг 3: Профиль и безопасность (2FA)", "Имена, фамилии, пол, Bio, юзернейм и пароль 2FA", R.drawable.msg_contacts))
+        container.addView(sectionHeader(context, "Имя и фамилия", "Имена, фамилии, пол, Bio, юзернейм и пароль 2FA", R.drawable.msg_contacts))
         val s3Card = GgtgUi.card(context)
 
         singleNameCheck = checkBox(context, "Одно имя и фамилия на все аккаунты", currentConfig.singleNameForAll)
@@ -417,6 +504,8 @@ class GgtgRegistrationActivity : BaseFragment() {
         bindAutoSave(lastNameInput) { currentConfig = currentConfig.copy(customLastName = it) }
         GgtgUi.labeled(context, singleNameLayout, "Фамилия для всех аккаунтов", "Будет установлена всем новым пользователям", lastNameInput)
         s3Card.addView(singleNameLayout)
+
+        val advS3From = s3Card.childCount
 
         randomNamesLayout = LinearLayout(context).apply {
             orientation = LinearLayout.VERTICAL
@@ -583,12 +672,15 @@ class GgtgRegistrationActivity : BaseFragment() {
             random2faLayout.visibility = if (isChecked) View.GONE else View.VISIBLE
         }
 
+        moveToAdvanced(s3Card, advS3From, advProfileCard)
+
         GgtgUi.addCard(container, s3Card)
+        for (i in commonFrom until container.childCount) commonViews.add(container.getChildAt(i))
 
         // -------------------------------------------------------------------------
         // ШАГ 4: Защита и токены (Push, Captcha, Email)
         // -------------------------------------------------------------------------
-        container.addView(sectionHeader(context, "Шаг 4: Защита и токены (Push, Captcha, Email)", "Push Notifications (FCM), reCAPTCHA Enterprise и подтверждение Email", R.drawable.msg_secret))
+        advTokensSlot.addView(sectionHeader(context, "Защита и токены", "Push Notifications (FCM), reCAPTCHA Enterprise и подтверждение Email", R.drawable.msg_secret))
         val s4Card = GgtgUi.card(context)
 
         val currentTokenName = GgtgRegistration.tokenServiceName(currentConfig.tokenService)
@@ -658,12 +750,12 @@ class GgtgRegistrationActivity : BaseFragment() {
         bindAutoSave(emailApiKeyInput) { currentConfig = currentConfig.copy(emailApiKey = it) }
         GgtgUi.labeled(context, s4Card, "API-ключ почты (необязательно)", "Отдельный API-ключ для сервиса почты, если отличается от SMS-сервиса", emailApiKeyInput)
 
-        GgtgUi.addCard(container, s4Card)
+        GgtgUi.addCard(advTokensSlot, s4Card)
 
         // -------------------------------------------------------------------------
         // ШАГ 5: План и запуск
         // -------------------------------------------------------------------------
-        step5HeaderView = sectionHeader(context, "Шаг 5: План и запуск", "Объём, потоки, задержки, сбросы и управление", R.drawable.msg_stats)
+        step5HeaderView = sectionHeader(context, "Количество и запуск", "Объём, потоки, задержки, сбросы и управление", R.drawable.msg_stats)
         container.addView(step5HeaderView)
         val s5Card = GgtgUi.card(context)
         step5CardView = s5Card
@@ -675,6 +767,7 @@ class GgtgRegistrationActivity : BaseFragment() {
         }
         GgtgUi.labeled(context, s5Card, "Целевое количество успешных аккаунтов", "Программа работает в цикле, пока не достигнет этой цели", targetCountInput)
 
+        val advS5From = s5Card.childCount
         threadsCountInput = GgtgUi.input(context, "2", currentConfig.threadsCount.toString(), numeric = true)
         bindAutoSave(threadsCountInput) {
             val v = it.toIntOrNull()?.coerceIn(1, 10) ?: 2
@@ -761,6 +854,7 @@ class GgtgRegistrationActivity : BaseFragment() {
             GgtgRegistration.saveConfig(currentConfig)
         }
         s5Card.addView(reset2faCheck)
+        moveToAdvanced(s5Card, advS5From, advPlanCard)
 
         val divSt = View(context).apply { setBackgroundColor(GgtgUi.color(Theme.key_divider)) }
         s5Card.addView(divSt, LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, 1).apply {
@@ -844,6 +938,16 @@ class GgtgRegistrationActivity : BaseFragment() {
 
         GgtgUi.addCard(container, s5Card)
 
+        val advancedToggle = GgtgUi.title(context, "Дополнительные настройки", 15f).apply {
+            setTextColor(GgtgUi.accent)
+            setPadding(GgtgUi.dp(16f), GgtgUi.dp(14f), GgtgUi.dp(16f), GgtgUi.dp(6f))
+            setOnClickListener {
+                advancedBox.visibility = if (advancedBox.visibility == View.VISIBLE) View.GONE else View.VISIBLE
+            }
+        }
+        container.addView(advancedToggle)
+        container.addView(advancedBox, LinearLayout.LayoutParams(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT))
+
         // -------------------------------------------------------------------------
         // Журнал действий
         // -------------------------------------------------------------------------
@@ -852,7 +956,7 @@ class GgtgRegistrationActivity : BaseFragment() {
         logConsoleView = TextView(context).apply {
             text = "Лог авторегистрации готов..."
             textSize = 12f
-            typeface = Typeface.MONOSPACE
+            typeface = Typeface.DEFAULT
             setTextColor(0xFFFFFFFF.toInt())
             setPadding(GgtgUi.dp(10f), GgtgUi.dp(10f), GgtgUi.dp(10f), GgtgUi.dp(10f))
             background = GgtgUi.rounded(0xFF14181C.toInt(), GgtgUi.dp(8f).toFloat())
@@ -863,7 +967,7 @@ class GgtgRegistrationActivity : BaseFragment() {
         updateModeVisibility(currentConfig.mode)
     }
 
-    private data class ConsoleLine(val text: String, val color: Int, val isWaiting: Boolean, val threadPrefix: String)
+    private data class ConsoleLine(val text: String, val color: Int, val isWaiting: Boolean, val threadPrefix: String, val time: String)
     private val consoleLines = mutableListOf<ConsoleLine>()
 
     private fun classifyLog(raw: String): Pair<Int, Boolean> {
@@ -887,23 +991,31 @@ class GgtgRegistrationActivity : BaseFragment() {
     private fun appendLogLine(msg: String) {
         if (!::logConsoleView.isInitialized) return
         val (color, isWaiting) = classifyLog(msg)
+        val time = java.text.SimpleDateFormat("HH:mm:ss", java.util.Locale.getDefault()).format(java.util.Date())
         val threadPrefix = if (msg.startsWith("[")) msg.substringBefore("]") + "]" else ""
         val last = consoleLines.lastOrNull()
         val canReplace = isWaiting && last != null && last.isWaiting &&
                 (threadPrefix.isEmpty() || threadPrefix == last.threadPrefix)
         if (canReplace) {
-            consoleLines[consoleLines.size - 1] = ConsoleLine(msg, color, true, threadPrefix)
+            consoleLines[consoleLines.size - 1] = ConsoleLine(msg, color, true, threadPrefix, time)
         } else {
-            consoleLines.add(ConsoleLine(msg, color, isWaiting, threadPrefix))
+            consoleLines.add(ConsoleLine(msg, color, isWaiting, threadPrefix, time))
             if (consoleLines.size > 200) consoleLines.removeAt(0)
         }
         val ssb = SpannableStringBuilder()
         for (i in consoleLines.indices) {
             val line = consoleLines[i]
             val start = ssb.length
+            ssb.append(line.time).append("  ")
+            ssb.setSpan(ForegroundColorSpan(0xFF7D8790.toInt()), start, ssb.length, Spannable.SPAN_EXCLUSIVE_EXCLUSIVE)
+            ssb.setSpan(RelativeSizeSpan(0.85f), start, ssb.length, Spannable.SPAN_EXCLUSIVE_EXCLUSIVE)
+            val bodyStart = ssb.length
             ssb.append(line.text)
-            if (i < consoleLines.size - 1) ssb.append("\n")
-            ssb.setSpan(ForegroundColorSpan(line.color), start, ssb.length, Spannable.SPAN_EXCLUSIVE_EXCLUSIVE)
+            ssb.setSpan(ForegroundColorSpan(line.color), bodyStart, ssb.length, Spannable.SPAN_EXCLUSIVE_EXCLUSIVE)
+            if (line.threadPrefix.isNotEmpty() && line.text.startsWith(line.threadPrefix)) {
+                ssb.setSpan(StyleSpan(Typeface.BOLD), bodyStart, bodyStart + line.threadPrefix.length, Spannable.SPAN_EXCLUSIVE_EXCLUSIVE)
+            }
+            if (i < consoleLines.size - 1) ssb.append("\n\n")
         }
         logConsoleView.text = ssb
     }
@@ -1096,7 +1208,7 @@ class GgtgRegistrationActivity : BaseFragment() {
                 }
                 count++
                 val isSelected = c.id == currentConfig.countryId
-                val row = GgtgUi.title(context, (if (isSelected) "● " else "○ ") + title, 15f).apply {
+                val row = GgtgUi.markSelected(GgtgUi.title(context, title, 15f), isSelected).apply {
                     setPadding(0, GgtgUi.dp(10f), 0, GgtgUi.dp(10f))
                     setOnClickListener {
                         currentConfig = currentConfig.copy(countryId = c.id, countryName = title, smsOperator = "")
@@ -1206,7 +1318,6 @@ class GgtgRegistrationActivity : BaseFragment() {
                 count++
                 val isSelected = (op.name == currentConfig.smsOperator) || (currentConfig.smsOperator.isEmpty() && op.name == "any")
                 val text = buildString {
-                    append(if (isSelected) "● " else "○ ")
                     append(op.title)
                     if (op.count >= 0) {
                         append(" — доступно: ${op.count} шт.")
@@ -1215,7 +1326,7 @@ class GgtgRegistrationActivity : BaseFragment() {
                         append(" (от ${op.price}$)")
                     }
                 }
-                val row = GgtgUi.title(context, text, 14f).apply {
+                val row = GgtgUi.markSelected(GgtgUi.title(context, text, 14f), isSelected).apply {
                     setPadding(0, GgtgUi.dp(10f), 0, GgtgUi.dp(10f))
                     setOnClickListener {
                         val chosen = if (op.name == "any") "" else op.name
@@ -1480,6 +1591,67 @@ class GgtgRegistrationActivity : BaseFragment() {
     private fun updatePauseButton(paused: Boolean) {
         if (!::pauseButton.isInitialized) return
         pauseButton.text = if (paused) "Продолжить" else "Пауза"
+    }
+
+    private fun startPhoneMigration() {
+        val slots = migPicker.selectedSlots()
+        if (slots.isEmpty()) {
+            Toast.makeText(context, "Выберите хотя бы один аккаунт", Toast.LENGTH_SHORT).show()
+            return
+        }
+        val key = apiKeyInput.text.toString().trim()
+        if (key.isEmpty()) {
+            Toast.makeText(context, "Укажите API-ключ SMS-сервиса", Toast.LENGTH_SHORT).show()
+            return
+        }
+        if (currentConfig.countryId < 0) {
+            Toast.makeText(context, "Выберите страну нового номера", Toast.LENGTH_SHORT).show()
+            return
+        }
+
+        currentConfig = currentConfig.copy(apiKey = key)
+        GgtgRegistration.saveApiKeyFor(currentConfig.serviceId, key)
+        GgtgRegistration.saveConfig(currentConfig)
+
+        val context = context ?: return
+        val act = context as? androidx.fragment.app.FragmentActivity
+        val progress = if (act != null) app.ggtg.ui.TdataImportProgressDialog(act, "Смена номера") else null
+        progress?.setWorkingText("Подготовка...")
+
+        setStatus(migStatusView, "Смена номеров выполняется...", R.drawable.msg_recent)
+        val timeStr = java.text.SimpleDateFormat("HH:mm:ss", java.util.Locale.getDefault()).format(java.util.Date())
+        consoleLines.clear()
+        appendLogLine("[$timeStr] Запуск смены номеров для ${slots.size} аккаунтов...")
+
+        // a process: the foreground service and the wake lock keep it going with the screen off
+        val process = GgtgProcess.start("Смена номеров (${slots.size})", GgtgProcess.Kind.Other)
+        scope.launch {
+            var successCount = 0
+            for ((index, slot) in slots.withIndex()) {
+                process.progress(index, slots.size)
+                val label = GgtgAccounts.label(slot)
+                val statusPrefix = "Аккаунт $label: "
+                progress?.setWorkingText(statusPrefix + "проверка доверенной сессии...")
+                appendLogLine("$statusPrefix запуск...")
+
+                val res = GgtgSessions.changePhoneNumber(slot, currentConfig) { st ->
+                    progress?.setWorkingText(statusPrefix + st)
+                    appendLogLine("  › $st")
+                }
+
+                res.onSuccess {
+                    successCount++
+                    appendLogLine("  [OK] Номер успешно изменён!")
+                }.onFailure { err ->
+                    appendLogLine("  [ОШИБКА] ${err.message}")
+                    Toast.makeText(context, "$label: ${err.message}", Toast.LENGTH_LONG).show()
+                }
+            }
+            progress?.dismiss()
+            process.succeed("Успешно: $successCount из ${slots.size}")
+            setStatus(migStatusView, "Завершено. Успешно: $successCount из ${slots.size}", R.drawable.msg_info)
+            Toast.makeText(context, "Смена номеров завершена! Успешно: $successCount из ${slots.size}", Toast.LENGTH_LONG).show()
+        }
     }
 
     private fun setStatus(view: TextView, text: String, iconRes: Int) {

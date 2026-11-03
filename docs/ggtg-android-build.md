@@ -1,6 +1,6 @@
 # Сборка Android-APK GGTG (чтобы он устанавливался)
 
-Собирать только так:
+**Релизы собираются только на GitHub** (`tools/ci.sh run android`, затем `tools/ci.sh get android`). Скрипт ниже — устаревший, для справки о том, что проверяет сборка (testOnly, пакет, подпись):
 
 ```bash
 /Users/yansheva/Desktop/GGTG/android/build_release.sh

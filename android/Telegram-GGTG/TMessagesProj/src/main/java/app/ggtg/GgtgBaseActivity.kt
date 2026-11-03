@@ -96,12 +96,13 @@ class GgtgBaseActivity(private val baseId: Long) : BaseFragment() {
         val listCard = card(context)
         val listTitle = if (isGroups) "Группы" else "Список пользователей"
         val toggle = TextView(context).apply {
-            text = "▸  $listTitle"; textSize = 15f
+            text = listTitle; textSize = 15f
             setTypeface(null, Typeface.BOLD)
             setTextColor(color(Theme.key_windowBackgroundWhiteBlackText))
             setPadding(0, dp(4f), 0, dp(4f))
         }
         listToggle = toggle
+        GgtgUi.trailingChevron(toggle, false)
         listCard.addView(toggle, LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT))
         editor = EditText(context).apply {
             inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_FLAG_MULTI_LINE
@@ -116,7 +117,7 @@ class GgtgBaseActivity(private val baseId: Long) : BaseFragment() {
         toggle.setOnClickListener {
             val show = editor.visibility != View.VISIBLE
             editor.visibility = if (show) View.VISIBLE else View.GONE
-            toggle.text = (if (show) "▾  " else "▸  ") + listTitle
+            GgtgUi.trailingChevron(toggle, show)
         }
         root.addView(listCard)
         reload()
@@ -340,7 +341,7 @@ class GgtgBaseActivity(private val baseId: Long) : BaseFragment() {
         val others = otherUserBases()
         if (others.isEmpty()) { toast("Других баз пользователей нет"); return }
         val checked = BooleanArray(others.size)
-        app.ggtg.ai.GgtgAiUi.multiChoice(context, "Объединить с…", others.map { "${it.title} (${it.count})" as CharSequence }, checked, "Объединить") {
+        GgtgPageUi.multiChoice(context, "Объединить с…", others.map { "${it.title} (${it.count})" as CharSequence }, checked, "Объединить") {
                 val chosen = others.filterIndexed { i, _ -> checked[i] }
                 if (chosen.isEmpty()) { toast("Отметьте хотя бы одну базу"); return@multiChoice }
                 // The chosen bases move into this one (a person lives in one

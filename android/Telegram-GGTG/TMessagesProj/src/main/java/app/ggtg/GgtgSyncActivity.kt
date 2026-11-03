@@ -113,7 +113,7 @@ class GgtgSyncActivity : BaseFragment() {
                 (UserObject.getUserName(user) + (user.username?.takeIf { it.isNotEmpty() }?.let { "  @$it" } ?: "")))
         }
         fun labelOf(id: String) = entries.firstOrNull { it.first == id }?.second ?: if (id.isEmpty()) "не выбран" else "id $id (не вошёл здесь)"
-        val current = GgtgUi.title(context, labelOf(settings.mainUserId) + "  ▾", 15f)
+        val current = GgtgUi.title(context, labelOf(settings.mainUserId) + "", 15f)
         current.setPadding(0, GgtgUi.dp(8f), 0, GgtgUi.dp(8f))
         current.setOnClickListener {
             val box = LinearLayout(context).apply { orientation = LinearLayout.VERTICAL; setPadding(GgtgUi.dp(20f), 0, GgtgUi.dp(20f), 0) }
@@ -132,12 +132,12 @@ class GgtgSyncActivity : BaseFragment() {
                 for ((id, label) in entries) {
                     if (query.isNotEmpty() && !label.lowercase().contains(query)) continue
                     if (++shown > 40) { list.addView(GgtgUi.body(context, "Показаны первые 40 - уточните поиск.")); break }
-                    val row = GgtgUi.title(context, (if (id == chosen) "● " else "○ ") + label, 15f)
+                    val row = GgtgUi.markSelected(GgtgUi.title(context, label, 15f), id == chosen)
                     row.setPadding(0, GgtgUi.dp(10f), 0, GgtgUi.dp(10f))
                     row.setOnClickListener {
                         GgtgSync.saveSettings(GgtgSync.loadSettings().copy(mainUserId = id))
                         GgtgSyncTransport.restart()
-                        current.text = label + "  ▾"
+                        current.text = label + ""
                         refreshStatus()
                         dialog.dismiss()
                     }
@@ -172,7 +172,7 @@ class GgtgSyncActivity : BaseFragment() {
         auto.addView(check)
 
         // ---- the key, for setting up by hand ----
-        val manual = GgtgUi.body(context, "Ключ вручную (без QR-кода)  ▾", 14f)
+        val manual = GgtgUi.body(context, "Ключ вручную (без QR-кода)", 14f)
         manual.setPadding(0, GgtgUi.dp(10f), 0, GgtgUi.dp(4f))
         val phraseBox = LinearLayout(context).apply { orientation = LinearLayout.VERTICAL; visibility = View.GONE }
         val phrase = GgtgUi.input(context, "Ключ (одинаковый на всех устройствах)", settings.passphrase)
@@ -266,7 +266,7 @@ class GgtgSyncActivity : BaseFragment() {
         val s = GgtgSync.loadSettings()
         val text = when {
             failure.isNotEmpty() && System.currentTimeMillis() - failureAt < 15_000 -> failure
-            !s.enabled || s.passphrase.isEmpty() -> "○ Выключена. Отсканируйте QR-код с Desktop."
+            !s.enabled || s.passphrase.isEmpty() -> "Выключена. Отсканируйте QR-код с Desktop."
             GgtgSyncTransport.mainSlot() == null -> "Главный аккаунт не выбран или не вошёл на этом телефоне"
             GgtgSyncTransport.running -> "↻ Синхронизирую…"
             s.lastSyncAt > 0 -> "" + SimpleDateFormat("dd.MM HH:mm", Locale.getDefault()).format(Date(s.lastSyncAt * 1000)) +

@@ -11,7 +11,6 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "base/timer.h"
 #include "base/unixtime.h"
 #include "core/application.h"
-#include "core/ggtg_ai.h"
 #include "core/ggtg_log.h"
 #include "window/ggtg_widgets.h"
 #include "styles/style_menu_icons.h"
@@ -59,48 +58,6 @@ namespace {
 	case Core::ProcessStatus::Running: break;
 	}
 	return QColor(56, 189, 248);
-}
-
-// "Сводка ИИ": the model reads the end of a process's log and says in a few
-// sentences what happened, what went wrong and what to do about it.
-void ShowAiSummaryBox(
-		std::shared_ptr<Ui::Show> show,
-		const QString &title,
-		const QStringList &lines) {
-	show->show(Box([=](not_null<Ui::GenericBox*> box) {
-		box->setTitle(rpl::single(u"Сводка ИИ"_q));
-		box->setWidth(st::boxWideWidth);
-		const auto label = box->addRow(object_ptr<Ui::FlatLabel>(
-			box,
-			u"Читаю журнал..."_q,
-			st::boxLabel));
-		box->addButton(rpl::single(u"Закрыть"_q), [=] {
-			box->closeBox();
-		});
-		// The last stretch of the log is what matters, and the fast models
-		// that take bulk jobs have the biggest limits for short questions.
-		auto text = lines.mid(std::max(int(lines.size()) - 150, 0)).join('\n');
-		if (text.size() > 6000) {
-			text = text.right(6000);
-		}
-		const auto weak = QPointer<Ui::FlatLabel>(label);
-		Core::GgtgAi::Ask(
-			u"Ты разбираешь журнал массовой операции программы GGTG "
-			"(рассылка сообщений, массовые действия, сбор баз). По журналу "
-			"коротко, по-русски и по делу ответь: что произошло, чем "
-			"закончилось, какие были ошибки и что делать дальше. "
-			"Не больше 8 строк, без вступлений. Ничего не выдумывай - только "
-			"то, что есть в журнале."_q,
-			u"Операция: "_q + title + u"\n\nЖурнал:\n"_q + text,
-			crl::guard(box, [=](QString result, QString error) {
-				if (const auto strong = weak.data()) {
-					strong->setText(error.isEmpty()
-						? result
-						: (u"Не вышло: "_q + error));
-				}
-			}),
-			0.3);
-	}));
 }
 
 // One card's clickable header: a status glyph, the title, a colored status
@@ -360,20 +317,6 @@ object_ptr<Ui::BoxContent> MakeProcessesBox() {
 								: lines.join('\n'),
 							st::boxDividerLabel),
 						st::boxRowPadding);
-					const auto ai = Core::GgtgAi::Load();
-					if (ai.enabled && ai.summaries && !lines.isEmpty()) {
-						const auto title = process.title;
-						list->add(
-							object_ptr<Ggtg::ActionRow>(
-								list,
-								rpl::single(u"Сводка ИИ"_q),
-								u"✦"_q,
-								&st::menuIconBot),
-							st::boxRowPadding
-						)->setClickedCallback([=] {
-							ShowAiSummaryBox(box->uiShow(), title, lines);
-						});
-					}
 				}
 				Ui::AddSkip(list);
 			}

@@ -1375,17 +1375,6 @@ historySmsTemplates: IconButton(historyAttach) {
 	icon: icon {{ "chat/input_bot_command", historyComposeIconFg }};
 	iconOver: icon {{ "chat/input_bot_command", historyComposeIconFgOver }};
 }
-// The "ИИ" button next to the paperclip (see HistoryWidget::showAiAssist):
-// the same robot as the "ИИ" section of the GGTG window.
-historyAiAssist: IconButton(historyAttach) {
-	icon: icon {{ "menu/bot", historyComposeIconFg }};
-	iconOver: icon {{ "menu/bot", historyComposeIconFgOver }};
-}
-// The same robot in the colours of the assistant's state: green - the engine
-// runs, amber - a model is loading, blue - it is reading and thinking.
-historyAiAssistIconOn: icon {{ "menu/bot", settingsIconBg2 }};
-historyAiAssistIconStarting: icon {{ "menu/bot", settingsIconBg3 }};
-historyAiAssistIconBusy: icon {{ "menu/bot", settingsIconBg4 }};
 historyBotCommandStart: IconButton(historyAttach) {
 	icon: icon {{ "chat/input_bot_command", historyComposeIconFg }};
 	iconOver: icon {{ "chat/input_bot_command", historyComposeIconFgOver }};

@@ -288,6 +288,13 @@ void AddAccountPicker(
 	not_null<AccountPickerState*> state,
 	const QString &emptyText = QString());
 
+// The same, into `container` (a part of the box that can be hidden) instead of the box itself.
+void AddAccountPicker(
+	not_null<Ui::GenericBox*> box,
+	not_null<Ui::VerticalLayout*> container,
+	not_null<AccountPickerState*> state,
+	const QString &emptyText = QString());
+
 // (Re)builds `accordion` from the live accounts and drops from the
 // selection any account that has gone away since. Safe to call from the
 // accordion's own handlers: rebuilding after a click is postponed.

@@ -1151,8 +1151,8 @@ inline void FillAiAgent(
 		}
 		auto lines = state->steps;
 		lines.push_back(state->current.isEmpty()
-			? u"● думает…"_q
-			: (u"● "_q + state->current));
+			? u"Думает…"_q
+			: state->current);
 		status->setText(lines.join('\n'));
 	};
 	const auto render = [=] {

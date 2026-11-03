@@ -675,6 +675,8 @@ public class ProfileActivity extends BaseFragment implements NotificationCenter.
     private int reportDividerRow;
     private int userIdRow;
     private int fakeAnalysisRow = -1;
+    private int ggtgSourceRow = -1; // ggtg: the base (group) we wrote this person from
+    private int ggtgWriterRow = -1; // ggtg: which account wrote and when
     private int addToContactsRow;
     private int addToGroupButtonRow;
     private int addToGroupInfoRow;
@@ -7409,7 +7411,7 @@ public class ProfileActivity extends BaseFragment implements NotificationCenter.
             return true;
         } else if (position == userIdRow) {
             try {
-                String est = app.ggtg.GgtgIdDate.estimate(userId);
+                String est = app.ggtg.GgtgIdDate.estimate(userId, app.ggtg.GgtgFakeDetector.photoBound(getMessagesController().getUserFull(userId)));
                 String copyText = !android.text.TextUtils.isEmpty(est) ? est : String.valueOf(userId);
                 android.content.ClipboardManager clipboard = (android.content.ClipboardManager) ApplicationLoader.applicationContext.getSystemService(Context.CLIPBOARD_SERVICE);
                 android.content.ClipData clip = android.content.ClipData.newPlainText("Registration Date", copyText);
@@ -7418,6 +7420,14 @@ public class ProfileActivity extends BaseFragment implements NotificationCenter.
             } catch (Exception e) {
                 FileLog.e(e);
             }
+            return true;
+        } else if (position == ggtgSourceRow || position == ggtgWriterRow) {
+            final TLRPC.User ggtgUser = getMessagesController().getUser(userId);
+            final String ggtgText = position == ggtgSourceRow
+                ? app.ggtg.GgtgFakeDetector.sourceOf(ggtgUser)
+                : app.ggtg.GgtgFakeDetector.writerLineOf(ggtgUser);
+            AndroidUtilities.addToClipboard(ggtgText);
+            BulletinFactory.of(this).createCopyBulletin(position == ggtgSourceRow ? "Название базы скопировано" : "Скопировано", resourcesProvider).show();
             return true;
         } else if (position == fakeAnalysisRow) {
             final TLRPC.User u = getMessagesController().getUser(userId);
@@ -10576,6 +10586,8 @@ public class ProfileActivity extends BaseFragment implements NotificationCenter.
         infoEndRow = -1;
         userIdRow = -1;
         fakeAnalysisRow = -1;
+        ggtgSourceRow = -1;
+        ggtgWriterRow = -1;
 
         membersHeaderRow = -1;
         membersStartRow = -1;
@@ -10768,6 +10780,13 @@ public class ProfileActivity extends BaseFragment implements NotificationCenter.
                 }
                 if (userId > 0) {
                     userIdRow = rowCount++;
+                    final TLRPC.User ggtgUser = getMessagesController().getUser(userId);
+                    if (!android.text.TextUtils.isEmpty(app.ggtg.GgtgFakeDetector.sourceOf(ggtgUser))) {
+                        ggtgSourceRow = rowCount++;
+                    }
+                    if (!android.text.TextUtils.isEmpty(app.ggtg.GgtgFakeDetector.writerLineOf(ggtgUser))) {
+                        ggtgWriterRow = rowCount++;
+                    }
                     fakeAnalysisRow = rowCount++;
                 }
                 if (actionsView == null && userId != getUserConfig().getClientUserId()) {
@@ -13565,12 +13584,17 @@ public class ProfileActivity extends BaseFragment implements NotificationCenter.
                         isFragmentPhoneNumber = phoneNumber != null && phoneNumber.matches("888\\d{8}");
                         detailCell.setTextAndValue(text, LocaleController.getString(isFragmentPhoneNumber ? R.string.AnonymousNumber : R.string.PhoneMobile), false);
                     } else if (position == userIdRow) {
-                        String est = app.ggtg.GgtgIdDate.estimate(userId);
+                        String est = app.ggtg.GgtgIdDate.estimate(userId, app.ggtg.GgtgFakeDetector.photoBound(getMessagesController().getUserFull(userId)));
                         if (!android.text.TextUtils.isEmpty(est)) {
-                            detailCell.setTextAndValue(est, "Примерная дата регистрации", false);
+                            String age = app.ggtg.GgtgIdDate.ageText(userId, app.ggtg.GgtgFakeDetector.photoBound(getMessagesController().getUserFull(userId)));
+                            detailCell.setTextAndValue(android.text.TextUtils.isEmpty(age) ? est : (est + " · " + age), "Примерная дата регистрации", false);
                         } else {
                             detailCell.setTextAndValue(String.valueOf(userId), "ID пользователя", false);
                         }
+                    } else if (position == ggtgSourceRow) {
+                        detailCell.setTextAndValue(app.ggtg.GgtgFakeDetector.sourceOf(getMessagesController().getUser(userId)), "Из какой базы написали", false);
+                    } else if (position == ggtgWriterRow) {
+                        detailCell.setTextAndValue(app.ggtg.GgtgFakeDetector.writerLineOf(getMessagesController().getUser(userId)), "Кто писал и когда", false);
                     } else if (position == fakeAnalysisRow) {
                         final TLRPC.User user = getMessagesController().getUser(userId);
                         final TLRPC.UserFull userInfo = getMessagesController().getUserFull(userId);
@@ -14396,7 +14420,7 @@ public class ProfileActivity extends BaseFragment implements NotificationCenter.
                 return VIEW_TYPE_HEADER;
             } else if (position == phoneRow || position == locationRow || position == numberRow || position == birthdayRow || position == userIdRow) {
                 return VIEW_TYPE_TEXT_DETAIL;
-            } else if (position == usernameRow || position == setUsernameRow || position == fakeAnalysisRow) {
+            } else if (position == usernameRow || position == setUsernameRow || position == fakeAnalysisRow || position == ggtgSourceRow || position == ggtgWriterRow) {
                 return VIEW_TYPE_TEXT_DETAIL_MULTILINE;
             } else if (position == noteRow) {
                 return VIEW_TYPE_TEXT_DETAIL_MULTILINE_2;
@@ -16406,7 +16430,7 @@ public class ProfileActivity extends BaseFragment implements NotificationCenter.
         } else if (position == birthdayRow) {
             textToCopy = UserInfoActivity.birthdayString(userInfo.birthday);
         } else if (position == userIdRow) {
-            String est = app.ggtg.GgtgIdDate.estimate(userId);
+            String est = app.ggtg.GgtgIdDate.estimate(userId, app.ggtg.GgtgFakeDetector.photoBound(getMessagesController().getUserFull(userId)));
             if (!android.text.TextUtils.isEmpty(est)) {
                 textToCopy = est;
                 copyButton = "Копировать дату";
@@ -16414,6 +16438,12 @@ public class ProfileActivity extends BaseFragment implements NotificationCenter.
                 textToCopy = String.valueOf(userId);
                 copyButton = "Копировать ID";
             }
+        } else if (position == ggtgSourceRow) {
+            textToCopy = app.ggtg.GgtgFakeDetector.sourceOf(userId != 0 ? getMessagesController().getUser(userId) : user);
+            copyButton = "Копировать название базы";
+        } else if (position == ggtgWriterRow) {
+            textToCopy = app.ggtg.GgtgFakeDetector.writerLineOf(userId != 0 ? getMessagesController().getUser(userId) : user);
+            copyButton = "Копировать";
         } else if (position == fakeAnalysisRow) {
             final TLRPC.User targetUser = userId != 0 ? getMessagesController().getUser(userId) : user;
             final TLRPC.UserFull targetUserInfo = userId != 0 ? getMessagesController().getUserFull(userId) : userFull;

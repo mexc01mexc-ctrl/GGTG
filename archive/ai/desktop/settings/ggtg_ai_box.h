@@ -340,7 +340,7 @@ namespace Settings {
 				Ui::PostponeCall(box, *rebuildKeys);
 			}
 			TestKey(key, crl::guard(box, [=](bool ok, QString message) {
-				(*keyResults)[key] = (ok ? u"✓ "_q : u"✗ "_q) + message;
+				(*keyResults)[key] = (ok ? u"Готово: "_q : u"Ошибка: "_q) + message;
 				if (labels->find(key) != labels->end()) {
 					showKey(key);
 				} else {
@@ -877,6 +877,9 @@ namespace Settings {
 				base::flat_set<not_null<Main::Account*>>>();
 			const auto unfolded = std::make_shared<base::flat_set<QString>>();
 			for (const auto &account : trainAccounts) {
+				if (!Main::AccountHasSession(account)) {
+					continue;
+				}
 				const auto id = qint64(account->session().user()->id.value);
 				const auto &chosen = Train::Current().accounts;
 				if (std::find(chosen.begin(), chosen.end(), id)
@@ -897,10 +900,16 @@ namespace Settings {
 			const auto sync = [=] {
 				auto &ids = Train::Current().accounts;
 				for (const auto &account : trainAccounts) {
+					if (!Main::AccountHasSession(account)) {
+						continue;
+					}
 					const auto id = qint64(account->session().user()->id.value);
 					ids.erase(std::remove(ids.begin(), ids.end(), id), ids.end());
 				}
 				for (const auto &account : *picked) {
+					if (!Main::AccountHasSession(account)) {
+						continue;
+					}
 					ids.push_back(qint64(account->session().user()->id.value));
 				}
 				Train::SaveState();

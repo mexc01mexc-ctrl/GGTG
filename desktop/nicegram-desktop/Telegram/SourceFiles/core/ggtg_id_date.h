@@ -1,8 +1,19 @@
 #pragma once
 
+#include <QtCore/QDir>
+#include <QtCore/QFile>
+#include <QtCore/QFileDevice>
+#include <QtCore/QSaveFile>
+#include <QtCore/QJsonArray>
+#include <QtCore/QJsonDocument>
+#include <QtCore/QJsonObject>
 #include <QtCore/QString>
 #include <QtCore/QDateTime>
+#include <algorithm>
+#include <cmath>
 #include <vector>
+
+#include "core/ggtg_paths.h"
 
 namespace Ggtg {
 
@@ -45,38 +56,253 @@ inline const std::vector<IdDateAnchor> &IdDateAnchors() {
 	return anchors;
 }
 
-inline QString EstimateIdDate(uint64 id) {
-	if (id == 0) {
-		return QString();
-	}
-	const auto &anchors = IdDateAnchors();
-	int64 t = 0;
-	if (id <= anchors.front().id) {
-		t = anchors.front().timestamp;
-	} else if (id >= anchors.back().id) {
-		t = anchors.back().timestamp;
-	} else {
-		for (size_t i = 0; i + 1 < anchors.size(); ++i) {
-			const auto &p1 = anchors[i];
-			const auto &p2 = anchors[i + 1];
-			if (id >= p1.id && id <= p2.id) {
-				const auto ratio = double(id - p1.id) / double(p2.id - p1.id);
-				t = p1.timestamp + int64(ratio * double(p2.timestamp - p1.timestamp));
-				break;
+// ---- the estimate of when an account was registered, by its id ----
+//
+// Ids are given out one after another, so the id says roughly when the account appeared. The anchors
+// above are known (id, date) pairs; between them the date follows a smooth monotone curve (a plain
+// straight line gives a month or more of error where the rate of new accounts changed). Past the last
+// anchor the curve goes on at the recent rate, up to now. Exact points make it better: every account
+// registered by GGTG adds its own (id, time) to tdata/ggtg_db/id_calibration.json. A person's own
+// facts bound the answer: the account cannot be younger than its first profile photo.
+
+struct IdEstimate {
+	int64 time = 0; // unix seconds, 0 when the id is unknown
+	int uncertaintyDays = 0; // how far the real date can be, about
+	bool extrapolated = false; // the id is newer than every known point
+};
+
+namespace details {
+
+struct IdPoint {
+	double id = 0.;
+	double time = 0.;
+	bool exact = false;
+};
+
+[[nodiscard]] inline QString IdCalibrationPath() {
+	const auto dir = Core::GgtgPaths::DbDir();
+	return dir.isEmpty() ? QString() : (dir + u"id_calibration.json"_q);
+}
+
+[[nodiscard]] inline std::vector<std::pair<uint64, int64>> &IdCalibrationList() {
+	static auto result = [] {
+		auto list = std::vector<std::pair<uint64, int64>>();
+		const auto path = IdCalibrationPath();
+		if (!path.isEmpty()) {
+			auto file = QFile(path);
+			if (file.open(QIODevice::ReadOnly)) {
+				for (const auto &value : QJsonDocument::fromJson(file.readAll()).array()) {
+					const auto object = value.toObject();
+					const auto id = uint64(object.value("id").toDouble());
+					const auto time = int64(object.value("t").toDouble());
+					if (id > 0 && time > 0) {
+						list.emplace_back(id, time);
+					}
+				}
 			}
 		}
+		return list;
+	}();
+	return result;
+}
+
+// Anchors and exact points, sorted by id and kept monotone: an exact point wins over an anchor
+// that contradicts it.
+[[nodiscard]] inline std::vector<IdPoint> IdPoints() {
+	auto all = std::vector<IdPoint>();
+	for (const auto &anchor : IdDateAnchors()) {
+		all.push_back({ double(anchor.id), double(anchor.timestamp), false });
 	}
-	const auto dt = QDateTime::fromSecsSinceEpoch(t);
+	for (const auto &[id, time] : IdCalibrationList()) {
+		all.push_back({ double(id), double(time), true });
+	}
+	std::sort(all.begin(), all.end(), [](const IdPoint &a, const IdPoint &b) {
+		return (a.id != b.id) ? (a.id < b.id) : (a.exact > b.exact);
+	});
+	auto result = std::vector<IdPoint>();
+	for (const auto &point : all) {
+		if (!result.empty() && point.id == result.back().id) {
+			continue;
+		}
+		if (!result.empty() && point.time < result.back().time) {
+			if (!point.exact) {
+				continue;
+			}
+			while (!result.empty() && !result.back().exact && result.back().time > point.time) {
+				result.pop_back();
+			}
+			if (!result.empty() && result.back().time > point.time) {
+				continue;
+			}
+		}
+		result.push_back(point);
+	}
+	return result;
+}
+
+// Fritsch-Carlson slopes of a monotone cubic through the points.
+[[nodiscard]] inline std::vector<double> IdSlopes(const std::vector<IdPoint> &p) {
+	const auto n = p.size();
+	auto delta = std::vector<double>(n - 1);
+	for (auto i = size_t(0); i + 1 < n; ++i) {
+		delta[i] = (p[i + 1].time - p[i].time) / (p[i + 1].id - p[i].id);
+	}
+	auto m = std::vector<double>(n);
+	m[0] = delta[0];
+	m[n - 1] = delta[n - 2];
+	for (auto i = size_t(1); i + 1 < n; ++i) {
+		if (delta[i - 1] * delta[i] <= 0.) {
+			m[i] = 0.;
+		} else {
+			const auto h0 = p[i].id - p[i - 1].id;
+			const auto h1 = p[i + 1].id - p[i].id;
+			const auto w1 = 2. * h1 + h0;
+			const auto w2 = h1 + 2. * h0;
+			m[i] = (w1 + w2) / (w1 / delta[i - 1] + w2 / delta[i]);
+		}
+	}
+	return m;
+}
+
+} // namespace details
+
+inline void AddIdCalibration(uint64 id, int64 time) {
+	if (id == 0 || time <= 0) {
+		return;
+	}
+	auto &list = details::IdCalibrationList();
+	for (const auto &[known, when] : list) {
+		if (known == id) {
+			return;
+		}
+	}
+	list.emplace_back(id, time);
+	const auto path = details::IdCalibrationPath();
+	if (path.isEmpty()) {
+		return;
+	}
+	QDir().mkpath(QFileInfo(path).absolutePath());
+	auto file = QSaveFile(path);
+	if (!file.open(QIODevice::WriteOnly)) {
+		return;
+	}
+	auto array = QJsonArray();
+	for (const auto &[known, when] : list) {
+		array.push_back(QJsonObject{ { "id", double(known) }, { "t", double(when) } });
+	}
+	file.write(QJsonDocument(array).toJson(QJsonDocument::Compact));
+	file.commit();
+}
+
+// `upperBound`: the account is not younger than this (unix seconds, 0 - unknown), e.g. the date of its
+// first profile photo.
+[[nodiscard]] inline IdEstimate EstimateIdInfo(uint64 id, int64 upperBound = 0) {
+	if (id == 0) {
+		return {};
+	}
+	const auto points = details::IdPoints();
+	if (points.size() < 2) {
+		return {};
+	}
+	const auto now = QDateTime::currentSecsSinceEpoch();
+	const auto x = double(id);
+	auto result = IdEstimate();
+	if (x <= points.front().id) {
+		result.time = int64(points.front().time);
+		result.uncertaintyDays = 30;
+	} else if (x >= points.back().id) {
+		// After the last known point: at the recent rate (the points of the last half year or more).
+		const auto &last = points.back();
+		auto from = points.size() - 2;
+		while (from > 0 && last.time - points[from].time < 180. * 86400.) {
+			--from;
+		}
+		const auto slope = (last.time - points[from].time) / (last.id - points[from].id);
+		const auto time = last.time + (x - last.id) * slope;
+		result.time = int64(std::min(time, double(now)));
+		result.extrapolated = true;
+		const auto days = (result.time - int64(last.time)) / 86400;
+		result.uncertaintyDays = int(30 + days * 0.15);
+	} else {
+		const auto m = details::IdSlopes(points);
+		auto i = size_t(0);
+		while (i + 2 < points.size() && x > points[i + 1].id) {
+			++i;
+		}
+		const auto &a = points[i];
+		const auto &b = points[i + 1];
+		const auto h = b.id - a.id;
+		const auto t = (x - a.id) / h;
+		const auto t2 = t * t;
+		const auto t3 = t2 * t;
+		const auto time = (2 * t3 - 3 * t2 + 1) * a.time
+			+ (t3 - 2 * t2 + t) * h * m[i]
+			+ (-2 * t3 + 3 * t2) * b.time
+			+ (t3 - t2) * h * m[i + 1];
+		result.time = int64(time);
+		const auto gapDays = int((b.time - a.time) / 86400.);
+		// Between two exact points the answer is tight, between old anchors it is a few weeks.
+		result.uncertaintyDays = (a.exact && b.exact)
+			? std::max(3, gapDays / 20)
+			: std::clamp(gapDays / 4, 14, 120);
+	}
+	if (upperBound > 0 && result.time > upperBound) {
+		result.time = upperBound;
+		result.uncertaintyDays = std::min(result.uncertaintyDays, 30);
+	}
+	return result;
+}
+
+// ggtg: the same estimate as unix seconds (0 when the id is unknown); the age of an account is counted from it.
+[[nodiscard]] inline int64 EstimateIdTime(uint64 id, int64 upperBound = 0) {
+	return EstimateIdInfo(id, upperBound).time;
+}
+
+// "около 2 лет 3 мес." for an account created at `created`.
+inline QString FormatAccountAge(int64 created, int64 now) {
+	if (created <= 0 || now <= created) {
+		return QString();
+	}
+	const auto months = int((now - created) / (30LL * 24 * 3600));
+	const auto years = months / 12;
+	const auto rest = months % 12;
+	const auto yearWord = [](int n) {
+		const auto m100 = n % 100;
+		const auto m10 = n % 10;
+		return (m100 >= 11 && m100 <= 14) ? u"лет"_q
+			: (m10 == 1) ? u"год"_q
+			: (m10 >= 2 && m10 <= 4) ? u"года"_q
+			: u"лет"_q;
+	};
+	if (years <= 0) {
+		return rest <= 1 ? u"меньше месяца"_q : u"около %1 мес."_q.arg(rest);
+	}
+	return u"около %1 %2"_q.arg(years).arg(yearWord(years))
+		+ (rest > 0 ? u" %1 мес."_q.arg(rest) : QString());
+}
+
+// "~сентябрь 2026 (±1 мес.)": the month of the estimate and how far it can be off.
+inline QString EstimateIdDate(uint64 id, int64 upperBound = 0) {
+	const auto info = EstimateIdInfo(id, upperBound);
+	if (info.time <= 0) {
+		return QString();
+	}
+	const auto dt = QDateTime::fromSecsSinceEpoch(info.time);
 	static const QString months[] = {
 		u"январь"_q, u"февраль"_q, u"март"_q, u"апрель"_q,
 		u"май"_q, u"июнь"_q, u"июль"_q, u"август"_q,
 		u"сентябрь"_q, u"октябрь"_q, u"ноябрь"_q, u"декабрь"_q
 	};
 	const auto m = dt.date().month();
-	if (m >= 1 && m <= 12) {
-		return u"~%1 %2"_q.arg(months[m - 1]).arg(dt.date().year());
+	if (m < 1 || m > 12) {
+		return QString();
 	}
-	return QString();
+	auto result = u"~%1 %2"_q.arg(months[m - 1]).arg(dt.date().year());
+	if (info.uncertaintyDays >= 20) {
+		const auto months = std::max(1, int(std::lround(info.uncertaintyDays / 30.)));
+		result += u" (±%1 мес.)"_q.arg(months);
+	}
+	return result;
 }
 
 } // namespace Ggtg

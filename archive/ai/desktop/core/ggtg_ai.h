@@ -2385,7 +2385,7 @@ inline void TestConnection(
 		}
 		TestKey(key.key, [=](bool ok, QString message) {
 			run->ok = run->ok || ok;
-			run->lines.push_back((ok ? u"✓ "_q : u"✗ "_q)
+			run->lines.push_back((ok ? u"Готово: "_q : u"Ошибка: "_q)
 				+ ShortKey(key.key) + u": "_q + message);
 			(*step)();
 		});

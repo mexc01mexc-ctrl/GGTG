@@ -303,7 +303,7 @@ object GgtgWarmup {
             log("Прогрев остановлен пользователем.")
             process.fail("Остановлено пользователем")
         } else {
-            log("✓ Прогрев успешно завершён. Траст всех аккаунтов повышен!")
+            log("Прогрев успешно завершён. Траст всех аккаунтов повышен!")
             process.succeed("Успешно завершено")
         }
     }
@@ -372,7 +372,7 @@ object GgtgWarmup {
                 }
                 val joinRes = GgtgAccounts.request(slot, joinReq)
                 if (joinRes?.second == null) {
-                    log("✓ Подписка на канал @$chUsername")
+                    log("Подписка на канал @$chUsername")
                     joinsCount++
                     delay(Random.nextLong(2000L, 4000L))
                 }
@@ -431,14 +431,14 @@ object GgtgWarmup {
                 }
                 GgtgAccounts.request(slot, reactReq)
                 reactsCount++
-                log("✓ Поставлена реакция $emoji в @$chUsername")
+                log("Поставлена реакция $emoji в @$chUsername")
             }
 
             delay(Random.nextLong(config.delayMinSec * 1000L, config.delayMaxSec * 1000L + 1))
         }
 
         val updated = updateStats(slot, postsCount, reactsCount, 0, 0, joinsCount)
-        log("✓ Аккаунт прогрет. Траст: ${updated.trustScore}% (Постов: ${updated.postsRead}, Реакций: ${updated.reactionsGiven}, Подписок: ${updated.channelsJoined})")
+        log("Аккаунт прогрет. Траст: ${updated.trustScore}% (Постов: ${updated.postsRead}, Реакций: ${updated.reactionsGiven}, Подписок: ${updated.channelsJoined})")
     }
 
     private suspend fun runP2pPair(slot1: Int, slot2: Int, config: WarmupConfig, log: (String) -> Unit) {

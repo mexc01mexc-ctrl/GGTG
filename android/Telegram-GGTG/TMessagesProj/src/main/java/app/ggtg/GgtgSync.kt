@@ -562,7 +562,7 @@ object GgtgSync {
                 val mtime = long(o, "mtime")
                 val text = o.optString("text")
                 if (name == "chat_lists.json") {
-                    app.ggtg.ai.GgtgChatLists.mergeJson(text)
+                    app.ggtg.chatlists.GgtgChatLists.mergeJson(text)
                     filesCount++
                     continue
                 }

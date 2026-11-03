@@ -3912,7 +3912,7 @@ public class DialogsActivity extends BaseFragment implements NotificationCenter.
                 } else if (id == 11) {
                     openAccountSelector(switchItem);
                 } else if (id == ggtg_list) {
-                    app.ggtg.ai.GgtgChatLists.showPicker(getParentActivity(), currentAccount, new ArrayList<>(selectedDialogs)); // ggtg
+                    app.ggtg.chatlists.GgtgChatLists.showPicker(getParentActivity(), currentAccount, new ArrayList<>(selectedDialogs)); // ggtg
                     hideActionMode(true);
                 } else if (id == add_to_folder) {
                     FiltersListBottomSheet sheet = new FiltersListBottomSheet(DialogsActivity.this, selectedDialogs);

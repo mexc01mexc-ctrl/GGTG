@@ -56,7 +56,7 @@ struct Run {
 };
 
 [[nodiscard]] inline std::shared_ptr<Run> &Active() {
-	static auto result = std::shared_ptr<Run>();
+	static auto &result = *new std::shared_ptr<Run>(); // ggtg: leaked, no exit() destructor
 	return result;
 }
 
@@ -144,6 +144,9 @@ inline void WaitFor(
 }
 
 [[nodiscard]] inline QString AccountKey(not_null<Main::Account*> account) {
+	if (!account->sessionExists()) { // ggtg:
+		return QString();
+	}
 	return QString::number(account->session().user()->id.value);
 }
 
@@ -243,6 +246,10 @@ inline void FetchPage(
 		std::shared_ptr<Fetched> fetched,
 		Fn<void(QString error)> done) {
 	if (Over(run)) {
+		return;
+	}
+	if (!Main::AccountHasSession(account)) { // ggtg: logged out between pages
+		done(u"аккаунт недоступен"_q);
 		return;
 	}
 	account->session().api().request(MTPmessages_GetHistory(

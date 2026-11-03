@@ -77,3 +77,24 @@ git push origin main
 `https://ntfy.sh/ggtg-ci-build-log-4e4b86e2`
 
 Вы можете открыть эту ссылку в браузере или в мобильном приложении ntfy, чтобы сразу узнать, когда сборка завершилась и файл готов к загрузке.
+
+## Крэши macOS: символы
+
+Установленный из DMG бинарь без символов, поэтому отчёт `~/Library/Logs/DiagnosticReports/GGTG-*.ips`
+сам по себе не показывает функции. После каждой сборки, которую отдают пользователю, запускай
+`tools/save_symbols.sh`: он кладёт бинарь в `APP/symbols/<UUID>/GGTG`. Потом
+`tools/symbolicate_crash.py <отчёт.ips>` печатает стек упавшего потока с именами функций
+(UUID в отчёте должен совпасть с сохранённым).
+
+## Только GitHub
+
+DMG, APK и EXE собираются исключительно в GitHub Actions. Помощник `tools/ci.sh`:
+
+```bash
+tools/ci.sh run all       # запустить сборки (или просто push в main)
+tools/ci.sh status        # последние запуски
+tools/ci.sh get all       # скачать последние успешные в APP/ (старые -> APP/previous/)
+```
+
+macOS-workflow выкладывает ещё артефакт `GGTG-macOS-symbols` (нестрипнутый бинарь по UUID);
+`tools/ci.sh get macos` кладёт его в `APP/symbols/<UUID>/GGTG` для `tools/symbolicate_crash.py`.

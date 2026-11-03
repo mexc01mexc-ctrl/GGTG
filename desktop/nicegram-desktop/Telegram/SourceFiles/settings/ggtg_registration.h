@@ -17,6 +17,8 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "core/application.h"
 #include "core/file_utilities.h"
 #include "core/ggtg_api_override.h"
+#include "settings/ggtg_tabs.h"
+#include "core/ggtg_id_date.h"
 #include "core/ggtg_geo.h"
 #include "core/ggtg_paths.h"
 #include "core/ggtg_log.h"
@@ -1864,7 +1866,7 @@ struct RefundTask {
 };
 
 inline std::vector<RefundTask> &RefundQueue() {
-	static auto list = std::vector<RefundTask>();
+	static auto &list = *new std::vector<RefundTask>(); // ggtg: leaked, see RefundTimer
 	return list;
 }
 
@@ -1932,7 +1934,8 @@ inline void RemoveRefundTask(const QString &activationId) {
 }
 
 inline std::unique_ptr<QTimer> &RefundTimer() {
-	static auto timer = std::make_unique<QTimer>();
+	// ggtg: leaked on purpose, a Qt object must not die in exit() after QApplication.
+	static auto &timer = *new std::unique_ptr<QTimer>(std::make_unique<QTimer>());
 	return timer;
 }
 
@@ -4127,6 +4130,9 @@ private:
 			auto settings = std::make_unique<Main::SessionSettings>();
 			settings->setDialogsFiltersEnabled(false);
 			_pendingAccount->createSession(user, std::move(settings));
+			// A fresh account: its id and the real time are an exact point for the registration
+			// date estimate of every other id (see core/ggtg_id_date.h).
+			Ggtg::AddIdCalibration(u.vid().v, int64(base::unixtime::now()));
 
 			if (!_settings.folderTag.isEmpty()) {
 				_pendingAccount->setFolderTag(_settings.folderTag);
@@ -4553,10 +4559,18 @@ private:
 			}
 		}
 		const auto full = u"["_q + time + u"] "_q + msg;
-		const auto html = u"<div style=\"color: %1; font-family: monospace; line-height: 1.35;\">[%2] %3</div>"_q
+		const auto body = prefix.isEmpty()
+			? msg.toHtmlEscaped()
+			: u"<b>%1</b>%2"_q
+				.arg(prefix.toHtmlEscaped())
+				.arg(msg.mid(prefix.size()).toHtmlEscaped());
+		const auto html = u"<div style=\"margin: 3px 0; padding: 4px 8px; border-left: 3px solid %1; background-color: #1A2026; border-radius: 4px;\">"
+			"<span style=\"color: #7D8790; font-size: 11px;\">%2</span>&nbsp;&nbsp;"
+			"<span style=\"color: %4;\">%3</span></div>"_q
 			.arg(colorHex)
 			.arg(time)
-			.arg(msg.toHtmlEscaped());
+			.arg(body)
+			.arg(colorHex);
 
 		const bool canReplace = isWaiting
 			&& !_formattedLogs.empty()
@@ -4810,7 +4824,7 @@ private:
 };
 
 inline std::shared_ptr<RegistrationController> &CurrentRegistrationController() {
-	static auto instance = std::shared_ptr<RegistrationController>();
+	static auto &instance = *new std::shared_ptr<RegistrationController>(); // ggtg: leaked, see RefundTimer
 	return instance;
 }
 
@@ -4861,6 +4875,12 @@ inline std::shared_ptr<RegistrationController> &CurrentRegistrationController() 
 
 // Section header of the registration form: round accent badge with an icon,
 // a bold title and a muted wrapped hint (the look of the other GGTG rows).
+// ggtg: Ggtg::ActionRow has no subtitle (its 3rd argument is a badge glyph that is
+// not drawn when an icon is given), so the hint is put into the row text.
+[[nodiscard]] inline QString RowWithHint(const QString &title, const QString &hint) {
+	return hint.isEmpty() ? title : (title + u"  ·  "_q + hint);
+}
+
 class SectionHeader final : public Ui::RpWidget {
 public:
 	SectionHeader(
@@ -5630,27 +5650,12 @@ inline void PerformAccountPhoneChange(
 	(*tryNextNumber)();
 }
 
-inline void FillPhoneMigrationContent(
+// ggtg: "Замена номера", the part with the accounts: the rule of Telegram and the picker. The service,
+// the key and the country are the "SMS-сервис и страна" card of the registration screen (shared).
+inline void FillPhoneMigrationAccounts(
 		not_null<Ui::VerticalLayout*> layout,
 		not_null<Ui::GenericBox*> box,
-		not_null<Window::SessionController*> controller,
-		not_null<SettingsData*> state,
-		std::vector<not_null<Main::Account*>> initialAccounts = {}) {
-	const auto show = box->uiShow();
-	const auto pickerState = box->lifetime().make_state<AccountPickerState>();
-
-	if (!initialAccounts.empty()) {
-		for (const auto &acc : initialAccounts) {
-			pickerState->selected.insert(acc);
-		}
-	} else {
-		for (const auto &acc : Core::App().domain().orderedAccounts()) {
-			if (acc->sessionExists()) {
-				pickerState->selected.insert(acc.get());
-			}
-		}
-	}
-
+		not_null<AccountPickerState*> pickerState) {
 	const auto addSectionTo = [](
 			not_null<Ui::VerticalLayout*> to,
 			const QString &title,
@@ -5663,9 +5668,9 @@ inline void FillPhoneMigrationContent(
 	};
 
 	addSectionTo(layout,
-		u"1. Правило безопасности (24 часа)"_q,
-		u"Требования Telegram к отлёжке сессий перед сменой номера"_q,
-		&st::menuIconPhone);
+		u"Аккаунты для замены номера"_q,
+		u"Выберите аккаунты, на которых нужно изменить номер телефона"_q,
+		&st::menuIconProfile);
 
 	Ui::AddDividerText(layout, rpl::single(
 		u"Смена номера телефона в Telegram через SMS-сервисы.\n\n"
@@ -5673,409 +5678,25 @@ inline void FillPhoneMigrationContent(
 		u"Сервер Telegram разрешает смену номера ТОЛЬКО с мобильной сессии (Android/iOS), которая существует более 24 часов (иначе возвращается ошибка FRESH_CHANGE_PHONE_FORBIDDEN).\n\n"
 		u"Если у аккаунта нет выдержанной мобильной сессии, программа автоматически создаст её (Android) и запустит 24-часовой таймер отлёжки."_q));
 
-	addSectionTo(layout,
-		u"2. SMS-сервис и новый номер"_q,
-		u"Выбор сервиса активаций, API-ключ и страна нового номера"_q,
-		&st::menuIconDiscussion);
+	AddAccountPicker(box, layout, pickerState, u"Нет доступных аккаунтов"_q);
+}
 
-	const auto cardSms = layout->add(
-		object_ptr<Ggtg::CardBox>(
+// ggtg: "Замена номера", the start: one button over the chosen accounts.
+inline void FillPhoneMigrationAction(
+		not_null<Ui::VerticalLayout*> layout,
+		not_null<Ui::GenericBox*> box,
+		not_null<Window::SessionController*> controller,
+		not_null<SettingsData*> state,
+		not_null<AccountPickerState*> pickerState) {
+	const auto show = box->uiShow();
+	Ui::AddSkip(layout, style::ConvertScale(12));
+	layout->add(
+		object_ptr<SectionHeader>(
 			layout,
-			style::margins(16, 14, 16, 14),
-			std::optional<QColor>(st::windowActiveTextFg->c)),
-		st::boxRowPadding);
-	const auto inSms = cardSms->inner();
-
-	auto currentServiceName = Services().front().name;
-	for (const auto &s : Services()) {
-		if (s.id == state->serviceId) {
-			currentServiceName = s.name;
-			break;
-		}
-	}
-
-	const auto serviceBtn = inSms->add(
-		object_ptr<PickerRow>(inSms, u"Сервис активаций"_q, currentServiceName),
-		style::margins(0, 0, 0, style::ConvertScale(4)));
-
-	const auto webLinkBtn = inSms->add(
-		object_ptr<Ui::LinkButton>(inSms, u"Открыть сайт сервиса"_q),
-		style::margins(style::ConvertScale(4), 0, 0, style::ConvertScale(4)));
-
-	const auto updateWebLink = [=] {
-		for (const auto &s : Services()) {
-			if (s.id == state->serviceId && !s.webUrl.isEmpty()) {
-				webLinkBtn->show();
-				webLinkBtn->setClickedCallback([url = s.webUrl] {
-					QDesktopServices::openUrl(QUrl(url));
-				});
-				return;
-			}
-		}
-		webLinkBtn->hide();
-	};
-	updateWebLink();
-
-	const auto customWrap = inSms->add(
-		object_ptr<Ui::SlideWrap<Ui::InputField>>(
-			inSms,
-			object_ptr<Ui::InputField>(
-				inSms,
-				FieldStyle(),
-				rpl::single(u"Адрес API (например https://myservice.com/stubs/handler_api.php)"_q),
-				state->customUrl)),
-		style::margins(0, style::ConvertScale(4), 0, style::ConvertScale(4)));
-	customWrap->toggle(state->serviceId == u"custom"_q, anim::type::instant);
-
-	// API-ключ (сохраняется отдельно для каждого сервиса)
-	const auto apiKeyField = inSms->add(
-		object_ptr<Ui::InputField>(
-			inSms,
-			FieldStyle(),
-			rpl::single(u"API-ключ сервиса"_q),
-			state->apiKey),
-		style::margins(0, style::ConvertScale(6), 0, style::ConvertScale(6)));
-
-	apiKeyField->changes(
-	) | rpl::on_next([=] {
-		state->apiKey = apiKeyField->getLastText().trimmed();
-		state->apiKeys.insert(state->serviceId, state->apiKey);
-		SaveSettings(*state);
-	}, apiKeyField->lifetime());
-
-	// Баланс
-	const auto balanceRow = inSms->add(object_ptr<Ui::RpWidget>(inSms));
-	balanceRow->resize(balanceRow->width(), style::ConvertScale(38));
-
-	const auto checkBalanceBtn = Ui::CreateChild<Ui::RoundButton>(
-		balanceRow,
-		rpl::single(u"Проверить баланс"_q),
-		st::defaultActiveButton);
-
-	const auto balanceLabel = Ui::CreateChild<Ui::FlatLabel>(
-		balanceRow,
-		rpl::single(u"Баланс: —"_q),
-		st::boxLabel);
-
-	balanceRow->widthValue() | rpl::on_next([=](int w) {
-		checkBalanceBtn->moveToLeft(0, style::ConvertScale(2));
-		balanceLabel->moveToLeft(checkBalanceBtn->width() + style::ConvertScale(14), style::ConvertScale(8));
-	}, balanceRow->lifetime());
-
-	const auto countryRefresh = box->lifetime().make_state<Fn<void()>>();
-	const auto weakBalanceLabel = QPointer<Ui::FlatLabel>(balanceLabel);
-
-	const auto doCheckBalance = [=] {
-		state->apiKey = apiKeyField->getLastText().trimmed();
-		state->apiKeys.insert(state->serviceId, state->apiKey);
-		SaveSettings(*state);
-		if (weakBalanceLabel) weakBalanceLabel->setText(u"Баланс: проверка..."_q);
-		FetchBalance(*state, [=](QString bal, QString err) {
-			if (weakBalanceLabel) {
-				if (!err.isEmpty()) {
-					weakBalanceLabel->setText(u"Ошибка баланса: "_q + err);
-				} else {
-					weakBalanceLabel->setText(u"Баланс: "_q + bal);
-				}
-			}
-			FetchCountries(*state, [=](QString) {
-				if (*countryRefresh) {
-					(*countryRefresh)();
-				}
-			});
-		});
-	};
-	checkBalanceBtn->setClickedCallback(doCheckBalance);
-
-	serviceBtn->setClickedCallback([=] {
-		show->show(Box([=](not_null<Ui::GenericBox*> pickBox) {
-			pickBox->setTitle(rpl::single(u"Выберите SMS-сервис"_q));
-			pickBox->setWidth(st::boxWideWidth);
-			for (const auto &s : Services()) {
-				const auto key = s.id;
-				const auto name = s.name;
-				pickBox->addRow(object_ptr<Ggtg::ActionRow>(
-					pickBox,
-					rpl::single(name),
-					s.baseUrl.isEmpty() ? u"Свой endpoint"_q : s.baseUrl,
-					&st::menuIconDiscussion)
-				)->setClickedCallback([=] {
-					state->apiKeys.insert(state->serviceId, apiKeyField->getLastText().trimmed());
-					state->serviceId = key;
-					state->countryName.clear();
-					state->countryId = -1;
-					state->apiKey = state->apiKeys.value(key);
-					apiKeyField->setText(state->apiKey);
-					serviceBtn->setValue(name);
-					customWrap->toggle(key == u"custom"_q, anim::type::normal);
-					updateWebLink();
-					SaveSettings(*state);
-					pickBox->closeBox();
-					doCheckBalance();
-				});
-				Ui::AddSkip(pickBox->verticalLayout(), st::defaultVerticalListSkip);
-			}
-			pickBox->addButton(tr::lng_close(), [=] { pickBox->closeBox(); });
-		}));
-	});
-
-	// Страна нового номера
-	const auto countryBtn = inSms->add(
-		object_ptr<PickerRow>(inSms, u"Страна нового номера"_q, CurrentCountryTitle(*state)),
-		style::margins(0, style::ConvertScale(4), 0, style::ConvertScale(4)));
-	const auto weakCountryBtn = QPointer<PickerRow>(countryBtn);
-
-	*countryRefresh = [=] {
-		if (const auto btn = weakCountryBtn.data()) {
-			btn->setValue(CurrentCountryTitle(*state));
-		}
-	};
-
-	countryBtn->setClickedCallback([=] {
-		state->apiKey = apiKeyField->getLastText().trimmed();
-		state->apiKeys.insert(state->serviceId, state->apiKey);
-		SaveSettings(*state);
-		FetchCountries(*state, [=](QString err) {
-			const auto &live = CountriesFor(state->serviceId);
-			const auto &available = !live.empty() ? live : PopularCountries();
-			show->show(Box([=](not_null<Ui::GenericBox*> pickBox) {
-				pickBox->setTitle(rpl::single(u"Выберите страну нового номера"_q));
-				pickBox->setWidth(style::ConvertScale(520));
-
-				const auto searchField = pickBox->addRow(
-					object_ptr<Ui::InputField>(
-						pickBox,
-						st::defaultInputField,
-						rpl::single(u"Поиск по названию или коду страны..."_q)),
-					st::boxRowPadding);
-
-				const auto listWrap = pickBox->addRow(object_ptr<Ui::VerticalLayout>(pickBox));
-				const auto weakList = QPointer<Ui::VerticalLayout>(listWrap);
-
-				const auto rebuildList = [=](const QString &query) {
-					if (!weakList) return;
-					while (weakList->count() > 0) {
-						delete weakList->widgetAt(0);
-					}
-					const auto q = query.trimmed().toLower();
-					int count = 0;
-					for (const auto &c : available) {
-						if (!q.isEmpty() && !c.name.toLower().contains(q) && !c.phoneCode.contains(q)) {
-							continue;
-						}
-						const auto cid = c.id;
-						const auto cname = c.name + (c.phoneCode.isEmpty() ? QString() : (u" ("_q + c.phoneCode + u")"_q));
-						const auto costStr = c.cost > 0.0 ? QString::number(c.cost, 'f', 2) + u" руб."_q : QString();
-						weakList->add(object_ptr<Ggtg::ActionRow>(
-							weakList.data(),
-							rpl::single(cname),
-							costStr,
-							&st::menuIconPhone)
-						)->setClickedCallback([=] {
-							state->countryId = cid;
-							state->countryName = c.name;
-							SaveSettings(*state);
-							if (const auto btn = weakCountryBtn.data()) {
-								btn->setValue(cname);
-							}
-							pickBox->closeBox();
-						});
-						Ui::AddSkip(weakList.data(), st::defaultVerticalListSkip);
-						if (++count >= 100) break;
-					}
-				};
-
-				searchField->changes() | rpl::on_next([=] {
-					rebuildList(searchField->getLastText());
-				}, searchField->lifetime());
-
-				rebuildList(QString());
-				pickBox->addButton(tr::lng_close(), [=] { pickBox->closeBox(); });
-			}));
-		});
-	});
-
-	// =====================================================================
-	//  3. Защита и токены (Push, Captcha)
-	// =====================================================================
-	addSectionTo(layout,
-		u"3. Защита и токены (Push, Captcha)"_q,
-		u"Обход reCAPTCHA Enterprise и Push-токен (FCM) для безопасной смены номера"_q,
-		&st::menuIconDevices);
-
-	const auto cardTokens = layout->add(
-		object_ptr<Ggtg::CardBox>(layout, style::margins(16, 14, 16, 14)),
-		st::boxRowPadding);
-	const auto inTokens = cardTokens->inner();
-
-	const auto tokenProviderTitle = [](int s) {
-		if (s == 1) return u"TokenFast (tokenfast.shop/api)"_q;
-		if (s == 2) return u"AntiSafety (antisafety.net)"_q;
-		return u"Без сервиса токенов (только параметры устройства)"_q;
-	};
-
-	const auto tokenServiceBtn = inTokens->add(
-		object_ptr<PickerRow>(
-			inTokens,
-			u"Сервис Push-токенов (FCM)"_q,
-			tokenProviderTitle(state->tokenService)));
-
-	tokenServiceBtn->setClickedCallback([=] {
-		show->show(Box([=](not_null<Ui::GenericBox*> pickBox) {
-			pickBox->setTitle(rpl::single(u"Выберите сервис Push-токенов (FCM)"_q));
-			pickBox->setWidth(st::boxWideWidth);
-
-			const auto options = std::vector<std::pair<int, QString>>{
-				{ 2, u"AntiSafety (antisafety.net)"_q },
-				{ 1, u"TokenFast (tokenfast.shop/api)"_q },
-				{ 0, u"Без сервиса токенов (только параметры устройства)"_q },
-			};
-			for (const auto &opt : options) {
-				pickBox->addRow(object_ptr<Ggtg::ActionRow>(
-					pickBox,
-					rpl::single(opt.second),
-					opt.first == 1 ? u"api.tokenfast.shop"_q : (opt.first == 2 ? u"antisafety.net"_q : QString()),
-					&st::menuIconDiscussion)
-				)->setClickedCallback([=] {
-					state->tokenService = opt.first;
-					tokenServiceBtn->setValue(tokenProviderTitle(opt.first));
-					SaveSettings(*state);
-					pickBox->closeBox();
-				});
-				Ui::AddSkip(pickBox->verticalLayout(), st::defaultVerticalListSkip);
-			}
-			pickBox->addButton(tr::lng_close(), [=] { pickBox->closeBox(); });
-		}));
-	});
-
-	const auto tokenApiKeyField = inTokens->add(
-		object_ptr<Ui::InputField>(
-			inTokens,
-			FieldStyle(),
-			rpl::single(u"API-ключ сервиса токенов (TokenFast / AntiSafety)"_q),
-			state->tokenApiKey),
-		style::margins(0, style::ConvertScale(6), 0, style::ConvertScale(6)));
-
-	tokenApiKeyField->changes(
-	) | rpl::on_next([=] {
-		state->tokenApiKey = tokenApiKeyField->getLastText().trimmed();
-		SaveSettings(*state);
-	}, tokenApiKeyField->lifetime());
-
-	const auto antiSafetyAidField = inTokens->add(
-		object_ptr<Ui::InputField>(
-			inTokens,
-			FieldStyle(),
-			rpl::single(u"AntiSafety App ID (AID контекста приложения Telegram)"_q),
-			state->antiSafetyAid.isEmpty() ? u"308aba4e-5680-466b-81a5-477ac6befa95"_q : state->antiSafetyAid),
+			u"Запуск замены номера"_q,
+			u"Последовательный перенос номеров с отслеживанием прогресса"_q,
+			&st::menuIconManage),
 		style::margins(0, 0, 0, style::ConvertScale(6)));
-
-	antiSafetyAidField->changes(
-	) | rpl::on_next([=] {
-		state->antiSafetyAid = antiSafetyAidField->getLastText().trimmed();
-		SaveSettings(*state);
-	}, antiSafetyAidField->lifetime());
-
-	const auto checkTokenRow = inTokens->add(object_ptr<Ui::RpWidget>(inTokens));
-	checkTokenRow->resize(checkTokenRow->width(), style::ConvertScale(38));
-
-	const auto checkTokenBtn = Ui::CreateChild<Ui::RoundButton>(
-		checkTokenRow,
-		rpl::single(u"Проверить баланс"_q),
-		st::defaultActiveButton);
-
-	const auto tokenStatusLabel = Ui::CreateChild<Ui::FlatLabel>(
-		checkTokenRow,
-		rpl::single(QString()),
-		st::boxLabel);
-
-	checkTokenRow->widthValue() | rpl::on_next([=](int w) {
-		checkTokenBtn->moveToLeft(0, style::ConvertScale(2));
-		tokenStatusLabel->moveToLeft(checkTokenBtn->width() + style::ConvertScale(14), style::ConvertScale(8));
-	}, checkTokenRow->lifetime());
-
-	const auto weakTokenStatusLabel = QPointer<Ui::FlatLabel>(tokenStatusLabel);
-	checkTokenBtn->setClickedCallback([=] {
-		const auto key = tokenApiKeyField->getLastText().trimmed();
-		state->tokenApiKey = key;
-		SaveSettings(*state);
-		if (weakTokenStatusLabel) weakTokenStatusLabel->setText(u"Проверка..."_q);
-		CheckMobileTokenBalance(
-			MobileTokenProvider(state->tokenService),
-			key,
-			[weakTokenStatusLabel](QString bal, QString err) {
-				if (!weakTokenStatusLabel) return;
-				if (!err.isEmpty()) {
-					weakTokenStatusLabel->setText(u"Ошибка: "_q + err);
-				} else {
-					weakTokenStatusLabel->setText(u"Баланс: "_q + bal);
-				}
-			},
-			state->antiSafetyAid);
-	});
-
-	// --- reCAPTCHA Enterprise ---
-	Ui::AddSkip(inTokens, style::ConvertScale(8));
-	const auto captchaServiceBtn = inTokens->add(
-		object_ptr<PickerRow>(
-			inTokens,
-			u"Сервис капчи (reCAPTCHA Enterprise)"_q,
-			CaptchaProviderName(state->captchaService)));
-
-	captchaServiceBtn->setClickedCallback([=] {
-		show->show(Box([=](not_null<Ui::GenericBox*> pickBox) {
-			pickBox->setTitle(rpl::single(u"Выберите сервис решения капчи (reCAPTCHA Enterprise)"_q));
-			pickBox->setWidth(st::boxWideWidth);
-
-			const auto options = std::vector<std::pair<int, QString>>{
-				{ 0, u"Авто (из сервиса токенов TokenFast / AntiSafety)"_q },
-				{ 2, u"AntiSafety (antisafety.net)"_q },
-				{ 1, u"TokenFast (api.tokenfast.shop)"_q },
-				{ 3, u"NextCaptcha (nextcaptcha.com)"_q },
-			};
-			for (const auto &opt : options) {
-				pickBox->addRow(object_ptr<Ggtg::ActionRow>(
-					pickBox,
-					rpl::single(opt.second),
-					opt.first == 3 ? u"dashboard.nextcaptcha.com"_q : (opt.first == 1 ? u"api.tokenfast.shop"_q : QString()),
-					&st::menuIconManage)
-				)->setClickedCallback([=] {
-					state->captchaService = opt.first;
-					captchaServiceBtn->setValue(CaptchaProviderName(opt.first));
-					SaveSettings(*state);
-					pickBox->closeBox();
-				});
-				Ui::AddSkip(pickBox->verticalLayout(), st::defaultVerticalListSkip);
-			}
-			pickBox->addButton(tr::lng_close(), [=] { pickBox->closeBox(); });
-		}));
-	});
-
-	const auto captchaApiKeyField = inTokens->add(
-		object_ptr<Ui::InputField>(
-			inTokens,
-			FieldStyle(),
-			rpl::single(u"API-ключ капчи (пусто = ключ сервиса токенов)"_q),
-			state->captchaApiKey),
-		style::margins(0, style::ConvertScale(6), 0, style::ConvertScale(6)));
-
-	captchaApiKeyField->changes(
-	) | rpl::on_next([=] {
-		state->captchaApiKey = captchaApiKeyField->getLastText().trimmed();
-		SaveSettings(*state);
-	}, captchaApiKeyField->lifetime());
-
-	addSectionTo(layout,
-		u"4. Выбор аккаунтов для смены номера"_q,
-		u"Выберите аккаунты, на которых нужно изменить номер телефона"_q,
-		&st::menuIconProfile);
-
-	AddAccountPicker(box, pickerState, u"Нет доступных аккаунтов"_q);
-
-	addSectionTo(layout,
-		u"5. Запуск смены номера"_q,
-		u"Последовательный перенос номеров с отслеживанием прогресса"_q,
-		&st::menuIconManage);
 
 	const auto cardAction = layout->add(
 		object_ptr<Ggtg::CardBox>(layout, style::margins(16, 14, 16, 14)),
@@ -6133,12 +5754,17 @@ inline void FillPhoneMigrationContent(
 
 inline void FillRegistrationBox(
 		not_null<Ui::GenericBox*> box,
-		not_null<Window::SessionController*> controller) {
+		not_null<Window::SessionController*> controller,
+		std::vector<not_null<Main::Account*>> initialAccounts = {},
+		int forcedMode = -1) {
 	const auto show = box->uiShow();
-	box->setTitle(rpl::single(u"Регистрация аккаунтов"_q));
+	box->setTitle(rpl::single(u"Регистрация и смена номера"_q));
 	box->setWidth(st::boxWideWidth + style::ConvertScale(120));
 
 	const auto state = box->lifetime().make_state<SettingsData>(LoadSettings());
+	if (forcedMode >= 0) {
+		state->mode = forcedMode; // ggtg: opened for a given mode (e.g. "Замена номера" from the bulk menu)
+	}
 	if (!CurrentRegistrationController()) {
 		CurrentRegistrationController() = std::make_shared<RegistrationController>(controller, show);
 	}
@@ -6168,53 +5794,45 @@ inline void FillRegistrationBox(
 	};
 
 	// =====================================================================
-	//  РЕЖИМ РЕГИСТРАЦИИ (Авто / Ручной)
+	//  РЕЖИМ: три раздела сверху (Авто / Ручной / Замена номера)
 	// =====================================================================
-	addSectionTo(layout,
-		u"Режим регистрации"_q,
-		u"Выберите способ получения номера и SMS-кода"_q,
-		&st::menuIconManage);
-
-	const auto cardMode = layout->add(
-		object_ptr<Ggtg::CardBox>(layout, style::margins(16, 12, 16, 12)),
-		st::boxRowPadding);
-	const auto inMode = cardMode->inner();
-
-	const auto modeGroup = std::make_shared<Ui::RadiobuttonGroup>(state->mode);
-
-	struct ModeChoice {
-		int id;
-		QString title;
-		QString desc;
+	const auto modeTabs = layout->add(
+		object_ptr<GgtgTabs>(
+			layout,
+			QStringList{ u"Авто"_q, u"Ручной"_q, u"Замена номера"_q },
+			std::clamp(state->mode, 0, 2)),
+		style::margins(
+			st::boxRowPadding.left(),
+			style::ConvertScale(12),
+			st::boxRowPadding.right(),
+			0));
+	const auto modeDesc = layout->add(
+		object_ptr<Ui::FlatLabel>(layout, QString(), st::boxDividerLabel),
+		style::margins(
+			st::boxRowPadding.left() + style::ConvertScale(8),
+			style::ConvertScale(8),
+			st::boxRowPadding.right(),
+			0));
+	const auto modeDescription = [](int mode) {
+		return (mode == 1)
+			? u"Свой номер телефона: код из Telegram вводите сами."_q
+			: (mode == 2)
+			? u"Перенос существующих аккаунтов на новые номера через SMS-сервис."_q
+			: u"Номера из SMS-сервиса, код принимается сам, несколько потоков."_q;
 	};
-	const auto modeChoices = std::vector<ModeChoice>{
-		{
-			0,
-			u"Авторегистрация (через SMS-сервисы с автоприёмом кода)"_q,
-			u"Автоматический заказ номеров через API, ожидание сотового SMS, многопоточная регистрация и сохранение сессий."_q,
-		},
-		{
-			1,
-			u"Ручная регистрация (по номеру телефона с ручным вводом кода)"_q,
-			u"Регистрация конкретного номера телефона с запросом кода в Telegram и ручным вводом полученного кода."_q,
-		},
-	};
-	for (const auto &m : modeChoices) {
-		inMode->add(
-			object_ptr<Ui::Radiobutton>(
-				inMode,
-				modeGroup,
-				m.id,
-				m.title,
-				st::defaultCheckbox),
-			style::margins(0, style::ConvertScale(2), 0, style::ConvertScale(2)));
-		inMode->add(
-			object_ptr<Ui::FlatLabel>(
-				inMode,
-				rpl::single(m.desc),
-				st::boxDividerLabel),
-			style::margins(style::ConvertScale(28), 0, style::ConvertScale(8), style::ConvertScale(8)));
+
+	// The accounts for the number change are chosen only in that mode: nothing is chosen
+	// unless the screen was opened with accounts (the bulk menu).
+	const auto pickerState = box->lifetime().make_state<AccountPickerState>();
+	for (const auto &acc : initialAccounts) {
+		pickerState->selected.insert(acc);
 	}
+	const auto phoneTopWrap = layout->add(
+		object_ptr<Ui::SlideWrap<Ui::VerticalLayout>>(
+			layout,
+			object_ptr<Ui::VerticalLayout>(layout)),
+		style::margins());
+	FillPhoneMigrationAccounts(phoneTopWrap->entity(), box, pickerState);
 
 	// =====================================================================
 	//  ШАГ 1: SMS-сервис и номер (Автоматический режим)
@@ -6227,8 +5845,8 @@ inline void FillRegistrationBox(
 	const auto autoSmsLayout = autoSmsWrap->entity();
 
 	addSectionTo(autoSmsLayout,
-		u"1. SMS-сервис и номер"_q,
-		u"Выбор сервиса активаций, API-ключ, страна и оператор"_q,
+		u"SMS-сервис и страна"_q,
+		u"Сервис активаций, API-ключ, баланс и страна номера"_q,
 		&st::menuIconPhone);
 
 	const auto cardMain = autoSmsLayout->add(
@@ -6357,8 +5975,8 @@ inline void FillRegistrationBox(
 				const auto name = s.name;
 				pickBox->addRow(object_ptr<Ggtg::ActionRow>(
 					pickBox,
-					rpl::single(name),
-					s.baseUrl.isEmpty() ? u"Свой endpoint"_q : s.baseUrl,
+					rpl::single(RowWithHint(name, s.baseUrl.isEmpty() ? u"Свой endpoint"_q : s.baseUrl)),
+					QString(),
 					&st::menuIconDiscussion)
 				)->setClickedCallback([=] {
 					state->apiKeys.insert(state->serviceId, apiKeyField->getLastText().trimmed());
@@ -6437,9 +6055,7 @@ inline void FillRegistrationBox(
 
 				const auto rebuildList = [=](const QString &query) {
 					if (!weakCountryListWrap) return;
-					while (weakCountryListWrap->count() > 0) {
-						delete weakCountryListWrap->widgetAt(0);
-					}
+					weakCountryListWrap->clear();
 					const auto q = query.trimmed().toLower();
 					int count = 0;
 					for (const auto &c : available) {
@@ -6459,8 +6075,8 @@ inline void FillRegistrationBox(
 
 						weakCountryListWrap->add(object_ptr<Ggtg::ActionRow>(
 							weakCountryListWrap.data(),
-							rpl::single(title),
-							sub,
+							rpl::single(RowWithHint(title, sub)),
+							QString(),
 							&st::menuIconPhone)
 						)->setClickedCallback([=] {
 							state->countryId = id;
@@ -6496,169 +6112,6 @@ inline void FillRegistrationBox(
 		});
 	});
 
-	// --- Оператор связи ---
-	Ui::AddSkip(inMain, style::ConvertScale(8));
-	const auto operatorBtn = inMain->add(
-		object_ptr<PickerRow>(
-			inMain,
-			u"Оператор связи"_q,
-			OperatorDisplayTitle(state->smsOperator)),
-		style::margins(0, 0, 0, style::ConvertScale(4)));
-	*operatorBtnHolder = operatorBtn;
-	const auto weakOperatorBtn = QPointer<PickerRow>(operatorBtn);
-
-	const auto updateOperatorSubtitle = [=](int count = -1) {
-		if (const auto btn = weakOperatorBtn.data()) {
-			btn->setText(rpl::single(OperatorDisplayTitle(state->smsOperator, count)));
-		}
-	};
-
-	if (state->countryId >= 0) {
-		FetchOperators(*state, state->countryId, [=](std::vector<OperatorInfo> ops, QString) {
-			for (const auto &op : ops) {
-				if (op.name == state->smsOperator || (state->smsOperator.isEmpty() && op.name == u"any"_q)) {
-					updateOperatorSubtitle(op.count);
-					break;
-				}
-			}
-		});
-	}
-
-	operatorBtn->setClickedCallback([=] {
-		if (state->countryId < 0) {
-			show->showToast(u"Сначала выберите страну"_q);
-			return;
-		}
-
-		show->show(Box([=](not_null<Ui::GenericBox*> pickBox) {
-			pickBox->setTitle(rpl::single(u"Выберите оператора связи"_q));
-			pickBox->setWidth(st::boxWideWidth);
-
-			const auto searchField = pickBox->addRow(
-				object_ptr<Ui::InputField>(
-					pickBox,
-					st::defaultInputField,
-					rpl::single(u"Поиск оператора..."_q)),
-					st::boxRowPadding);
-
-			const auto listWrap = pickBox->addRow(
-				object_ptr<Ui::VerticalLayout>(pickBox));
-			const auto weakOpListWrap = QPointer<Ui::VerticalLayout>(listWrap);
-
-			listWrap->add(
-				object_ptr<Ui::FlatLabel>(
-					listWrap,
-					rpl::single(u"Загрузка операторов из сервиса..."_q),
-					st::boxDividerLabel),
-				st::boxRowPadding);
-
-			FetchOperators(*state, state->countryId, [=](std::vector<OperatorInfo> ops, QString err) {
-				if (!weakOpListWrap) return;
-				const auto rebuildList = [=](const QString &filter) {
-					while (weakOpListWrap->count() > 0) {
-						delete weakOpListWrap->widgetAt(0);
-					}
-					const auto f = filter.trimmed().toLower();
-					for (const auto &op : ops) {
-						if (!f.isEmpty() && !op.name.toLower().contains(f)) continue;
-
-						const auto sub = op.count > 0 ? (QString::number(op.count) + u" шт."_q) : QString();
-						weakOpListWrap->add(object_ptr<Ggtg::ActionRow>(
-							weakOpListWrap.data(),
-							rpl::single(op.name == u"any"_q ? u"Любой оператор"_q : op.name),
-							sub,
-							&st::menuIconManage)
-						)->setClickedCallback([=] {
-							state->smsOperator = (op.name == u"any"_q) ? QString() : op.name;
-							SaveSettings(*state);
-							updateOperatorSubtitle(op.count);
-							pickBox->closeBox();
-						});
-						Ui::AddSkip(weakOpListWrap.data(), st::defaultVerticalListSkip);
-					}
-
-					if (weakOpListWrap) {
-						weakOpListWrap->add(object_ptr<Ggtg::ActionRow>(
-							weakOpListWrap.data(),
-							rpl::single(u"Ввести вручную..."_q),
-							u"Указать произвольный код оператора"_q,
-							&st::menuIconSettings)
-						)->setClickedCallback([=] {
-							pickBox->closeBox();
-							show->show(Box([=](not_null<Ui::GenericBox*> customBox) {
-								customBox->setTitle(rpl::single(u"Код оператора вручную"_q));
-								const auto input = customBox->addRow(
-									object_ptr<Ui::InputField>(
-										customBox,
-										FieldStyle(),
-										rpl::single(u"Например: mts, megafon, beeline, tele2"_q),
-										state->smsOperator),
-									st::boxRowPadding);
-								customBox->addButton(rpl::single(u"Сохранить"_q), [=] {
-									state->smsOperator = input->getLastText().trimmed();
-									SaveSettings(*state);
-									updateOperatorSubtitle();
-									customBox->closeBox();
-								});
-								customBox->addButton(tr::lng_cancel(), [=] { customBox->closeBox(); });
-							}));
-						});
-					}
-
-					if (weakOpListWrap && weakOpListWrap->count() == 0) {
-						weakOpListWrap->add(object_ptr<Ui::FlatLabel>(
-							weakOpListWrap.data(),
-							u"Ничего не найдено"_q,
-							st::boxDividerLabel),
-							st::boxRowPadding);
-					}
-				};
-
-				searchField->changes() | rpl::on_next([=] {
-					rebuildList(searchField->getLastText());
-				}, searchField->lifetime());
-
-				rebuildList(QString());
-			});
-
-			pickBox->addButton(tr::lng_close(), [=] { pickBox->closeBox(); });
-		}));
-	});
-
-	// --- Макс. цена номера ---
-	Ui::AddSkip(inMain, style::ConvertScale(8));
-	const auto maxPriceField = inMain->add(
-		object_ptr<Ui::InputField>(
-			inMain,
-			FieldStyle(),
-			rpl::single(u"Макс. цена номера (руб, например: 15.00; пусто = без лимита)"_q),
-			state->maxPrice),
-		style::margins(0, 0, 0, style::ConvertScale(4)));
-
-	maxPriceField->changes() | rpl::on_next([=] {
-		state->maxPrice = maxPriceField->getLastText().trimmed();
-		SaveSettings(*state);
-	}, maxPriceField->lifetime());
-
-	// --- Фильтрация номеров ---
-	const auto skipAppCheck = inMain->add(
-		object_ptr<Ui::Checkbox>(
-			inMain,
-			u"Отклонять номер, если код отправлен в приложение (номер занят)"_q,
-			state->skipAppCode),
-		style::margins(0, style::ConvertScale(8), 0, style::ConvertScale(2)));
-	inMain->add(
-		object_ptr<Ui::FlatLabel>(
-			inMain,
-			rpl::single(u"Рекомендуется включить (стандарт Telegram Expert). Если номер уже кем-то используется, Telegram отправляет код в приложение, а не в SMS. Опция мгновенно отменяет номер (статус 8) и возвращает 100% средств на баланс SMS-сервиса, не тратя 5 минут на пустое ожидание SMS."_q),
-			st::boxDividerLabel),
-		style::margins(0, 0, 0, style::ConvertScale(8)));
-
-	skipAppCheck->checkedChanges(
-	) | rpl::on_next([=](bool checked) {
-		state->skipAppCode = checked;
-		SaveSettings(*state);
-	}, skipAppCheck->lifetime());
 
 	// =====================================================================
 	//  ШАГ 1: Номер телефона и подтверждение (Ручной режим)
@@ -6671,7 +6124,7 @@ inline void FillRegistrationBox(
 	const auto manualPhoneLayout = manualPhoneWrap->entity();
 
 	addSectionTo(manualPhoneLayout,
-		u"1. Номер телефона и подтверждение"_q,
+		u"Номер телефона и код"_q,
 		u"Введите номер телефона вручную, запросите код и подтвердите регистрацию"_q,
 		&st::menuIconPhone);
 
@@ -6741,15 +6194,33 @@ inline void FillRegistrationBox(
 	}, manualBtnRow->lifetime());
 
 	// =====================================================================
+	//  ЗАМЕНА НОМЕРА (третий режим)
+	// =====================================================================
+	const auto phoneBottomWrap = layout->add(
+		object_ptr<Ui::SlideWrap<Ui::VerticalLayout>>(
+			layout,
+			object_ptr<Ui::VerticalLayout>(layout)),
+		style::margins());
+	FillPhoneMigrationAction(phoneBottomWrap->entity(), box, controller, state, pickerState);
+
+	// The proxy, the names and the plan: shared by the auto and the manual registration.
+	const auto commonWrap = layout->add(
+		object_ptr<Ui::SlideWrap<Ui::VerticalLayout>>(
+			layout,
+			object_ptr<Ui::VerticalLayout>(layout)),
+		style::margins());
+	const auto commonLayout = commonWrap->entity();
+
+	// =====================================================================
 	//  ШАГ 2: Прокси и сохранение
 	// =====================================================================
-	addSectionTo(layout,
-		u"2. Прокси и сохранение"_q,
+	addSectionTo(commonLayout,
+		u"Прокси"_q,
 		u"Выбор списка прокси и папка для новых аккаунтов"_q,
 		&st::menuIconNetwork);
 
-	const auto cardProxy = layout->add(
-		object_ptr<Ggtg::CardBox>(layout, style::margins(16, 14, 16, 14)),
+	const auto cardProxy = commonLayout->add(
+		object_ptr<Ggtg::CardBox>(commonLayout, style::margins(16, 14, 16, 14)),
 		st::boxRowPadding);
 	const auto inProxy = cardProxy->inner();
 
@@ -6783,8 +6254,8 @@ inline void FillRegistrationBox(
 
 			pickBox->addRow(object_ptr<Ggtg::ActionRow>(
 				pickBox,
-				rpl::single(u"Без прокси (прямое подключение)"_q),
-				u"Не рекомендуется для массовой регистрации"_q,
+				rpl::single(RowWithHint(u"Без прокси (прямое подключение)"_q, u"Не рекомендуется для массовой регистрации"_q)),
+				QString(),
 				&st::menuIconNetwork)
 			)->setClickedCallback([=] {
 				state->proxyPoolName.clear();
@@ -6800,8 +6271,8 @@ inline void FillRegistrationBox(
 				const auto count = int(list.entries.size());
 				pickBox->addRow(object_ptr<Ggtg::ActionRow>(
 					pickBox,
-					rpl::single(name),
-					u"Свободных прокси: "_q + QString::number(count),
+					rpl::single(RowWithHint(name, u"Свободных прокси: "_q + QString::number(count))),
+					QString(),
 					&st::menuIconNetwork)
 				)->setClickedCallback([=] {
 					state->proxyPoolName = name;
@@ -6827,63 +6298,17 @@ inline void FillRegistrationBox(
 		show->show(MakeProxyPoolManagerBox());
 	});
 
-	const auto precheckCheck = inProxy->add(
-		object_ptr<Ui::Checkbox>(
-			inProxy,
-			u"Проверять прокси перед заказом номера"_q,
-			state->precheckProxy),
-		style::margins(0, style::ConvertScale(4), 0, style::ConvertScale(2)));
-	inProxy->add(
-		object_ptr<Ui::FlatLabel>(
-			inProxy,
-			rpl::single(u"Перед списанием денег за SMS тестирует доступность сокета прокси. Если прокси недоступен, номер не заказывается и баланс не расходуется."_q),
-			st::boxDividerLabel),
-		style::margins(0, 0, 0, style::ConvertScale(6)));
-
-	precheckCheck->checkedChanges() | rpl::on_next([=](bool checked) {
-		state->precheckProxy = checked;
-		SaveSettings(*state);
-	}, precheckCheck->lifetime());
-
-	const auto folderField = inProxy->add(
-		object_ptr<Ui::InputField>(
-			inProxy,
-			FieldStyle(),
-			rpl::single(u"Папка в GGTG (например: Регистрация)"_q),
-			state->folderTag.isEmpty() ? u"Регистрация"_q : state->folderTag),
-		style::margins(0, style::ConvertScale(4), 0, style::ConvertScale(6)));
-
-	folderField->changes() | rpl::on_next([=] {
-		state->folderTag = folderField->getLastText().trimmed();
-		SaveSettings(*state);
-	}, folderField->lifetime());
-
-	const auto openFolderBtn = inProxy->add(
-		object_ptr<Ui::RoundButton>(
-			inProxy,
-			rpl::single(u"Открыть папку аккаунтов на диске (Documents/GGTG)"_q),
-			st::defaultBoxButton),
-		style::margins(0, 0, 0, style::ConvertScale(4)));
-	openFolderBtn->setTextTransform(Ui::RoundButtonTextTransform::NoTransform);
-
-	openFolderBtn->setClickedCallback([=] {
-		const auto tag = folderField->getLastText().trimmed();
-		const auto docs = QStandardPaths::writableLocation(QStandardPaths::DocumentsLocation) + u"/GGTG"_q;
-		const auto folder = tag.isEmpty() ? docs : (docs + '/' + tag);
-		QDir().mkpath(folder);
-		QDesktopServices::openUrl(QUrl::fromLocalFile(folder));
-	});
 
 	// =====================================================================
 	//  ШАГ 3: Профиль и безопасность (2FA)
 	// =====================================================================
-	addSectionTo(layout,
-		u"3. Профиль и безопасность (2FA)"_q,
-		u"Имена, аватары, Bio и облачный пароль"_q,
+	addSectionTo(commonLayout,
+		u"Имя и фамилия"_q,
+		u"Имя и фамилия для всех аккаунтов или случайные"_q,
 		&st::menuIconProfile);
 
-	const auto cardNames = layout->add(
-		object_ptr<Ggtg::CardBox>(layout, style::margins(16, 14, 16, 14)),
+	const auto cardNames = commonLayout->add(
+		object_ptr<Ggtg::CardBox>(commonLayout, style::margins(16, 14, 16, 14)),
 		st::boxRowPadding);
 	const auto inNames = cardNames->inner();
 
@@ -6933,509 +6358,20 @@ inline void FillRegistrationBox(
 		SaveSettings(*state);
 	}, lastNameField->lifetime());
 
-	const auto randomNameWrap = inNames->add(
-		object_ptr<Ui::SlideWrap<Ui::VerticalLayout>>(
-			inNames,
-			object_ptr<Ui::VerticalLayout>(inNames)),
-		style::margins());
-	const auto randomNameLayout = randomNameWrap->entity();
-
-	const auto genderTitle = [](int g) {
-		if (g == 1) return u"Только мужские имена"_q;
-		if (g == 2) return u"Только женские имена"_q;
-		return u"Любой пол (случайно)"_q;
-	};
-	const auto genderBtn = randomNameLayout->add(
-		object_ptr<PickerRow>(
-			randomNameLayout,
-			u"Пол для имён"_q,
-			genderTitle(state->gender)),
-		style::margins(0, 0, 0, style::ConvertScale(4)));
-
-	genderBtn->setClickedCallback([=] {
-		show->show(Box([=](not_null<Ui::GenericBox*> pickBox) {
-			pickBox->setTitle(rpl::single(u"Выберите пол для генерации имён"_q));
-			pickBox->setWidth(st::boxWideWidth);
-			const auto options = std::vector<std::pair<int, QString>>{
-				{ 0, u"Любой пол (случайно)"_q },
-				{ 1, u"Только мужские имена"_q },
-				{ 2, u"Только женские имена"_q },
-			};
-			for (const auto &[val, title] : options) {
-				pickBox->addRow(object_ptr<Ggtg::ActionRow>(
-					pickBox,
-					rpl::single(title),
-					QString(),
-					&st::menuIconProfile)
-				)->setClickedCallback([=] {
-					state->gender = val;
-					genderBtn->setText(rpl::single(title));
-					SaveSettings(*state);
-					pickBox->closeBox();
-				});
-				Ui::AddSkip(pickBox->verticalLayout(), st::defaultVerticalListSkip);
-			}
-			pickBox->addButton(tr::lng_close(), [=] { pickBox->closeBox(); });
-		}));
-	});
-
-	singleNameWrap->toggle(state->singleNameForAll, anim::type::instant);
-	randomNameWrap->toggle(!state->singleNameForAll, anim::type::instant);
-
-	singleNameCheck->checkedChanges(
-	) | rpl::on_next([=](bool checked) {
-		state->singleNameForAll = checked;
-		state->autoRandomNames = !checked;
-		singleNameWrap->toggle(checked, anim::type::normal);
-		randomNameWrap->toggle(!checked, anim::type::normal);
-		SaveSettings(*state);
-	}, singleNameCheck->lifetime());
-
-	// --- Аватары ---
-	Ui::AddSkip(inNames, style::ConvertScale(6));
-	const auto avatarCheck = inNames->add(
-		object_ptr<Ui::Checkbox>(
-			inNames,
-			u"Устанавливать аватары на новые аккаунты"_q,
-			state->autoExportGgtg),
-		style::margins(0, style::ConvertScale(4), 0, style::ConvertScale(2)));
-	inNames->add(
-		object_ptr<Ui::FlatLabel>(
-			inNames,
-			rpl::single(u"При включении берёт случайные изображения из указанной папки на диске и устанавливает фото профиля."_q),
-			st::boxDividerLabel),
-		style::margins(0, 0, 0, style::ConvertScale(6)));
-
-	const auto avatarWrap = inNames->add(
-		object_ptr<Ui::SlideWrap<Ui::VerticalLayout>>(
-			inNames,
-			object_ptr<Ui::VerticalLayout>(inNames)),
-		style::margins());
-	const auto avatarLayout = avatarWrap->entity();
-
-	const auto avatarPathField = avatarLayout->add(
-		object_ptr<Ui::InputField>(
-			avatarLayout,
-			FieldStyle(),
-			rpl::single(u"Папка с аватарами (jpg/png)"_q),
-			state->firstNameFile),
-		style::margins(0, style::ConvertScale(4), 0, style::ConvertScale(4)));
-
-	avatarPathField->changes() | rpl::on_next([=] {
-		state->firstNameFile = avatarPathField->getLastText().trimmed();
-		SaveSettings(*state);
-	}, avatarPathField->lifetime());
-
-	const auto chooseAvatarDirBtn = avatarLayout->add(
-		object_ptr<Ui::RoundButton>(
-			avatarLayout,
-			rpl::single(u"Выбрать папку с фото..."_q),
-			st::defaultBoxButton),
-		style::margins(0, 0, 0, style::ConvertScale(6)));
-	chooseAvatarDirBtn->setTextTransform(Ui::RoundButtonTextTransform::NoTransform);
-
-	chooseAvatarDirBtn->setClickedCallback([=] {
-		const auto dir = QFileDialog::getExistingDirectory(
-			nullptr,
-			u"Выберите папку с изображениями для аватаров"_q,
-			QDir::homePath());
-		if (!dir.isEmpty()) {
-			avatarPathField->setText(dir);
-			state->firstNameFile = dir;
-			SaveSettings(*state);
-		}
-	});
-
-	avatarWrap->toggle(state->autoExportGgtg, anim::type::instant);
-	avatarCheck->checkedChanges(
-	) | rpl::on_next([=](bool checked) {
-		state->autoExportGgtg = checked;
-		avatarWrap->toggle(checked, anim::type::normal);
-		SaveSettings(*state);
-	}, avatarCheck->lifetime());
-
-	// --- Описание (Bio) ---
-	Ui::AddSkip(inNames, style::ConvertScale(6));
-	const auto bioInput = inNames->add(
-		object_ptr<Ui::InputField>(
-			inNames,
-			FieldStyle(),
-			rpl::single(u"Описание профиля (Bio, поддерживает {A|B})"_q),
-			state->customBio),
-		style::margins(0, style::ConvertScale(4), 0, style::ConvertScale(6)));
-
-	bioInput->changes() | rpl::on_next([=] {
-		state->customBio = bioInput->getLastText().trimmed();
-		SaveSettings(*state);
-	}, bioInput->lifetime());
-
-	// --- Юзернейм ---
-	const auto autoSetUsernameCheck = inNames->add(
-		object_ptr<Ui::Checkbox>(
-			inNames,
-			u"Автоматически устанавливать username (латиница + цифры)"_q,
-			state->autoSetUsername),
-		style::margins(0, style::ConvertScale(4), 0, style::ConvertScale(2)));
-	autoSetUsernameCheck->checkedChanges() | rpl::on_next([=](bool checked) {
-		state->autoSetUsername = checked;
-		SaveSettings(*state);
-	}, autoSetUsernameCheck->lifetime());
-
-	// --- 2FA в Шаге 3 ---
-	Ui::AddSkip(inNames, style::ConvertScale(8));
-	const auto single2faCheck = inNames->add(
-		object_ptr<Ui::Checkbox>(
-			inNames,
-			u"Один пароль 2FA на все новые аккаунты"_q,
-			state->single2faForAll),
-		style::margins(0, style::ConvertScale(4), 0, style::ConvertScale(2)));
-	inNames->add(
-		object_ptr<Ui::FlatLabel>(
-			inNames,
-			rpl::single(u"Если выключено — для каждого аккаунта генерируется свой уникальный надёжный пароль (18 символов), автоматически сохраняемый в 2FA Vault программы."_q),
-			st::boxDividerLabel),
-		style::margins(0, 0, 0, style::ConvertScale(6)));
-
-	const auto single2faWrap = inNames->add(
-		object_ptr<Ui::SlideWrap<Ui::VerticalLayout>>(
-			inNames,
-			object_ptr<Ui::VerticalLayout>(inNames)),
-		style::margins());
-	const auto single2faLayout = single2faWrap->entity();
-
-	const auto twoFactorField = single2faLayout->add(
-		object_ptr<Ui::InputField>(
-			single2faLayout,
-			FieldStyle(),
-			rpl::single(u"Пароль 2FA"_q),
-			state->twoFactorPassword),
-		style::margins(0, style::ConvertScale(4), 0, style::ConvertScale(6)));
-
-	twoFactorField->changes() | rpl::on_next([=] {
-		state->twoFactorPassword = twoFactorField->getLastText().trimmed();
-		SaveSettings(*state);
-	}, twoFactorField->lifetime());
-
-	const auto pwdBtnsRow = single2faLayout->add(object_ptr<Ui::RpWidget>(single2faLayout));
-	pwdBtnsRow->resize(pwdBtnsRow->width(), style::ConvertScale(38));
-
-	const auto genPwdBtn = Ui::CreateChild<Ui::RoundButton>(
-		pwdBtnsRow,
-		rpl::single(u"Сгенерировать"_q),
-		st::defaultBoxButton);
-	genPwdBtn->setTextTransform(Ui::RoundButtonTextTransform::NoTransform);
-
-	const auto copyPwdBtn = Ui::CreateChild<Ui::RoundButton>(
-		pwdBtnsRow,
-		rpl::single(u"Скопировать"_q),
-		st::defaultBoxButton);
-	copyPwdBtn->setTextTransform(Ui::RoundButtonTextTransform::NoTransform);
-
-	pwdBtnsRow->widthValue() | rpl::on_next([=](int w) {
-		genPwdBtn->moveToLeft(0, style::ConvertScale(2));
-		copyPwdBtn->moveToLeft(genPwdBtn->width() + style::ConvertScale(10), style::ConvertScale(2));
-	}, pwdBtnsRow->lifetime());
-
-	genPwdBtn->setClickedCallback([=] {
-		const auto pwd = GenerateStrongPassword(18);
-		twoFactorField->setText(pwd);
-		state->twoFactorPassword = pwd;
-		SaveSettings(*state);
-		RecordTwoFactorPassword(
-			pwd,
-			QString(),
-			state->folderTag,
-			u"Сгенерирован в форме регистрации"_q);
-		TextUtilities::SetClipboardText(TextForMimeData::Simple(pwd));
-		show->showToast(u"Пароль 2FA сгенерирован и скопирован в буфер"_q);
-	});
-
-	copyPwdBtn->setClickedCallback([=] {
-		const auto current = twoFactorField->getLastText().trimmed();
-		if (current.isEmpty()) {
-			show->showToast(u"Поле пароля пустое"_q);
-			return;
-		}
-		RecordTwoFactorPassword(
-			current,
-			QString(),
-			state->folderTag,
-			u"Скопирован из формы регистрации"_q);
-		TextUtilities::SetClipboardText(TextForMimeData::Simple(current));
-		show->showToast(u"Пароль 2FA скопирован в буфер обмена"_q);
-	});
-
-	single2faWrap->toggle(state->single2faForAll, anim::type::instant);
-
-	single2faCheck->checkedChanges(
-	) | rpl::on_next([=](bool checked) {
-		state->single2faForAll = checked;
-		single2faWrap->toggle(checked, anim::type::normal);
-		SaveSettings(*state);
-	}, single2faCheck->lifetime());
-
-	// =====================================================================
-	//  ШАГ 4: Защита и токены (Push, Captcha, Email)
-	// =====================================================================
-	addSectionTo(layout,
-		u"4. Защита и токены (Push, Captcha, Email)"_q,
-		u"Обход проверок Telegram через AntiSafety / TokenFast и подтверждение Email"_q,
-		&st::menuIconDevices);
-
-	const auto cardDev = layout->add(
-		object_ptr<Ggtg::CardBox>(layout, style::margins(16, 14, 16, 14)),
-		st::boxRowPadding);
-	const auto inDev = cardDev->inner();
-
-	const auto tokenProviderTitle = [](int s) {
-		if (s == 1) return u"TokenFast (tokenfast.shop/api)"_q;
-		if (s == 2) return u"AntiSafety (antisafety.net)"_q;
-		return u"Без сервиса токенов (только Base.db)"_q;
-	};
-	const auto tokenServiceBtn = inDev->add(
-		object_ptr<PickerRow>(
-			inDev,
-			u"Сервис Push-токенов (FCM)"_q,
-			tokenProviderTitle(state->tokenService)));
-
-	tokenServiceBtn->setClickedCallback([=] {
-		show->show(Box([=](not_null<Ui::GenericBox*> pickBox) {
-			pickBox->setTitle(rpl::single(u"Выберите сервис Push-токенов (FCM)"_q));
-			pickBox->setWidth(st::boxWideWidth);
-
-			const auto options = std::vector<std::pair<int, QString>>{
-				{ 2, u"AntiSafety (antisafety.net)"_q },
-				{ 1, u"TokenFast (tokenfast.shop/api)"_q },
-				{ 0, u"Без сервиса токенов (только параметры устройства)"_q },
-			};
-			for (const auto &opt : options) {
-				pickBox->addRow(object_ptr<Ggtg::ActionRow>(
-					pickBox,
-					rpl::single(opt.second),
-					opt.first == 1 ? u"api.tokenfast.shop"_q : (opt.first == 2 ? u"antisafety.net"_q : QString()),
-					&st::menuIconDiscussion)
-				)->setClickedCallback([=] {
-					state->tokenService = opt.first;
-					tokenServiceBtn->setText(rpl::single(tokenProviderTitle(opt.first)));
-					SaveSettings(*state);
-					pickBox->closeBox();
-				});
-				Ui::AddSkip(pickBox->verticalLayout(), st::defaultVerticalListSkip);
-			}
-			pickBox->addButton(tr::lng_close(), [=] { pickBox->closeBox(); });
-		}));
-	});
-
-	const auto tokenApiKeyField = inDev->add(
-		object_ptr<Ui::InputField>(
-			inDev,
-			FieldStyle(),
-			rpl::single(u"API-ключ сервиса токенов (TokenFast / AntiSafety)"_q),
-			state->tokenApiKey),
-		style::margins(0, style::ConvertScale(6), 0, style::ConvertScale(6)));
-
-	tokenApiKeyField->changes(
-	) | rpl::on_next([=] {
-		state->tokenApiKey = tokenApiKeyField->getLastText().trimmed();
-		SaveSettings(*state);
-	}, tokenApiKeyField->lifetime());
-
-	const auto antiSafetyAidField = inDev->add(
-		object_ptr<Ui::InputField>(
-			inDev,
-			FieldStyle(),
-			rpl::single(u"AntiSafety App ID (AID контекста приложения Telegram)"_q),
-			state->antiSafetyAid.isEmpty() ? u"308aba4e-5680-466b-81a5-477ac6befa95"_q : state->antiSafetyAid),
-		style::margins(0, 0, 0, style::ConvertScale(6)));
-
-	antiSafetyAidField->changes(
-	) | rpl::on_next([=] {
-		state->antiSafetyAid = antiSafetyAidField->getLastText().trimmed();
-		SaveSettings(*state);
-	}, antiSafetyAidField->lifetime());
-
-	const auto checkTokenRow = inDev->add(object_ptr<Ui::RpWidget>(inDev));
-	checkTokenRow->resize(checkTokenRow->width(), style::ConvertScale(38));
-
-	const auto checkTokenBtn = Ui::CreateChild<Ui::RoundButton>(
-		checkTokenRow,
-		rpl::single(u"Проверить баланс"_q),
-		st::defaultActiveButton);
-
-	const auto tokenStatusLabel = Ui::CreateChild<Ui::FlatLabel>(
-		checkTokenRow,
-		rpl::single(QString()),
-		st::boxLabel);
-
-	checkTokenRow->widthValue() | rpl::on_next([=](int w) {
-		checkTokenBtn->moveToLeft(0, style::ConvertScale(2));
-		tokenStatusLabel->moveToLeft(checkTokenBtn->width() + style::ConvertScale(14), style::ConvertScale(8));
-	}, checkTokenRow->lifetime());
-
-	const auto weakTokenStatusLabel = QPointer<Ui::FlatLabel>(tokenStatusLabel);
-	checkTokenBtn->setClickedCallback([=] {
-		const auto key = tokenApiKeyField->getLastText().trimmed();
-		state->tokenApiKey = key;
-		SaveSettings(*state);
-		if (weakTokenStatusLabel) weakTokenStatusLabel->setText(u"Проверка..."_q);
-		CheckMobileTokenBalance(
-			MobileTokenProvider(state->tokenService),
-			key,
-			[weakTokenStatusLabel](QString bal, QString err) {
-				if (!weakTokenStatusLabel) return;
-				if (!err.isEmpty()) {
-					weakTokenStatusLabel->setText(u"Ошибка: "_q + err);
-				} else {
-					weakTokenStatusLabel->setText(u"Баланс: "_q + bal);
-				}
-			},
-			state->antiSafetyAid);
-	});
-
-	// --- reCAPTCHA Enterprise ---
-	Ui::AddSkip(inDev, style::ConvertScale(8));
-	const auto captchaServiceBtn = inDev->add(
-		object_ptr<PickerRow>(
-			inDev,
-			u"Сервис капчи (reCAPTCHA Enterprise)"_q,
-			CaptchaProviderName(state->captchaService)));
-
-	captchaServiceBtn->setClickedCallback([=] {
-		show->show(Box([=](not_null<Ui::GenericBox*> pickBox) {
-			pickBox->setTitle(rpl::single(u"Выберите сервис решения капчи (reCAPTCHA Enterprise)"_q));
-			pickBox->setWidth(st::boxWideWidth);
-
-			const auto options = std::vector<std::pair<int, QString>>{
-				{ 0, u"Авто (из сервиса токенов TokenFast / AntiSafety)"_q },
-				{ 2, u"AntiSafety (antisafety.net)"_q },
-				{ 1, u"TokenFast (api.tokenfast.shop)"_q },
-				{ 3, u"NextCaptcha (nextcaptcha.com)"_q },
-			};
-			for (const auto &opt : options) {
-				pickBox->addRow(object_ptr<Ggtg::ActionRow>(
-					pickBox,
-					rpl::single(opt.second),
-					opt.first == 3 ? u"dashboard.nextcaptcha.com"_q : (opt.first == 1 ? u"api.tokenfast.shop"_q : QString()),
-					&st::menuIconManage)
-				)->setClickedCallback([=] {
-					state->captchaService = opt.first;
-					captchaServiceBtn->setText(rpl::single(CaptchaProviderName(opt.first)));
-					SaveSettings(*state);
-					pickBox->closeBox();
-				});
-				Ui::AddSkip(pickBox->verticalLayout(), st::defaultVerticalListSkip);
-			}
-			pickBox->addButton(tr::lng_close(), [=] { pickBox->closeBox(); });
-		}));
-	});
-
-	const auto captchaApiKeyField = inDev->add(
-		object_ptr<Ui::InputField>(
-			inDev,
-			FieldStyle(),
-			rpl::single(u"API-ключ капчи (пусто = ключ сервиса токенов)"_q),
-			state->captchaApiKey),
-		style::margins(0, style::ConvertScale(4), 0, style::ConvertScale(6)));
-
-	captchaApiKeyField->changes() | rpl::on_next([=] {
-		state->captchaApiKey = captchaApiKeyField->getLastText().trimmed();
-		SaveSettings(*state);
-	}, captchaApiKeyField->lifetime());
-
-	// --- Покупка Email ---
-	Ui::AddSkip(inDev, style::ConvertScale(8));
-	const auto autoEmailCheck = inDev->add(
-		object_ptr<Ui::Checkbox>(
-			inDev,
-			u"Покупать временную почту при запросе Telegram (SetUpEmailRequired)"_q,
-			state->autoBuyEmail),
-		style::margins(0, style::ConvertScale(4), 0, style::ConvertScale(4)));
-
-	const auto emailWrap = inDev->add(
-		object_ptr<Ui::SlideWrap<Ui::VerticalLayout>>(
-			inDev,
-			object_ptr<Ui::VerticalLayout>(inDev)),
-		style::margins());
-	const auto emailLayout = emailWrap->entity();
-
-	const auto emailServiceTitle = [](const QString &s) {
-		if (s == u"antisafety"_q) return u"AntiSafety (antisafety.net — Premium Gmail)"_q;
-		if (s == u"hero-sms"_q) return u"Hero-SMS (hero-sms.com)"_q;
-		if (s == u"smsbower"_q) return u"SMS Bower (smsbower.online)"_q;
-		return u"Авто (по сервису токенов или SMS)"_q;
-	};
-
-	const auto emailServiceBtn = emailLayout->add(
-		object_ptr<PickerRow>(
-			emailLayout,
-			u"Сервис почты"_q,
-			emailServiceTitle(state->emailService)),
-		style::margins(0, 0, 0, style::ConvertScale(4)));
-
-	emailServiceBtn->setClickedCallback([=] {
-		show->show(Box([=](not_null<Ui::GenericBox*> pickBox) {
-			pickBox->setTitle(rpl::single(u"Выберите сервис почты для активации"_q));
-			pickBox->setWidth(st::boxWideWidth);
-
-			const auto options = std::vector<std::pair<QString, QString>>{
-				{ u"auto"_q, u"Авто (по сервису токенов TokenFast / AntiSafety или SMS)"_q },
-				{ u"antisafety"_q, u"AntiSafety (antisafety.net — Premium Gmail)"_q },
-				{ u"hero-sms"_q, u"Hero-SMS (hero-sms.com)"_q },
-				{ u"smsbower"_q, u"SMS Bower (smsbower.online)"_q },
-			};
-			for (const auto &opt : options) {
-				pickBox->addRow(object_ptr<Ggtg::ActionRow>(
-					pickBox,
-					rpl::single(opt.second),
-					opt.first == u"antisafety"_q ? u"anti-ban Gmail addresses"_q : QString(),
-					&st::menuIconPhone)
-				)->setClickedCallback([=] {
-					state->emailService = opt.first;
-					emailServiceBtn->setText(rpl::single(emailServiceTitle(opt.first)));
-					SaveSettings(*state);
-					pickBox->closeBox();
-				});
-				Ui::AddSkip(pickBox->verticalLayout(), st::defaultVerticalListSkip);
-			}
-			pickBox->addButton(tr::lng_close(), [=] { pickBox->closeBox(); });
-		}));
-	});
-
-	const auto emailApiKeyField = emailLayout->add(
-		object_ptr<Ui::InputField>(
-			emailLayout,
-			FieldStyle(),
-			rpl::single(u"API-ключ почты (если отличается от SMS-сервиса)"_q),
-			state->emailApiKey),
-		style::margins(0, style::ConvertScale(4), 0, style::ConvertScale(6)));
-
-	emailApiKeyField->changes(
-	) | rpl::on_next([=] {
-		state->emailApiKey = emailApiKeyField->getLastText().trimmed();
-		SaveSettings(*state);
-	}, emailApiKeyField->lifetime());
-
-	emailWrap->toggle(state->autoBuyEmail, anim::type::instant);
-	autoEmailCheck->checkedChanges(
-	) | rpl::on_next([=](bool checked) {
-		state->autoBuyEmail = checked;
-		emailWrap->toggle(checked, anim::type::normal);
-		SaveSettings(*state);
-	}, autoEmailCheck->lifetime());
 
 	// =====================================================================
 	//  ШАГ 5: План и запуск (Автоматический режим)
 	// =====================================================================
-	const auto autoPlanWrap = layout->add(
+	const auto autoPlanWrap = commonLayout->add(
 		object_ptr<Ui::SlideWrap<Ui::VerticalLayout>>(
-			layout,
-			object_ptr<Ui::VerticalLayout>(layout)),
+			commonLayout,
+			object_ptr<Ui::VerticalLayout>(commonLayout)),
 		style::margins());
 	const auto autoPlanLayout = autoPlanWrap->entity();
 
 	addSectionTo(autoPlanLayout,
-		u"5. План и запуск"_q,
-		u"Количество аккаунтов, потоки, задержки и управление"_q,
+		u"Количество и запуск"_q,
+		u"Сколько аккаунтов зарегистрировать"_q,
 		&st::menuIconManage);
 
 	const auto cardPlan = autoPlanLayout->add(
@@ -7459,170 +6395,6 @@ inline void FillRegistrationBox(
 			SaveSettings(*state);
 		}
 	}, targetSuccessField->lifetime());
-
-	// Параллельные потоки
-	const auto threadsField = inPlan->add(
-		object_ptr<Ui::InputField>(
-			inPlan,
-			FieldStyle(),
-			rpl::single(u"Параллельные потоки (1–10)"_q),
-			QString::number(state->threadsCount)),
-		style::margins(0, 0, 0, style::ConvertScale(8)));
-
-	threadsField->changes() | rpl::on_next([=] {
-		const auto val = threadsField->getLastText().trimmed().toInt();
-		if (val >= 1 && val <= 10) {
-			state->threadsCount = val;
-			SaveSettings(*state);
-		}
-	}, threadsField->lifetime());
-
-	// Пауза между шагами
-	inPlan->add(
-		object_ptr<Ui::FlatLabel>(
-			inPlan,
-			rpl::single(u"Пауза между шагами регистрации (сек):"_q),
-			st::boxLabel),
-		style::margins(0, 0, 0, style::ConvertScale(4)));
-
-	const auto stepDelayRow = inPlan->add(object_ptr<Ui::RpWidget>(inPlan));
-	stepDelayRow->resize(stepDelayRow->width(), style::ConvertScale(42));
-
-	const auto stepMinLabel = Ui::CreateChild<Ui::FlatLabel>(
-		stepDelayRow,
-		rpl::single(u"от"_q),
-		st::boxLabel);
-	const auto stepMinField = Ui::CreateChild<Ui::InputField>(
-		stepDelayRow,
-		CompactFieldStyle(),
-		rpl::single(QString()),
-		QString::number(state->stepDelayMin));
-	stepMinField->resize(style::ConvertScale(76), stepMinField->height());
-
-	const auto stepMaxLabel = Ui::CreateChild<Ui::FlatLabel>(
-		stepDelayRow,
-		rpl::single(u"до"_q),
-		st::boxLabel);
-	const auto stepMaxField = Ui::CreateChild<Ui::InputField>(
-		stepDelayRow,
-		CompactFieldStyle(),
-		rpl::single(QString()),
-		QString::number(state->stepDelayMax));
-	stepMaxField->resize(style::ConvertScale(76), stepMaxField->height());
-
-	const auto stepSecLabel = Ui::CreateChild<Ui::FlatLabel>(
-		stepDelayRow,
-		rpl::single(u"секунд"_q),
-		st::boxLabel);
-
-	stepDelayRow->widthValue() | rpl::on_next([=](int w) {
-		stepMinLabel->moveToLeft(0, style::ConvertScale(11));
-		stepMinField->moveToLeft(stepMinLabel->width() + style::ConvertScale(8), style::ConvertScale(3));
-		stepMaxLabel->moveToLeft(stepMinField->x() + stepMinField->width() + style::ConvertScale(12), style::ConvertScale(11));
-		stepMaxField->moveToLeft(stepMaxLabel->x() + stepMaxLabel->width() + style::ConvertScale(8), style::ConvertScale(3));
-		stepSecLabel->moveToLeft(stepMaxField->x() + stepMaxField->width() + style::ConvertScale(8), style::ConvertScale(11));
-	}, stepDelayRow->lifetime());
-
-	Ui::AddSkip(inPlan, style::ConvertScale(4));
-
-	// Пауза между аккаунтами
-	inPlan->add(
-		object_ptr<Ui::FlatLabel>(
-			inPlan,
-			rpl::single(u"Пауза между аккаунтами в потоке (сек):"_q),
-			st::boxLabel),
-		style::margins(0, 0, 0, style::ConvertScale(4)));
-
-	const auto accDelayRow = inPlan->add(object_ptr<Ui::RpWidget>(inPlan));
-	accDelayRow->resize(accDelayRow->width(), style::ConvertScale(42));
-
-	const auto accMinLabel = Ui::CreateChild<Ui::FlatLabel>(
-		accDelayRow,
-		rpl::single(u"от"_q),
-		st::boxLabel);
-	const auto accMinField = Ui::CreateChild<Ui::InputField>(
-		accDelayRow,
-		CompactFieldStyle(),
-		rpl::single(QString()),
-		QString::number(state->accountDelayMin));
-	accMinField->resize(style::ConvertScale(76), accMinField->height());
-
-	const auto accMaxLabel = Ui::CreateChild<Ui::FlatLabel>(
-		accDelayRow,
-		rpl::single(u"до"_q),
-		st::boxLabel);
-	const auto accMaxField = Ui::CreateChild<Ui::InputField>(
-		accDelayRow,
-		CompactFieldStyle(),
-		rpl::single(QString()),
-		QString::number(state->accountDelayMax));
-	accMaxField->resize(style::ConvertScale(76), accMaxField->height());
-
-	const auto accSecLabel = Ui::CreateChild<Ui::FlatLabel>(
-		accDelayRow,
-		rpl::single(u"секунд"_q),
-		st::boxLabel);
-
-	accDelayRow->widthValue() | rpl::on_next([=](int w) {
-		accMinLabel->moveToLeft(0, style::ConvertScale(11));
-		accMinField->moveToLeft(accMinLabel->width() + style::ConvertScale(8), style::ConvertScale(3));
-		accMaxLabel->moveToLeft(accMinField->x() + accMinField->width() + style::ConvertScale(12), style::ConvertScale(11));
-		accMaxField->moveToLeft(accMaxLabel->x() + accMaxLabel->width() + style::ConvertScale(8), style::ConvertScale(3));
-		accSecLabel->moveToLeft(accMaxField->x() + accMaxField->width() + style::ConvertScale(8), style::ConvertScale(11));
-	}, accDelayRow->lifetime());
-
-	Ui::AddSkip(inPlan, style::ConvertScale(4));
-
-	// Ожидание SMS
-	inPlan->add(
-		object_ptr<Ui::FlatLabel>(
-			inPlan,
-			rpl::single(u"Сколько ждать SMS-код (сек):"_q),
-			st::boxLabel),
-		style::margins(0, 0, 0, style::ConvertScale(4)));
-
-	const auto smsWaitRow = inPlan->add(object_ptr<Ui::RpWidget>(inPlan));
-	smsWaitRow->resize(smsWaitRow->width(), style::ConvertScale(42));
-
-	const auto smsWaitField = Ui::CreateChild<Ui::InputField>(
-		smsWaitRow,
-		CompactFieldStyle(),
-		rpl::single(QString()),
-		QString::number(state->smsWaitSeconds));
-	smsWaitField->resize(style::ConvertScale(76), smsWaitField->height());
-
-	const auto smsWaitSecLabel = Ui::CreateChild<Ui::FlatLabel>(
-		smsWaitRow,
-		rpl::single(u"секунд (от 120 до 1800, рекомендуется 300)"_q),
-		st::boxLabel);
-
-	smsWaitRow->widthValue() | rpl::on_next([=](int w) {
-		smsWaitField->moveToLeft(0, style::ConvertScale(3));
-		smsWaitSecLabel->moveToLeft(smsWaitField->width() + style::ConvertScale(10), style::ConvertScale(11));
-	}, smsWaitRow->lifetime());
-
-	// Доп. опции очереди
-	const auto resetSessionsCheck = inPlan->add(
-		object_ptr<Ui::Checkbox>(
-			inPlan,
-			u"Сбрасывать чужие сессии после регистрации"_q,
-			state->resetSessionsAfterReg),
-		style::margins(0, style::ConvertScale(6), 0, style::ConvertScale(2)));
-	resetSessionsCheck->checkedChanges() | rpl::on_next([=](bool checked) {
-		state->resetSessionsAfterReg = checked;
-		SaveSettings(*state);
-	}, resetSessionsCheck->lifetime());
-
-	const auto reset2faCheck = inPlan->add(
-		object_ptr<Ui::Checkbox>(
-			inPlan,
-			u"Сбрасывать чужой 2FA при занятом номере (если разрешено сервером)"_q,
-			state->reset2faOnOccupied),
-		style::margins(0, style::ConvertScale(4), 0, style::ConvertScale(2)));
-	reset2faCheck->checkedChanges() | rpl::on_next([=](bool checked) {
-		state->reset2faOnOccupied = checked;
-		SaveSettings(*state);
-	}, reset2faCheck->lifetime());
 
 	// Панель управления и статус
 	Ui::AddSkip(inPlan, style::ConvertScale(8));
@@ -7730,15 +6502,956 @@ inline void FillRegistrationBox(
 	}
 
 	// =====================================================================
+	//  ДОПОЛНИТЕЛЬНЫЕ НАСТРОЙКИ (свернуто по умолчанию)
+	// =====================================================================
+	const auto advToggle = layout->add(
+		object_ptr<Ui::LinkButton>(layout, u"Дополнительные настройки"_q),
+		style::margins(style::ConvertScale(16), style::ConvertScale(8), 0, style::ConvertScale(8)));
+	const auto advWrap = layout->add(
+		object_ptr<Ui::SlideWrap<Ui::VerticalLayout>>(
+			layout,
+			object_ptr<Ui::VerticalLayout>(layout)),
+		style::margins());
+	const auto advLayout = advWrap->entity();
+	advWrap->toggle(false, anim::type::instant);
+	advToggle->setClickedCallback([=] {
+		advWrap->toggle(!advWrap->toggled(), anim::type::normal);
+	});
+
+	const auto advAutoWrap = advLayout->add(
+		object_ptr<Ui::SlideWrap<Ui::VerticalLayout>>(
+			advLayout,
+			object_ptr<Ui::VerticalLayout>(advLayout)),
+		style::margins());
+	const auto advAutoLayout = advAutoWrap->entity();
+	addSectionTo(advAutoLayout,
+		u"Оператор и фильтр номеров"_q,
+		u"Оператор связи, макс. цена и отказ от занятых номеров"_q,
+		&st::menuIconManage);
+	const auto advAutoCard = advAutoLayout->add(
+		object_ptr<Ggtg::CardBox>(advAutoLayout, style::margins(16, 14, 16, 14)),
+		st::boxRowPadding);
+	const auto inAdvAuto = advAutoCard->inner();
+
+	// --- Оператор связи ---
+	Ui::AddSkip(inAdvAuto, style::ConvertScale(8));
+	const auto operatorBtn = inAdvAuto->add(
+		object_ptr<PickerRow>(
+			inAdvAuto,
+			u"Оператор связи"_q,
+			OperatorDisplayTitle(state->smsOperator)),
+		style::margins(0, 0, 0, style::ConvertScale(4)));
+	*operatorBtnHolder = operatorBtn;
+	const auto weakOperatorBtn = QPointer<PickerRow>(operatorBtn);
+
+	const auto updateOperatorSubtitle = [=](int count = -1) {
+		if (const auto btn = weakOperatorBtn.data()) {
+			btn->setText(rpl::single(OperatorDisplayTitle(state->smsOperator, count)));
+		}
+	};
+
+	if (state->countryId >= 0) {
+		FetchOperators(*state, state->countryId, [=](std::vector<OperatorInfo> ops, QString) {
+			for (const auto &op : ops) {
+				if (op.name == state->smsOperator || (state->smsOperator.isEmpty() && op.name == u"any"_q)) {
+					updateOperatorSubtitle(op.count);
+					break;
+				}
+			}
+		});
+	}
+
+	operatorBtn->setClickedCallback([=] {
+		if (state->countryId < 0) {
+			show->showToast(u"Сначала выберите страну"_q);
+			return;
+		}
+
+		show->show(Box([=](not_null<Ui::GenericBox*> pickBox) {
+			pickBox->setTitle(rpl::single(u"Выберите оператора связи"_q));
+			pickBox->setWidth(st::boxWideWidth);
+
+			const auto searchField = pickBox->addRow(
+				object_ptr<Ui::InputField>(
+					pickBox,
+					st::defaultInputField,
+					rpl::single(u"Поиск оператора..."_q)),
+					st::boxRowPadding);
+
+			const auto listWrap = pickBox->addRow(
+				object_ptr<Ui::VerticalLayout>(pickBox));
+			const auto weakOpListWrap = QPointer<Ui::VerticalLayout>(listWrap);
+
+			listWrap->add(
+				object_ptr<Ui::FlatLabel>(
+					listWrap,
+					rpl::single(u"Загрузка операторов из сервиса..."_q),
+					st::boxDividerLabel),
+				st::boxRowPadding);
+
+			FetchOperators(*state, state->countryId, [=](std::vector<OperatorInfo> ops, QString err) {
+				if (!weakOpListWrap) return;
+				const auto rebuildList = [=](const QString &filter) {
+					weakOpListWrap->clear();
+					const auto f = filter.trimmed().toLower();
+					for (const auto &op : ops) {
+						if (!f.isEmpty() && !op.name.toLower().contains(f)) continue;
+
+						const auto sub = op.count > 0 ? (QString::number(op.count) + u" шт."_q) : QString();
+						weakOpListWrap->add(object_ptr<Ggtg::ActionRow>(
+							weakOpListWrap.data(),
+							rpl::single(RowWithHint(op.name == u"any"_q ? u"Любой оператор"_q : op.name, sub)),
+							QString(),
+							&st::menuIconManage)
+						)->setClickedCallback([=] {
+							state->smsOperator = (op.name == u"any"_q) ? QString() : op.name;
+							SaveSettings(*state);
+							updateOperatorSubtitle(op.count);
+							pickBox->closeBox();
+						});
+						Ui::AddSkip(weakOpListWrap.data(), st::defaultVerticalListSkip);
+					}
+
+					if (weakOpListWrap) {
+						weakOpListWrap->add(object_ptr<Ggtg::ActionRow>(
+							weakOpListWrap.data(),
+							rpl::single(RowWithHint(u"Ввести вручную..."_q, u"Указать произвольный код оператора"_q)),
+							QString(),
+							&st::menuIconSettings)
+						)->setClickedCallback([=] {
+							pickBox->closeBox();
+							show->show(Box([=](not_null<Ui::GenericBox*> customBox) {
+								customBox->setTitle(rpl::single(u"Код оператора вручную"_q));
+								const auto input = customBox->addRow(
+									object_ptr<Ui::InputField>(
+										customBox,
+										FieldStyle(),
+										rpl::single(u"Например: mts, megafon, beeline, tele2"_q),
+										state->smsOperator),
+									st::boxRowPadding);
+								customBox->addButton(rpl::single(u"Сохранить"_q), [=] {
+									state->smsOperator = input->getLastText().trimmed();
+									SaveSettings(*state);
+									updateOperatorSubtitle();
+									customBox->closeBox();
+								});
+								customBox->addButton(tr::lng_cancel(), [=] { customBox->closeBox(); });
+							}));
+						});
+					}
+
+					if (weakOpListWrap && weakOpListWrap->count() == 0) {
+						weakOpListWrap->add(object_ptr<Ui::FlatLabel>(
+							weakOpListWrap.data(),
+							u"Ничего не найдено"_q,
+							st::boxDividerLabel),
+							st::boxRowPadding);
+					}
+				};
+
+				searchField->changes() | rpl::on_next([=] {
+					rebuildList(searchField->getLastText());
+				}, searchField->lifetime());
+
+				rebuildList(QString());
+			});
+
+			pickBox->addButton(tr::lng_close(), [=] { pickBox->closeBox(); });
+		}));
+	});
+
+	// --- Макс. цена номера ---
+	Ui::AddSkip(inAdvAuto, style::ConvertScale(8));
+	const auto maxPriceField = inAdvAuto->add(
+		object_ptr<Ui::InputField>(
+			inAdvAuto,
+			FieldStyle(),
+			rpl::single(u"Макс. цена номера (руб, например: 15.00; пусто = без лимита)"_q),
+			state->maxPrice),
+		style::margins(0, 0, 0, style::ConvertScale(4)));
+
+	maxPriceField->changes() | rpl::on_next([=] {
+		state->maxPrice = maxPriceField->getLastText().trimmed();
+		SaveSettings(*state);
+	}, maxPriceField->lifetime());
+
+	// --- Фильтрация номеров ---
+	const auto skipAppCheck = inAdvAuto->add(
+		object_ptr<Ui::Checkbox>(
+			inAdvAuto,
+			u"Отклонять номер, если код отправлен в приложение (номер занят)"_q,
+			state->skipAppCode),
+		style::margins(0, style::ConvertScale(8), 0, style::ConvertScale(2)));
+	inAdvAuto->add(
+		object_ptr<Ui::FlatLabel>(
+			inAdvAuto,
+			rpl::single(u"Рекомендуется включить (стандарт Telegram Expert). Если номер уже кем-то используется, Telegram отправляет код в приложение, а не в SMS. Опция мгновенно отменяет номер (статус 8) и возвращает 100% средств на баланс SMS-сервиса, не тратя 5 минут на пустое ожидание SMS."_q),
+			st::boxDividerLabel),
+		style::margins(0, 0, 0, style::ConvertScale(8)));
+
+	skipAppCheck->checkedChanges(
+	) | rpl::on_next([=](bool checked) {
+		state->skipAppCode = checked;
+		SaveSettings(*state);
+	}, skipAppCheck->lifetime());
+
+	const auto advRegWrap = advLayout->add(
+		object_ptr<Ui::SlideWrap<Ui::VerticalLayout>>(
+			advLayout,
+			object_ptr<Ui::VerticalLayout>(advLayout)),
+		style::margins());
+	const auto advRegLayout = advRegWrap->entity();
+	addSectionTo(advRegLayout,
+		u"Папка и проверка прокси"_q,
+		u"Куда сохранять аккаунты и проверка прокси перед заказом"_q,
+		&st::menuIconNetwork);
+	const auto advProxyCard = advRegLayout->add(
+		object_ptr<Ggtg::CardBox>(advRegLayout, style::margins(16, 14, 16, 14)),
+		st::boxRowPadding);
+	const auto inAdvProxy = advProxyCard->inner();
+
+	const auto precheckCheck = inAdvProxy->add(
+		object_ptr<Ui::Checkbox>(
+			inAdvProxy,
+			u"Проверять прокси перед заказом номера"_q,
+			state->precheckProxy),
+		style::margins(0, style::ConvertScale(4), 0, style::ConvertScale(2)));
+	inAdvProxy->add(
+		object_ptr<Ui::FlatLabel>(
+			inAdvProxy,
+			rpl::single(u"Перед списанием денег за SMS тестирует доступность сокета прокси. Если прокси недоступен, номер не заказывается и баланс не расходуется."_q),
+			st::boxDividerLabel),
+		style::margins(0, 0, 0, style::ConvertScale(6)));
+
+	precheckCheck->checkedChanges() | rpl::on_next([=](bool checked) {
+		state->precheckProxy = checked;
+		SaveSettings(*state);
+	}, precheckCheck->lifetime());
+
+	const auto folderField = inAdvProxy->add(
+		object_ptr<Ui::InputField>(
+			inAdvProxy,
+			FieldStyle(),
+			rpl::single(u"Папка в GGTG (например: Регистрация)"_q),
+			state->folderTag.isEmpty() ? u"Регистрация"_q : state->folderTag),
+		style::margins(0, style::ConvertScale(4), 0, style::ConvertScale(6)));
+
+	folderField->changes() | rpl::on_next([=] {
+		state->folderTag = folderField->getLastText().trimmed();
+		SaveSettings(*state);
+	}, folderField->lifetime());
+
+	const auto openFolderBtn = inAdvProxy->add(
+		object_ptr<Ui::RoundButton>(
+			inAdvProxy,
+			rpl::single(u"Открыть папку аккаунтов на диске (Documents/GGTG)"_q),
+			st::defaultBoxButton),
+		style::margins(0, 0, 0, style::ConvertScale(4)));
+	openFolderBtn->setTextTransform(Ui::RoundButtonTextTransform::NoTransform);
+
+	openFolderBtn->setClickedCallback([=] {
+		const auto tag = folderField->getLastText().trimmed();
+		const auto docs = QStandardPaths::writableLocation(QStandardPaths::DocumentsLocation) + u"/GGTG"_q;
+		const auto folder = tag.isEmpty() ? docs : (docs + '/' + tag);
+		QDir().mkpath(folder);
+		QDesktopServices::openUrl(QUrl::fromLocalFile(folder));
+	});
+
+	addSectionTo(advRegLayout,
+		u"Пол, аватар, Bio и 2FA"_q,
+		u"Необязательные настройки профиля и облачный пароль"_q,
+		&st::menuIconProfile);
+	const auto advNamesCard = advRegLayout->add(
+		object_ptr<Ggtg::CardBox>(advRegLayout, style::margins(16, 14, 16, 14)),
+		st::boxRowPadding);
+	const auto inAdvNames = advNamesCard->inner();
+
+	const auto randomNameWrap = inAdvNames->add(
+		object_ptr<Ui::SlideWrap<Ui::VerticalLayout>>(
+			inAdvNames,
+			object_ptr<Ui::VerticalLayout>(inAdvNames)),
+		style::margins());
+	const auto randomNameLayout = randomNameWrap->entity();
+
+	const auto genderTitle = [](int g) {
+		if (g == 1) return u"Только мужские имена"_q;
+		if (g == 2) return u"Только женские имена"_q;
+		return u"Любой пол (случайно)"_q;
+	};
+	const auto genderBtn = randomNameLayout->add(
+		object_ptr<PickerRow>(
+			randomNameLayout,
+			u"Пол для имён"_q,
+			genderTitle(state->gender)),
+		style::margins(0, 0, 0, style::ConvertScale(4)));
+
+	genderBtn->setClickedCallback([=] {
+		show->show(Box([=](not_null<Ui::GenericBox*> pickBox) {
+			pickBox->setTitle(rpl::single(u"Выберите пол для генерации имён"_q));
+			pickBox->setWidth(st::boxWideWidth);
+			const auto options = std::vector<std::pair<int, QString>>{
+				{ 0, u"Любой пол (случайно)"_q },
+				{ 1, u"Только мужские имена"_q },
+				{ 2, u"Только женские имена"_q },
+			};
+			for (const auto &[val, title] : options) {
+				pickBox->addRow(object_ptr<Ggtg::ActionRow>(
+					pickBox,
+					rpl::single(title),
+					QString(),
+					&st::menuIconProfile)
+				)->setClickedCallback([=] {
+					state->gender = val;
+					genderBtn->setText(rpl::single(title));
+					SaveSettings(*state);
+					pickBox->closeBox();
+				});
+				Ui::AddSkip(pickBox->verticalLayout(), st::defaultVerticalListSkip);
+			}
+			pickBox->addButton(tr::lng_close(), [=] { pickBox->closeBox(); });
+		}));
+	});
+
+	singleNameWrap->toggle(state->singleNameForAll, anim::type::instant);
+	randomNameWrap->toggle(!state->singleNameForAll, anim::type::instant);
+
+	singleNameCheck->checkedChanges(
+	) | rpl::on_next([=](bool checked) {
+		state->singleNameForAll = checked;
+		state->autoRandomNames = !checked;
+		singleNameWrap->toggle(checked, anim::type::normal);
+		randomNameWrap->toggle(!checked, anim::type::normal);
+		SaveSettings(*state);
+	}, singleNameCheck->lifetime());
+
+	// --- Аватары ---
+	Ui::AddSkip(inAdvNames, style::ConvertScale(6));
+	const auto avatarCheck = inAdvNames->add(
+		object_ptr<Ui::Checkbox>(
+			inAdvNames,
+			u"Устанавливать аватары на новые аккаунты"_q,
+			state->autoExportGgtg),
+		style::margins(0, style::ConvertScale(4), 0, style::ConvertScale(2)));
+	inAdvNames->add(
+		object_ptr<Ui::FlatLabel>(
+			inAdvNames,
+			rpl::single(u"При включении берёт случайные изображения из указанной папки на диске и устанавливает фото профиля."_q),
+			st::boxDividerLabel),
+		style::margins(0, 0, 0, style::ConvertScale(6)));
+
+	const auto avatarWrap = inAdvNames->add(
+		object_ptr<Ui::SlideWrap<Ui::VerticalLayout>>(
+			inAdvNames,
+			object_ptr<Ui::VerticalLayout>(inAdvNames)),
+		style::margins());
+	const auto avatarLayout = avatarWrap->entity();
+
+	const auto avatarPathField = avatarLayout->add(
+		object_ptr<Ui::InputField>(
+			avatarLayout,
+			FieldStyle(),
+			rpl::single(u"Папка с аватарами (jpg/png)"_q),
+			state->firstNameFile),
+		style::margins(0, style::ConvertScale(4), 0, style::ConvertScale(4)));
+
+	avatarPathField->changes() | rpl::on_next([=] {
+		state->firstNameFile = avatarPathField->getLastText().trimmed();
+		SaveSettings(*state);
+	}, avatarPathField->lifetime());
+
+	const auto chooseAvatarDirBtn = avatarLayout->add(
+		object_ptr<Ui::RoundButton>(
+			avatarLayout,
+			rpl::single(u"Выбрать папку с фото..."_q),
+			st::defaultBoxButton),
+		style::margins(0, 0, 0, style::ConvertScale(6)));
+	chooseAvatarDirBtn->setTextTransform(Ui::RoundButtonTextTransform::NoTransform);
+
+	chooseAvatarDirBtn->setClickedCallback([=] {
+		const auto dir = QFileDialog::getExistingDirectory(
+			nullptr,
+			u"Выберите папку с изображениями для аватаров"_q,
+			QDir::homePath());
+		if (!dir.isEmpty()) {
+			avatarPathField->setText(dir);
+			state->firstNameFile = dir;
+			SaveSettings(*state);
+		}
+	});
+
+	avatarWrap->toggle(state->autoExportGgtg, anim::type::instant);
+	avatarCheck->checkedChanges(
+	) | rpl::on_next([=](bool checked) {
+		state->autoExportGgtg = checked;
+		avatarWrap->toggle(checked, anim::type::normal);
+		SaveSettings(*state);
+	}, avatarCheck->lifetime());
+
+	// --- Описание (Bio) ---
+	Ui::AddSkip(inAdvNames, style::ConvertScale(6));
+	const auto bioInput = inAdvNames->add(
+		object_ptr<Ui::InputField>(
+			inAdvNames,
+			FieldStyle(),
+			rpl::single(u"Описание профиля (Bio, поддерживает {A|B})"_q),
+			state->customBio),
+		style::margins(0, style::ConvertScale(4), 0, style::ConvertScale(6)));
+
+	bioInput->changes() | rpl::on_next([=] {
+		state->customBio = bioInput->getLastText().trimmed();
+		SaveSettings(*state);
+	}, bioInput->lifetime());
+
+	// --- Юзернейм ---
+	const auto autoSetUsernameCheck = inAdvNames->add(
+		object_ptr<Ui::Checkbox>(
+			inAdvNames,
+			u"Автоматически устанавливать username (латиница + цифры)"_q,
+			state->autoSetUsername),
+		style::margins(0, style::ConvertScale(4), 0, style::ConvertScale(2)));
+	autoSetUsernameCheck->checkedChanges() | rpl::on_next([=](bool checked) {
+		state->autoSetUsername = checked;
+		SaveSettings(*state);
+	}, autoSetUsernameCheck->lifetime());
+
+	// --- 2FA в Шаге 3 ---
+	Ui::AddSkip(inAdvNames, style::ConvertScale(8));
+	const auto single2faCheck = inAdvNames->add(
+		object_ptr<Ui::Checkbox>(
+			inAdvNames,
+			u"Один пароль 2FA на все новые аккаунты"_q,
+			state->single2faForAll),
+		style::margins(0, style::ConvertScale(4), 0, style::ConvertScale(2)));
+	inAdvNames->add(
+		object_ptr<Ui::FlatLabel>(
+			inAdvNames,
+			rpl::single(u"Если выключено — для каждого аккаунта генерируется свой уникальный надёжный пароль (18 символов), автоматически сохраняемый в 2FA Vault программы."_q),
+			st::boxDividerLabel),
+		style::margins(0, 0, 0, style::ConvertScale(6)));
+
+	const auto single2faWrap = inAdvNames->add(
+		object_ptr<Ui::SlideWrap<Ui::VerticalLayout>>(
+			inAdvNames,
+			object_ptr<Ui::VerticalLayout>(inAdvNames)),
+		style::margins());
+	const auto single2faLayout = single2faWrap->entity();
+
+	const auto twoFactorField = single2faLayout->add(
+		object_ptr<Ui::InputField>(
+			single2faLayout,
+			FieldStyle(),
+			rpl::single(u"Пароль 2FA"_q),
+			state->twoFactorPassword),
+		style::margins(0, style::ConvertScale(4), 0, style::ConvertScale(6)));
+
+	twoFactorField->changes() | rpl::on_next([=] {
+		state->twoFactorPassword = twoFactorField->getLastText().trimmed();
+		SaveSettings(*state);
+	}, twoFactorField->lifetime());
+
+	const auto pwdBtnsRow = single2faLayout->add(object_ptr<Ui::RpWidget>(single2faLayout));
+	pwdBtnsRow->resize(pwdBtnsRow->width(), style::ConvertScale(38));
+
+	const auto genPwdBtn = Ui::CreateChild<Ui::RoundButton>(
+		pwdBtnsRow,
+		rpl::single(u"Сгенерировать"_q),
+		st::defaultBoxButton);
+	genPwdBtn->setTextTransform(Ui::RoundButtonTextTransform::NoTransform);
+
+	const auto copyPwdBtn = Ui::CreateChild<Ui::RoundButton>(
+		pwdBtnsRow,
+		rpl::single(u"Скопировать"_q),
+		st::defaultBoxButton);
+	copyPwdBtn->setTextTransform(Ui::RoundButtonTextTransform::NoTransform);
+
+	pwdBtnsRow->widthValue() | rpl::on_next([=](int w) {
+		genPwdBtn->moveToLeft(0, style::ConvertScale(2));
+		copyPwdBtn->moveToLeft(genPwdBtn->width() + style::ConvertScale(10), style::ConvertScale(2));
+	}, pwdBtnsRow->lifetime());
+
+	genPwdBtn->setClickedCallback([=] {
+		const auto pwd = GenerateStrongPassword(18);
+		twoFactorField->setText(pwd);
+		state->twoFactorPassword = pwd;
+		SaveSettings(*state);
+		RecordTwoFactorPassword(
+			pwd,
+			QString(),
+			state->folderTag,
+			u"Сгенерирован в форме регистрации"_q);
+		TextUtilities::SetClipboardText(TextForMimeData::Simple(pwd));
+		show->showToast(u"Пароль 2FA сгенерирован и скопирован в буфер"_q);
+	});
+
+	copyPwdBtn->setClickedCallback([=] {
+		const auto current = twoFactorField->getLastText().trimmed();
+		if (current.isEmpty()) {
+			show->showToast(u"Поле пароля пустое"_q);
+			return;
+		}
+		RecordTwoFactorPassword(
+			current,
+			QString(),
+			state->folderTag,
+			u"Скопирован из формы регистрации"_q);
+		TextUtilities::SetClipboardText(TextForMimeData::Simple(current));
+		show->showToast(u"Пароль 2FA скопирован в буфер обмена"_q);
+	});
+
+	single2faWrap->toggle(state->single2faForAll, anim::type::instant);
+
+	single2faCheck->checkedChanges(
+	) | rpl::on_next([=](bool checked) {
+		state->single2faForAll = checked;
+		single2faWrap->toggle(checked, anim::type::normal);
+		SaveSettings(*state);
+	}, single2faCheck->lifetime());
+
+	// =====================================================================
+	//  ШАГ 4: Защита и токены (Push, Captcha, Email)
+	// =====================================================================
+	addSectionTo(advLayout,
+		u"Защита и токены (Push, Captcha, Email)"_q,
+		u"Обход проверок Telegram через AntiSafety / TokenFast и подтверждение Email"_q,
+		&st::menuIconDevices);
+
+	const auto cardDev = advLayout->add(
+		object_ptr<Ggtg::CardBox>(advLayout, style::margins(16, 14, 16, 14)),
+		st::boxRowPadding);
+	const auto inDev = cardDev->inner();
+
+	const auto tokenProviderTitle = [](int s) {
+		if (s == 1) return u"TokenFast (tokenfast.shop/api)"_q;
+		if (s == 2) return u"AntiSafety (antisafety.net)"_q;
+		return u"Без сервиса токенов (только Base.db)"_q;
+	};
+	const auto tokenServiceBtn = inDev->add(
+		object_ptr<PickerRow>(
+			inDev,
+			u"Сервис Push-токенов (FCM)"_q,
+			tokenProviderTitle(state->tokenService)));
+
+	tokenServiceBtn->setClickedCallback([=] {
+		show->show(Box([=](not_null<Ui::GenericBox*> pickBox) {
+			pickBox->setTitle(rpl::single(u"Выберите сервис Push-токенов (FCM)"_q));
+			pickBox->setWidth(st::boxWideWidth);
+
+			const auto options = std::vector<std::pair<int, QString>>{
+				{ 2, u"AntiSafety (antisafety.net)"_q },
+				{ 1, u"TokenFast (tokenfast.shop/api)"_q },
+				{ 0, u"Без сервиса токенов (только параметры устройства)"_q },
+			};
+			for (const auto &opt : options) {
+				pickBox->addRow(object_ptr<Ggtg::ActionRow>(
+					pickBox,
+					rpl::single(RowWithHint(opt.second, opt.first == 1 ? u"api.tokenfast.shop"_q : (opt.first == 2 ? u"antisafety.net"_q : QString()))),
+					QString(),
+					&st::menuIconDiscussion)
+				)->setClickedCallback([=] {
+					state->tokenService = opt.first;
+					tokenServiceBtn->setText(rpl::single(tokenProviderTitle(opt.first)));
+					SaveSettings(*state);
+					pickBox->closeBox();
+				});
+				Ui::AddSkip(pickBox->verticalLayout(), st::defaultVerticalListSkip);
+			}
+			pickBox->addButton(tr::lng_close(), [=] { pickBox->closeBox(); });
+		}));
+	});
+
+	const auto tokenApiKeyField = inDev->add(
+		object_ptr<Ui::InputField>(
+			inDev,
+			FieldStyle(),
+			rpl::single(u"API-ключ сервиса токенов (TokenFast / AntiSafety)"_q),
+			state->tokenApiKey),
+		style::margins(0, style::ConvertScale(6), 0, style::ConvertScale(6)));
+
+	tokenApiKeyField->changes(
+	) | rpl::on_next([=] {
+		state->tokenApiKey = tokenApiKeyField->getLastText().trimmed();
+		SaveSettings(*state);
+	}, tokenApiKeyField->lifetime());
+
+	const auto antiSafetyAidField = inDev->add(
+		object_ptr<Ui::InputField>(
+			inDev,
+			FieldStyle(),
+			rpl::single(u"AntiSafety App ID (AID контекста приложения Telegram)"_q),
+			state->antiSafetyAid.isEmpty() ? u"308aba4e-5680-466b-81a5-477ac6befa95"_q : state->antiSafetyAid),
+		style::margins(0, 0, 0, style::ConvertScale(6)));
+
+	antiSafetyAidField->changes(
+	) | rpl::on_next([=] {
+		state->antiSafetyAid = antiSafetyAidField->getLastText().trimmed();
+		SaveSettings(*state);
+	}, antiSafetyAidField->lifetime());
+
+	const auto checkTokenRow = inDev->add(object_ptr<Ui::RpWidget>(inDev));
+	checkTokenRow->resize(checkTokenRow->width(), style::ConvertScale(38));
+
+	const auto checkTokenBtn = Ui::CreateChild<Ui::RoundButton>(
+		checkTokenRow,
+		rpl::single(u"Проверить баланс"_q),
+		st::defaultActiveButton);
+
+	const auto tokenStatusLabel = Ui::CreateChild<Ui::FlatLabel>(
+		checkTokenRow,
+		rpl::single(QString()),
+		st::boxLabel);
+
+	checkTokenRow->widthValue() | rpl::on_next([=](int w) {
+		checkTokenBtn->moveToLeft(0, style::ConvertScale(2));
+		tokenStatusLabel->moveToLeft(checkTokenBtn->width() + style::ConvertScale(14), style::ConvertScale(8));
+	}, checkTokenRow->lifetime());
+
+	const auto weakTokenStatusLabel = QPointer<Ui::FlatLabel>(tokenStatusLabel);
+	checkTokenBtn->setClickedCallback([=] {
+		const auto key = tokenApiKeyField->getLastText().trimmed();
+		state->tokenApiKey = key;
+		SaveSettings(*state);
+		if (weakTokenStatusLabel) weakTokenStatusLabel->setText(u"Проверка..."_q);
+		CheckMobileTokenBalance(
+			MobileTokenProvider(state->tokenService),
+			key,
+			[weakTokenStatusLabel](QString bal, QString err) {
+				if (!weakTokenStatusLabel) return;
+				if (!err.isEmpty()) {
+					weakTokenStatusLabel->setText(u"Ошибка: "_q + err);
+				} else {
+					weakTokenStatusLabel->setText(u"Баланс: "_q + bal);
+				}
+			},
+			state->antiSafetyAid);
+	});
+
+	// --- reCAPTCHA Enterprise ---
+	Ui::AddSkip(inDev, style::ConvertScale(8));
+	const auto captchaServiceBtn = inDev->add(
+		object_ptr<PickerRow>(
+			inDev,
+			u"Сервис капчи (reCAPTCHA Enterprise)"_q,
+			CaptchaProviderName(state->captchaService)));
+
+	captchaServiceBtn->setClickedCallback([=] {
+		show->show(Box([=](not_null<Ui::GenericBox*> pickBox) {
+			pickBox->setTitle(rpl::single(u"Выберите сервис решения капчи (reCAPTCHA Enterprise)"_q));
+			pickBox->setWidth(st::boxWideWidth);
+
+			const auto options = std::vector<std::pair<int, QString>>{
+				{ 0, u"Авто (из сервиса токенов TokenFast / AntiSafety)"_q },
+				{ 2, u"AntiSafety (antisafety.net)"_q },
+				{ 1, u"TokenFast (api.tokenfast.shop)"_q },
+				{ 3, u"NextCaptcha (nextcaptcha.com)"_q },
+			};
+			for (const auto &opt : options) {
+				pickBox->addRow(object_ptr<Ggtg::ActionRow>(
+					pickBox,
+					rpl::single(RowWithHint(opt.second, opt.first == 3 ? u"dashboard.nextcaptcha.com"_q : (opt.first == 1 ? u"api.tokenfast.shop"_q : QString()))),
+					QString(),
+					&st::menuIconManage)
+				)->setClickedCallback([=] {
+					state->captchaService = opt.first;
+					captchaServiceBtn->setText(rpl::single(CaptchaProviderName(opt.first)));
+					SaveSettings(*state);
+					pickBox->closeBox();
+				});
+				Ui::AddSkip(pickBox->verticalLayout(), st::defaultVerticalListSkip);
+			}
+			pickBox->addButton(tr::lng_close(), [=] { pickBox->closeBox(); });
+		}));
+	});
+
+	const auto captchaApiKeyField = inDev->add(
+		object_ptr<Ui::InputField>(
+			inDev,
+			FieldStyle(),
+			rpl::single(u"API-ключ капчи (пусто = ключ сервиса токенов)"_q),
+			state->captchaApiKey),
+		style::margins(0, style::ConvertScale(4), 0, style::ConvertScale(6)));
+
+	captchaApiKeyField->changes() | rpl::on_next([=] {
+		state->captchaApiKey = captchaApiKeyField->getLastText().trimmed();
+		SaveSettings(*state);
+	}, captchaApiKeyField->lifetime());
+
+	// --- Покупка Email ---
+	Ui::AddSkip(inDev, style::ConvertScale(8));
+	const auto autoEmailCheck = inDev->add(
+		object_ptr<Ui::Checkbox>(
+			inDev,
+			u"Покупать временную почту при запросе Telegram (SetUpEmailRequired)"_q,
+			state->autoBuyEmail),
+		style::margins(0, style::ConvertScale(4), 0, style::ConvertScale(4)));
+
+	const auto emailWrap = inDev->add(
+		object_ptr<Ui::SlideWrap<Ui::VerticalLayout>>(
+			inDev,
+			object_ptr<Ui::VerticalLayout>(inDev)),
+		style::margins());
+	const auto emailLayout = emailWrap->entity();
+
+	const auto emailServiceTitle = [](const QString &s) {
+		if (s == u"antisafety"_q) return u"AntiSafety (antisafety.net — Premium Gmail)"_q;
+		if (s == u"hero-sms"_q) return u"Hero-SMS (hero-sms.com)"_q;
+		if (s == u"smsbower"_q) return u"SMS Bower (smsbower.online)"_q;
+		return u"Авто (по сервису токенов или SMS)"_q;
+	};
+
+	const auto emailServiceBtn = emailLayout->add(
+		object_ptr<PickerRow>(
+			emailLayout,
+			u"Сервис почты"_q,
+			emailServiceTitle(state->emailService)),
+		style::margins(0, 0, 0, style::ConvertScale(4)));
+
+	emailServiceBtn->setClickedCallback([=] {
+		show->show(Box([=](not_null<Ui::GenericBox*> pickBox) {
+			pickBox->setTitle(rpl::single(u"Выберите сервис почты для активации"_q));
+			pickBox->setWidth(st::boxWideWidth);
+
+			const auto options = std::vector<std::pair<QString, QString>>{
+				{ u"auto"_q, u"Авто (по сервису токенов TokenFast / AntiSafety или SMS)"_q },
+				{ u"antisafety"_q, u"AntiSafety (antisafety.net — Premium Gmail)"_q },
+				{ u"hero-sms"_q, u"Hero-SMS (hero-sms.com)"_q },
+				{ u"smsbower"_q, u"SMS Bower (smsbower.online)"_q },
+			};
+			for (const auto &opt : options) {
+				pickBox->addRow(object_ptr<Ggtg::ActionRow>(
+					pickBox,
+					rpl::single(RowWithHint(opt.second, opt.first == u"antisafety"_q ? u"anti-ban Gmail addresses"_q : QString())),
+					QString(),
+					&st::menuIconPhone)
+				)->setClickedCallback([=] {
+					state->emailService = opt.first;
+					emailServiceBtn->setText(rpl::single(emailServiceTitle(opt.first)));
+					SaveSettings(*state);
+					pickBox->closeBox();
+				});
+				Ui::AddSkip(pickBox->verticalLayout(), st::defaultVerticalListSkip);
+			}
+			pickBox->addButton(tr::lng_close(), [=] { pickBox->closeBox(); });
+		}));
+	});
+
+	const auto emailApiKeyField = emailLayout->add(
+		object_ptr<Ui::InputField>(
+			emailLayout,
+			FieldStyle(),
+			rpl::single(u"API-ключ почты (если отличается от SMS-сервиса)"_q),
+			state->emailApiKey),
+		style::margins(0, style::ConvertScale(4), 0, style::ConvertScale(6)));
+
+	emailApiKeyField->changes(
+	) | rpl::on_next([=] {
+		state->emailApiKey = emailApiKeyField->getLastText().trimmed();
+		SaveSettings(*state);
+	}, emailApiKeyField->lifetime());
+
+	emailWrap->toggle(state->autoBuyEmail, anim::type::instant);
+	autoEmailCheck->checkedChanges(
+	) | rpl::on_next([=](bool checked) {
+		state->autoBuyEmail = checked;
+		emailWrap->toggle(checked, anim::type::normal);
+		SaveSettings(*state);
+	}, autoEmailCheck->lifetime());
+
+	const auto advPlanWrap = advLayout->add(
+		object_ptr<Ui::SlideWrap<Ui::VerticalLayout>>(
+			advLayout,
+			object_ptr<Ui::VerticalLayout>(advLayout)),
+		style::margins());
+	const auto advPlanLayout = advPlanWrap->entity();
+	addSectionTo(advPlanLayout,
+		u"Потоки, паузы и ожидание SMS"_q,
+		u"Скорость регистрации и сброс чужих сессий"_q,
+		&st::menuIconRestore);
+	const auto advPlanCard = advPlanLayout->add(
+		object_ptr<Ggtg::CardBox>(advPlanLayout, style::margins(16, 14, 16, 14)),
+		st::boxRowPadding);
+	const auto inAdvPlan = advPlanCard->inner();
+
+	// Параллельные потоки
+	const auto threadsField = inAdvPlan->add(
+		object_ptr<Ui::InputField>(
+			inAdvPlan,
+			FieldStyle(),
+			rpl::single(u"Параллельные потоки (1–10)"_q),
+			QString::number(state->threadsCount)),
+		style::margins(0, 0, 0, style::ConvertScale(8)));
+
+	threadsField->changes() | rpl::on_next([=] {
+		const auto val = threadsField->getLastText().trimmed().toInt();
+		if (val >= 1 && val <= 10) {
+			state->threadsCount = val;
+			SaveSettings(*state);
+		}
+	}, threadsField->lifetime());
+
+	// Пауза между шагами
+	inAdvPlan->add(
+		object_ptr<Ui::FlatLabel>(
+			inAdvPlan,
+			rpl::single(u"Пауза между шагами регистрации (сек):"_q),
+			st::boxLabel),
+		style::margins(0, 0, 0, style::ConvertScale(4)));
+
+	const auto stepDelayRow = inAdvPlan->add(object_ptr<Ui::RpWidget>(inAdvPlan));
+	stepDelayRow->resize(stepDelayRow->width(), style::ConvertScale(42));
+
+	const auto stepMinLabel = Ui::CreateChild<Ui::FlatLabel>(
+		stepDelayRow,
+		rpl::single(u"от"_q),
+		st::boxLabel);
+	const auto stepMinField = Ui::CreateChild<Ui::InputField>(
+		stepDelayRow,
+		CompactFieldStyle(),
+		rpl::single(QString()),
+		QString::number(state->stepDelayMin));
+	stepMinField->resize(style::ConvertScale(76), stepMinField->height());
+
+	const auto stepMaxLabel = Ui::CreateChild<Ui::FlatLabel>(
+		stepDelayRow,
+		rpl::single(u"до"_q),
+		st::boxLabel);
+	const auto stepMaxField = Ui::CreateChild<Ui::InputField>(
+		stepDelayRow,
+		CompactFieldStyle(),
+		rpl::single(QString()),
+		QString::number(state->stepDelayMax));
+	stepMaxField->resize(style::ConvertScale(76), stepMaxField->height());
+
+	const auto stepSecLabel = Ui::CreateChild<Ui::FlatLabel>(
+		stepDelayRow,
+		rpl::single(u"секунд"_q),
+		st::boxLabel);
+
+	stepDelayRow->widthValue() | rpl::on_next([=](int w) {
+		stepMinLabel->moveToLeft(0, style::ConvertScale(11));
+		stepMinField->moveToLeft(stepMinLabel->width() + style::ConvertScale(8), style::ConvertScale(3));
+		stepMaxLabel->moveToLeft(stepMinField->x() + stepMinField->width() + style::ConvertScale(12), style::ConvertScale(11));
+		stepMaxField->moveToLeft(stepMaxLabel->x() + stepMaxLabel->width() + style::ConvertScale(8), style::ConvertScale(3));
+		stepSecLabel->moveToLeft(stepMaxField->x() + stepMaxField->width() + style::ConvertScale(8), style::ConvertScale(11));
+	}, stepDelayRow->lifetime());
+
+	Ui::AddSkip(inAdvPlan, style::ConvertScale(4));
+
+	// Пауза между аккаунтами
+	inAdvPlan->add(
+		object_ptr<Ui::FlatLabel>(
+			inAdvPlan,
+			rpl::single(u"Пауза между аккаунтами в потоке (сек):"_q),
+			st::boxLabel),
+		style::margins(0, 0, 0, style::ConvertScale(4)));
+
+	const auto accDelayRow = inAdvPlan->add(object_ptr<Ui::RpWidget>(inAdvPlan));
+	accDelayRow->resize(accDelayRow->width(), style::ConvertScale(42));
+
+	const auto accMinLabel = Ui::CreateChild<Ui::FlatLabel>(
+		accDelayRow,
+		rpl::single(u"от"_q),
+		st::boxLabel);
+	const auto accMinField = Ui::CreateChild<Ui::InputField>(
+		accDelayRow,
+		CompactFieldStyle(),
+		rpl::single(QString()),
+		QString::number(state->accountDelayMin));
+	accMinField->resize(style::ConvertScale(76), accMinField->height());
+
+	const auto accMaxLabel = Ui::CreateChild<Ui::FlatLabel>(
+		accDelayRow,
+		rpl::single(u"до"_q),
+		st::boxLabel);
+	const auto accMaxField = Ui::CreateChild<Ui::InputField>(
+		accDelayRow,
+		CompactFieldStyle(),
+		rpl::single(QString()),
+		QString::number(state->accountDelayMax));
+	accMaxField->resize(style::ConvertScale(76), accMaxField->height());
+
+	const auto accSecLabel = Ui::CreateChild<Ui::FlatLabel>(
+		accDelayRow,
+		rpl::single(u"секунд"_q),
+		st::boxLabel);
+
+	accDelayRow->widthValue() | rpl::on_next([=](int w) {
+		accMinLabel->moveToLeft(0, style::ConvertScale(11));
+		accMinField->moveToLeft(accMinLabel->width() + style::ConvertScale(8), style::ConvertScale(3));
+		accMaxLabel->moveToLeft(accMinField->x() + accMinField->width() + style::ConvertScale(12), style::ConvertScale(11));
+		accMaxField->moveToLeft(accMaxLabel->x() + accMaxLabel->width() + style::ConvertScale(8), style::ConvertScale(3));
+		accSecLabel->moveToLeft(accMaxField->x() + accMaxField->width() + style::ConvertScale(8), style::ConvertScale(11));
+	}, accDelayRow->lifetime());
+
+	Ui::AddSkip(inAdvPlan, style::ConvertScale(4));
+
+	// Ожидание SMS
+	inAdvPlan->add(
+		object_ptr<Ui::FlatLabel>(
+			inAdvPlan,
+			rpl::single(u"Сколько ждать SMS-код (сек):"_q),
+			st::boxLabel),
+		style::margins(0, 0, 0, style::ConvertScale(4)));
+
+	const auto smsWaitRow = inAdvPlan->add(object_ptr<Ui::RpWidget>(inAdvPlan));
+	smsWaitRow->resize(smsWaitRow->width(), style::ConvertScale(42));
+
+	const auto smsWaitField = Ui::CreateChild<Ui::InputField>(
+		smsWaitRow,
+		CompactFieldStyle(),
+		rpl::single(QString()),
+		QString::number(state->smsWaitSeconds));
+	smsWaitField->resize(style::ConvertScale(76), smsWaitField->height());
+
+	const auto smsWaitSecLabel = Ui::CreateChild<Ui::FlatLabel>(
+		smsWaitRow,
+		rpl::single(u"секунд (от 120 до 1800, рекомендуется 300)"_q),
+		st::boxLabel);
+
+	smsWaitRow->widthValue() | rpl::on_next([=](int w) {
+		smsWaitField->moveToLeft(0, style::ConvertScale(3));
+		smsWaitSecLabel->moveToLeft(smsWaitField->width() + style::ConvertScale(10), style::ConvertScale(11));
+	}, smsWaitRow->lifetime());
+
+	// Доп. опции очереди
+	const auto resetSessionsCheck = inAdvPlan->add(
+		object_ptr<Ui::Checkbox>(
+			inAdvPlan,
+			u"Сбрасывать чужие сессии после регистрации"_q,
+			state->resetSessionsAfterReg),
+		style::margins(0, style::ConvertScale(6), 0, style::ConvertScale(2)));
+	resetSessionsCheck->checkedChanges() | rpl::on_next([=](bool checked) {
+		state->resetSessionsAfterReg = checked;
+		SaveSettings(*state);
+	}, resetSessionsCheck->lifetime());
+
+	const auto reset2faCheck = inAdvPlan->add(
+		object_ptr<Ui::Checkbox>(
+			inAdvPlan,
+			u"Сбрасывать чужой 2FA при занятом номере (если разрешено сервером)"_q,
+			state->reset2faOnOccupied),
+		style::margins(0, style::ConvertScale(4), 0, style::ConvertScale(2)));
+	reset2faCheck->checkedChanges() | rpl::on_next([=](bool checked) {
+		state->reset2faOnOccupied = checked;
+		SaveSettings(*state);
+	}, reset2faCheck->lifetime());
+
+
+	// =====================================================================
 	//  ЖУРНАЛ ДЕЙСТВИЙ
 	// =====================================================================
-	addSectionTo(layout,
+	const auto logWrap = layout->add(
+		object_ptr<Ui::SlideWrap<Ui::VerticalLayout>>(
+			layout,
+			object_ptr<Ui::VerticalLayout>(layout)),
+		style::margins());
+	const auto logLayout = logWrap->entity();
+	addSectionTo(logLayout,
 		u"Журнал действий"_q,
 		u"Лог работы регистрации в реальном времени"_q,
 		&st::menuIconRestore);
 
-	const auto cardLog = layout->add(
-		object_ptr<Ggtg::CardBox>(layout, style::margins(14, 12, 14, 12)),
+	const auto cardLog = logLayout->add(
+		object_ptr<Ggtg::CardBox>(logLayout, style::margins(14, 12, 14, 12)),
 		st::boxRowPadding);
 	const auto inLog = cardLog->inner();
 
@@ -7774,18 +7487,29 @@ inline void FillRegistrationBox(
 		}
 	});
 
-	// Переключение режима (Авторегистрация / Ручная регистрация)
-	autoSmsWrap->toggle(state->mode == 0, anim::type::instant);
-	manualPhoneWrap->toggle(state->mode == 1, anim::type::instant);
-	autoPlanWrap->toggle(state->mode == 0, anim::type::instant);
+	// Переключение режима: Авто (0) / Ручной (1) / Замена номера (2)
+	const auto applyMode = [=](int m, anim::type animated) {
+		modeDesc->setText(modeDescription(m));
+		// the SMS service and the country card: registering with a number from a service and changing a number
+		autoSmsWrap->toggle(m != 1, animated);
+		manualPhoneWrap->toggle(m == 1, animated);
+		phoneTopWrap->toggle(m == 2, animated);
+		phoneBottomWrap->toggle(m == 2, animated);
+		commonWrap->toggle(m != 2, animated);
+		autoPlanWrap->toggle(m == 0, animated);
+		advAutoWrap->toggle(m != 1, animated);
+		advPlanWrap->toggle(m == 0, animated);
+		advRegWrap->toggle(m != 2, animated);
+		logWrap->toggle(m != 2, animated);
+	};
+	applyMode(std::clamp(state->mode, 0, 2), anim::type::instant);
 
-	modeGroup->setChangedCallback([=](int m) {
+	modeTabs->activeChanges(
+	) | rpl::on_next([=](int m) {
 		state->mode = m;
 		SaveSettings(*state);
-		autoSmsWrap->toggle(m == 0, anim::type::normal);
-		manualPhoneWrap->toggle(m == 1, anim::type::normal);
-		autoPlanWrap->toggle(m == 0, anim::type::normal);
-	});
+		applyMode(m, anim::type::normal);
+	}, modeTabs->lifetime());
 
 	// Обработчики кнопок ручной регистрации
 	manualSendCodeBtn->setClickedCallback([=] {
@@ -7882,9 +7606,11 @@ inline void FillRegistrationBox(
 }
 
 inline object_ptr<Ui::GenericBox> MakeRegistrationBox(
-		not_null<Window::SessionController*> controller) {
+		not_null<Window::SessionController*> controller,
+		std::vector<not_null<Main::Account*>> initialAccounts = {},
+		int forcedMode = -1) {
 	return Box([=](not_null<Ui::GenericBox*> box) {
-		FillRegistrationBox(box, controller);
+		FillRegistrationBox(box, controller, initialAccounts, forcedMode);
 	});
 }
 
@@ -7909,30 +7635,11 @@ inline void ShowManualRegistrationBox(
 	controller->uiShow()->showBox(MakeManualRegistrationBox(controller));
 }
 
-inline void FillPhoneMigrationBox(
-		not_null<Ui::GenericBox*> box,
-		not_null<Window::SessionController*> controller,
-		std::vector<not_null<Main::Account*>> initialAccounts = {}) {
-	box->setTitle(rpl::single(u"Смена номера (миграция)"_q));
-	box->setWidth(st::boxWideWidth + style::ConvertScale(120));
-
-	const auto state = box->lifetime().make_state<SettingsData>(LoadSettings());
-	const auto layout = box->verticalLayout();
-
-	FillPhoneMigrationContent(layout, box, controller, state, std::move(initialAccounts));
-
-	box->addButton(tr::lng_close(), [=] {
-		SaveSettings(*state);
-		box->closeBox();
-	});
-}
-
 inline object_ptr<Ui::GenericBox> MakePhoneMigrationBox(
 		not_null<Window::SessionController*> controller,
 		std::vector<not_null<Main::Account*>> initialAccounts = {}) {
-	return Box([=](not_null<Ui::GenericBox*> box) {
-		FillPhoneMigrationBox(box, controller, initialAccounts);
-	});
+	// ggtg: the number change is the third mode of the registration box
+	return MakeRegistrationBox(controller, initialAccounts, 2);
 }
 
 inline void ShowPhoneMigrationBox(

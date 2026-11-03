@@ -26,9 +26,6 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 enum class SendMediaType;
 class MessageLinksParser;
 
-namespace Settings {
-enum class AiChatMode;
-} // namespace Settings
 struct InlineBotQuery;
 class SendFilesBox;
 
@@ -578,16 +575,6 @@ private:
 	void showSmsTemplates();
 	void toggleSmsTemplates();
 	void createSmsTemplatesPanel();
-	// The "ИИ" button next to the paperclip: reads the chat and suggests
-	// replies (see settings/ggtg_ai_chat.h); right click - more actions.
-	void updateAiAssistVisibility();
-	void updateAiAssistState();
-	void learnFromThisChat();
-	void showAiAssist(Settings::AiChatMode mode);
-	void showAiAssistMenu();
-	// "Написать ответ": the assistant types its reply into the field.
-	void writeAiReply();
-	void typeAiText(const QString &text);
 	void saveFieldAsSmsTemplate();
 	void initAiButton();
 	void updateAiButtonVisibility();
@@ -972,14 +959,6 @@ private:
 	base::unique_qptr<Ui::PopupMenu> _smsTemplatesMenu;
 	base::unique_qptr<HistoryView::SmsTemplatesPanel> _smsTemplatesPanel;
 	base::Timer _smsHoverTimer;
-	object_ptr<Ui::IconButton> _aiAssist;
-	base::unique_qptr<Ui::PopupMenu> _aiAssistMenu;
-	bool _aiWriting = false;
-	QString _aiLastDraft;
-	base::Timer _aiStateTimer;
-	int _aiStateShown = -1;
-	bool _aiBlink = false;
-	int _aiTypingGeneration = 0;
 	void showSmsTemplateContextMenu(
 		uint64 id,
 		const QString &name,

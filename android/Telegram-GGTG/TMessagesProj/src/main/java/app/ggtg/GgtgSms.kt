@@ -319,14 +319,17 @@ object GgtgSms {
             val u = MessagesController.getInstance(slot).getUser(clean)
             val fn = u?.first_name ?: ""
             val ln = u?.last_name ?: ""
-            val combined = "$fn $ln"
             val target = if (translateLang != "auto") translateLang else {
-                if (Regex("[\\uac00-\\ud7af\\u1100-\\u11ff]").containsMatchIn(combined) || groupName.contains("коре", ignoreCase = true) || groupName.contains("korea", ignoreCase = true) || groupName.contains("kr", ignoreCase = true)) "ko"
-                else if (Regex("[\\u4e00-\\u9fff]").containsMatchIn(combined) || groupName.contains("кита", ignoreCase = true) || groupName.contains("china", ignoreCase = true) || groupName.contains("cn", ignoreCase = true)) "zh-CN"
-                else if (Regex("[\\u0400-\\u04ff]").containsMatchIn(combined)) "ru"
-                else if (Regex("[\\u3040-\\u30ff]").containsMatchIn(combined) || groupName.contains("япон", ignoreCase = true) || groupName.contains("japan", ignoreCase = true)) "ja"
-                else if (Regex("[\\u0600-\\u06ff]").containsMatchIn(combined)) "ar"
-                else ""
+                // The name: its script, or for Latin letters the dictionaries of surnames and given names
+                // (Vietnamese, Korean, Turkish...), with the language of the group's title as a hint.
+                val hint = GgtgNames.languageFromTitle(groupName)
+                val guess = GgtgNames.guessNameLanguage(fn, ln, u?.username ?: "", hint)
+                val own = GgtgNames.detectLanguage(template)
+                when {
+                    guess.sure && guess.code != own -> guess.code
+                    hint.isNotEmpty() && hint != own -> hint
+                    else -> ""
+                }
             }
             if (target.isNotEmpty()) {
                 step("переводит на $target")

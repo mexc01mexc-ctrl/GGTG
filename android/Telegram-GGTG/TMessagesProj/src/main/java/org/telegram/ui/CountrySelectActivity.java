@@ -80,6 +80,14 @@ public class CountrySelectActivity extends BaseFragment {
 
     private boolean disableAnonymousNumbers;
 
+    // ggtg: proxy country lists can pin countries to the top (long press).
+    private boolean ggtgPinning;
+    private static final String GGTG_PINNED_SECTION = "\u0000pinned";
+
+    public void setGgtgPinning(boolean ggtgPinning) {
+        this.ggtgPinning = ggtgPinning;
+    }
+
     private CountrySelectActivityDelegate delegate;
     private ArrayList<Country> existingCountries;
 
@@ -220,6 +228,29 @@ public class CountrySelectActivity extends BaseFragment {
             }
         });
 
+        if (ggtgPinning) {
+            listView.setOnItemLongClickListener((view, position) -> {
+                if (searching && searchWas) {
+                    return false;
+                }
+                int section = listViewAdapter.getSectionForPosition(position);
+                int row = listViewAdapter.getPositionInSectionForPosition(position);
+                if (row < 0 || section < 0) {
+                    return false;
+                }
+                Country country = listViewAdapter.getItem(section, row);
+                if (country == null || country.shortname == null) {
+                    return false;
+                }
+                boolean pinned = app.ggtg.GgtgPinnedCountries.toggle(country.shortname);
+                listViewAdapter = new CountryAdapter(context, existingCountries, disableAnonymousNumbers);
+                listView.setAdapter(listViewAdapter);
+                listView.scrollToPosition(0);
+                android.widget.Toast.makeText(context, pinned ? "Страна закреплена вверху" : "Страна откреплена", android.widget.Toast.LENGTH_SHORT).show();
+                return true;
+            });
+        }
+
         listView.setOnScrollListener(new RecyclerView.OnScrollListener() {
             @Override
             public void onScrollStateChanged(RecyclerView recyclerView, int newState) {
@@ -327,6 +358,35 @@ public class CountrySelectActivity extends BaseFragment {
             for (ArrayList<Country> arr : countries.values()) {
                 Collections.sort(arr, (country, country2) -> comparator.compare(country.name, country2.name));
             }
+
+            if (ggtgPinning) {
+                ArrayList<Country> pinnedList = new ArrayList<>();
+                for (String iso : app.ggtg.GgtgPinnedCountries.load()) {
+                    for (String letter : new ArrayList<>(sortedCountries)) {
+                        ArrayList<Country> arr = countries.get(letter);
+                        Country found = null;
+                        for (Country c : arr) {
+                            if (iso.equals(c.shortname)) {
+                                found = c;
+                                break;
+                            }
+                        }
+                        if (found != null) {
+                            arr.remove(found);
+                            pinnedList.add(found);
+                            if (arr.isEmpty()) {
+                                countries.remove(letter);
+                                sortedCountries.remove(letter);
+                            }
+                            break;
+                        }
+                    }
+                }
+                if (!pinnedList.isEmpty()) {
+                    countries.put(GGTG_PINNED_SECTION, pinnedList);
+                    sortedCountries.add(0, GGTG_PINNED_SECTION);
+                }
+            }
         }
 
         public HashMap<String, ArrayList<Country>> getCountries() {
@@ -408,7 +468,8 @@ public class CountrySelectActivity extends BaseFragment {
             if (section == -1) {
                 section = sortedCountries.size() - 1;
             }
-            return sortedCountries.get(section);
+            String letter = sortedCountries.get(section);
+            return GGTG_PINNED_SECTION.equals(letter) ? "" : letter;
         }
 
         @Override

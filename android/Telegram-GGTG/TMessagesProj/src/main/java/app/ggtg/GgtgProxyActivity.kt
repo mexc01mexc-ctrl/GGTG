@@ -133,6 +133,7 @@ class GgtgProxyActivity : BaseFragment() {
 
     private fun selectCountryForList() {
         val act = CountrySelectActivity(true)
+        act.setGgtgPinning(true)
         act.setCountrySelectActivityDelegate { country ->
             val listName = "${country.name} (+${country.code})"
             GgtgProxyPoolStore.createList(listName, country.shortname)

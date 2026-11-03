@@ -1036,6 +1036,10 @@ bool AccountIsLive(not_null<Account*> account) {
 	return Core::App().domain().isLive(account);
 }
 
+bool AccountHasSession(not_null<Account*> account) {
+	return Core::App().domain().isLive(account) && account->sessionExists();
+}
+
 std::vector<not_null<Account*>> LiveAccounts(
 		const base::flat_set<not_null<Account*>> &chosen) {
 	auto result = std::vector<not_null<Account*>>();

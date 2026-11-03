@@ -64,13 +64,9 @@ class GgtgAddAccountsActivity : BaseFragment() {
 
         // ---- accounts ----
         column.addView(GgtgUi.sectionLabel(context, "2. Аккаунты"))
-        GgtgUi.addCard(column, GgtgUi.actionCard(context, R.drawable.msg_newphone, "Регистрация аккаунтов",
-            "Автоматическая (по SMS) и ручная регистрация новых аккаунтов с 2FA, прокси, Push-токенами (FCM) и обходом защиты.") {
+        GgtgUi.addCard(column, GgtgUi.actionCard(context, R.drawable.msg_newphone, "Регистрация и смена номера",
+            "Авто, ручная регистрация и замена номера на существующих аккаунтах: новые аккаунты с 2FA, прокси, Push-токенами (FCM) и обходом защиты.") {
             presentFragment(GgtgRegistrationActivity())
-        })
-        GgtgUi.addCard(column, GgtgUi.actionCard(context, R.drawable.msg_retry, "Смена номера (миграция)",
-            "Смена номера на существующих аккаунтах через SMS-сервисы с учётом отлёжки 24 часа.") {
-            presentFragment(GgtgPhoneMigrationActivity())
         })
         GgtgUi.addCard(column, GgtgUi.actionCard(context, R.drawable.msg_list, "Импорт Сессия + JSON",
             "Файлы .session и .json (Telethon / Pyrogram / софт): zip-архив или папка с 2FA и прокси.") {

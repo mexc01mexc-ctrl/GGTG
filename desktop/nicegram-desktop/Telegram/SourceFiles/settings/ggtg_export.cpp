@@ -140,6 +140,9 @@ struct ExportOptions {
 namespace {
 
 [[nodiscard]] QString ExportAccountLabel(not_null<Main::Account*> account) {
+	if (!account->sessionExists()) { // ggtg:
+		return u"Аккаунт без сессии"_q;
+	}
 	const auto user = account->session().user();
 	auto name = user->firstName;
 	if (!user->lastName.isEmpty()) {
@@ -164,6 +167,9 @@ namespace {
 [[nodiscard]] QJsonObject AccountMeta(
 		not_null<Main::Account*> account,
 		const ExportOptions &options) {
+	if (!account->sessionExists()) { // ggtg:
+		return QJsonObject();
+	}
 	const auto user = account->session().user();
 	auto result = QJsonObject();
 	result["phone"] = user->phone();

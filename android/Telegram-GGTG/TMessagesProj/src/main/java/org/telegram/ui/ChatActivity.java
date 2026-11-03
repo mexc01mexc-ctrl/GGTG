@@ -3906,7 +3906,7 @@ public class ChatActivity extends BaseFragment implements
                 } else if (id == ggtg_chat_list) {
                     java.util.ArrayList<Long> ggtgDialogs = new java.util.ArrayList<>(); // ggtg
                     ggtgDialogs.add(getDialogId());
-                    app.ggtg.ai.GgtgChatLists.showPicker(getParentActivity(), currentAccount, ggtgDialogs);
+                    app.ggtg.chatlists.GgtgChatLists.showPicker(getParentActivity(), currentAccount, ggtgDialogs);
                 } else if (id == report) {
                     ReportBottomSheet.openChat(ChatActivity.this);
                 } else if (id == star) {

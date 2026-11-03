@@ -57,7 +57,6 @@ object GgtgHome {
     /** Adds the dashboard to [column]; [open] opens a fragment of the hub. */
     fun build(fragment: BaseFragment, column: LinearLayout, context: Context) {
         val n = numbers()
-        val aiReady = app.ggtg.ai.GgtgAi.ready()
         val running = GgtgProcess.snapshots().filter { it.status == GgtgProcess.Status.Running }
         val open = { f: BaseFragment -> fragment.presentFragment(f) }
 
@@ -70,8 +69,6 @@ object GgtgHome {
         when {
             n.accounts == 0 -> { message = "Начнём с малого: добавьте первый аккаунт, и остальное оживёт."; button = "Добавить аккаунт"
                 target = { open(GgtgAddAccountsActivity()) } }
-            !aiReady -> { message = "Подключите бесплатный ИИ: это минута, карта не нужна."; button = "Открыть ИИ"
-                target = { open(app.ggtg.ai.GgtgAiBrainActivity(false)) } }
             running.isNotEmpty() -> { message = "Сейчас идёт: ${running.first().title}" + (if (running.size > 1) " и ещё ${running.size - 1}" else "") + "."
                 button = "Посмотреть ход"; target = { open(GgtgProcessesActivity()) } }
             n.remaining > 0 -> { message = "Всё спокойно. В базах ждут ${n.remaining} человек - можно запускать рассылку."; button = "Запустить рассылку"
@@ -118,10 +115,7 @@ object GgtgHome {
             tile("Аккаунты", n.accounts.toString(), if (n.blocked > 0) "спам-блок: ${n.blocked}" else if (n.accounts > 0) "подключены" else "пока нет",
                 if (n.blocked > 0) orange else GgtgUi.accent) { open(GgtgAccountManagerActivity()) },
             tile("Уже написали", GgtgDb.countSmsByStatus(GgtgDb.SmsStatus.Sent).toString(), "осталось написать: ${n.remaining} · списков: ${n.userBases}", GgtgUi.accent) { open(GgtgSmsActivity()) },
-            tile("Последняя рассылка", n.lastValue, n.lastSub, GgtgUi.accent) { open(GgtgSmsActivity()) },
-            tile("ИИ", if (aiReady) "Работает" else "Нужен ключ",
-                if (aiReady) "всё в порядке" else "бесплатный, за минуту",
-                if (aiReady) green else orange) { open(app.ggtg.ai.GgtgAiBrainActivity(false)) }
+            tile("Последняя рассылка", n.lastValue, n.lastSub, GgtgUi.accent) { open(GgtgSmsActivity()) }
         )
         for (pair in tiles.chunked(2)) {
             val row = LinearLayout(context).apply { orientation = LinearLayout.HORIZONTAL }

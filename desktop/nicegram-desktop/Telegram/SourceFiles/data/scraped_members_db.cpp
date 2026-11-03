@@ -20,7 +20,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "chat_helpers/compose/compose_show.h"
 #include "core/application.h"
 #include "core/ggtg_log.h"
-#include "core/ggtg_ai_feedback.h"
+#include "core/ggtg_replies.h"
 #include "core/process_manager.h"
 #include "data/data_channel.h"
 #include "data/data_chat.h"
@@ -3162,8 +3162,8 @@ void TrackManualSends(not_null<Main::Session*> session) {
 			return;
 		}
 		const auto text = item->originalText().text.simplified();
-		Core::GgtgAi::Feedback::RememberReply(
-			Core::GgtgAi::Feedback::ReplyKey(
+		Core::GgtgReplies::RememberReply(
+			Core::GgtgReplies::ReplyKey(
 				session->userId().bare,
 				user->username()),
 			text.isEmpty() ? u"[вложение или стикер]"_q : text);

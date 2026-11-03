@@ -188,7 +188,7 @@ inline void ShowAiDialog(
 		const auto memory = top->add(
 			object_ptr<Ui::LinkButton>(
 				top,
-				u"Что ИИ уже знает о вас ▸"_q),
+				u"Что ИИ уже знает о вас"_q),
 			st::boxRowPadding);
 		memory->setClickedCallback([=] {
 			ShowAiProfile(box->uiShow());
