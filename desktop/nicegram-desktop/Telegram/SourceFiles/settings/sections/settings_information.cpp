@@ -309,6 +309,17 @@ ComposedBadge::ComposedBadge(
 	}, lifetime());
 }
 
+// ggtg: the «Корзина» group of the accounts list. Its key is the same
+// invisible-prefixed title the Android app uses, so it can never clash with
+// a folder the user named; the invisible character is left out when shown.
+[[nodiscard]] QString TrashFolderKey() {
+	return u"\u2063Корзина"_q;
+}
+
+[[nodiscard]] QString FolderTitle(const QString &folder) {
+	return (folder == TrashFolderKey()) ? u"Корзина"_q : folder;
+}
+
 class AccountsList final {
 public:
 	AccountsList(
@@ -335,7 +346,8 @@ private:
 		not_null<Ui::VerticalLayout*> container,
 		const QString &folder,
 		const std::vector<not_null<::Main::Account*>> &accounts,
-		const std::vector<QString> &folderOrder);
+		const std::vector<QString> &folderOrder,
+		int pendingTotal);
 	void moveAccountToFolder(
 		not_null<::Main::Account*> account,
 		const QString &folder);
@@ -1965,6 +1977,57 @@ void SetupAccountsWrap(
 		&& (dcState >= 0);
 }
 
+// ggtg: a row for an account that has not started yet. Clicking it starts
+// the account out of turn and opens it.
+[[nodiscard]] object_ptr<Ui::SettingsButton> MakePendingAccountButton(
+		QWidget *parent,
+		const ::Main::Domain::PendingPreview &preview) {
+	auto result = object_ptr<Ui::SettingsButton>(
+		parent,
+		rpl::single(preview.name + u"  (ожидает)"_q),
+		st::mainMenuAddAccountButton);
+	const auto raw = result.data();
+	const auto icon = Ui::CreateChild<Ui::RpWidget>(raw);
+	icon->setAttribute(Qt::WA_TransparentForMouseEvents);
+	auto nameHash = uint64(0);
+	for (const auto &ch : preview.name) {
+		nameHash = nameHash * 31 + ch.unicode();
+	}
+	const auto emptyUserpic = std::make_shared<Ui::EmptyUserpic>(
+		Ui::EmptyUserpic::UserpicColor(Ui::EmptyUserpic::ColorIndex(nameHash)),
+		preview.name);
+	const auto userpicSkip = 2 * st::mainMenuAccountLine + st::lineWidth;
+	const auto userpicSize = st::mainMenuAccountSize + userpicSkip * 2;
+	raw->heightValue(
+	) | rpl::on_next([=](int height) {
+		const auto left = st::mainMenuAddAccountButton.iconLeft
+			+ (st::settingsIconAdd.width() - userpicSize) / 2;
+		icon->setGeometry(left, (height - userpicSize) / 2, userpicSize, userpicSize);
+	}, icon->lifetime());
+	icon->show();
+	icon->raise();
+	icon->paintRequest(
+	) | rpl::on_next([=] {
+		auto p = Painter(icon);
+		emptyUserpic->paintCircle(
+			p,
+			userpicSkip,
+			userpicSkip,
+			userpicSize,
+			st::mainMenuAccountSize);
+	}, icon->lifetime());
+	const auto index = preview.index;
+	raw->setClickedCallback([=] {
+		const auto domain = &Core::App().domain();
+		if (const auto account = domain->startPendingNow(index)) {
+			if (account->sessionExists()) {
+				domain->maybeActivate(account);
+			}
+		}
+	});
+	return result;
+}
+
 [[nodiscard]] object_ptr<Ui::SettingsButton> MakeAccountButton(
 		QWidget *parent,
 		not_null<Window::SessionController*> window,
@@ -2568,6 +2631,9 @@ void AccountsList::rebuild() {
 
 	const auto premiumLimit = _controller->session().domain().maxAccounts();
 	const auto list = _controller->session().domain().orderedAccounts();
+	// ggtg: accounts that have not started yet are listed too (from the
+	// cache), so everything shows at launch while they connect in batches.
+	const auto previews = _controller->session().domain().pendingPreviews();
 
 	// Group accounts by their folder tag (see Main::Account::folderTag).
 	// Folders are purely a UI grouping derived from that per-account tag -
@@ -2579,16 +2645,14 @@ void AccountsList::rebuild() {
 		std::vector<not_null<::Main::Account*>>>();
 	auto ungrouped = std::vector<not_null<::Main::Account*>>();
 	for (const auto &account : list) {
-		if (!account->sessionExists() || list.size() == 1) {
+		if (!account->sessionExists()
+			|| (list.size() == 1 && previews.empty())) {
 			continue;
 		}
-		// An account in the «Корзина» is not listed here (it is reached
-		// through GGTG's manager); the one this window is on always stays.
-		if (account->trashed()
-			&& account.get() != &_controller->session().account()) {
-			continue;
-		}
-		const auto tag = account->folderTag();
+		// ggtg: an account in the «Корзина» is listed under that group.
+		const auto tag = account->trashed()
+			? TrashFolderKey()
+			: account->folderTag();
 		if (tag.isEmpty()) {
 			ungrouped.push_back(account);
 		} else {
@@ -2597,6 +2661,21 @@ void AccountsList::rebuild() {
 				folderOrder.push_back(tag);
 			}
 			bucket.push_back(account);
+		}
+	}
+	auto pendingGrouped = base::flat_map<
+		QString,
+		std::vector<::Main::Domain::PendingPreview>>();
+	auto pendingUngrouped = std::vector<::Main::Domain::PendingPreview>();
+	for (const auto &preview : previews) {
+		const auto tag = preview.trashed ? TrashFolderKey() : preview.folder;
+		if (tag.isEmpty()) {
+			pendingUngrouped.push_back(preview);
+			continue;
+		}
+		pendingGrouped[tag].push_back(preview);
+		if (!ranges::contains(folderOrder, tag)) {
+			folderOrder.push_back(tag);
 		}
 	}
 	{
@@ -2618,7 +2697,19 @@ void AccountsList::rebuild() {
 			return ranges::find(state.order, a)
 				< ranges::find(state.order, b);
 		});
+		// ggtg: the trash always goes last.
+		ranges::stable_sort(folderOrder, [&](
+				const QString &a,
+				const QString &b) {
+			const auto trash = TrashFolderKey();
+			return (a != trash) && (b == trash);
+		});
 	}
+	// The folders an account can be moved to: not the trash.
+	auto movableFolders = folderOrder;
+	movableFolders.erase(
+		ranges::remove(movableFolders, TrashFolderKey()),
+		movableFolders.end());
 
 	{
 		// Inside a folder (and among accounts without one): pinned first,
@@ -2697,7 +2788,7 @@ void AccountsList::rebuild() {
 				account,
 				std::move(callback),
 				nextIsLocked,
-				folderOrder,
+				movableFolders,
 				[=](QString folder) { moveAccountToFolder(account, folder); },
 				[=] { promptNewFolder(account); },
 				[=] { togglePinned(account); },
@@ -2732,7 +2823,12 @@ void AccountsList::rebuild() {
 		folderBlocks.push_back(block);
 		blockFolder.emplace(block, folder);
 		folderHeaderButtons.push_back(
-			addFolderHeader(block, folder, grouped[folder], folderOrder));
+			addFolderHeader(
+				block,
+				folder,
+				grouped[folder],
+				movableFolders,
+				int(pendingGrouped[folder].size())));
 		if (!GlobalFoldersUiState().collapsed.contains(folder)) {
 			const auto folderInner = block->add(
 				object_ptr<Ui::VerticalLayout>(block));
@@ -2744,6 +2840,11 @@ void AccountsList::rebuild() {
 			const auto folderReorder = folderInner->lifetime(
 			).make_state<Ui::VerticalLayoutReorder>(folderInner);
 			perFolderReorders.emplace_back(folderReorder, folderInner);
+			for (const auto &preview : pendingGrouped[folder]) {
+				block->add(
+					MakePendingAccountButton(block, preview),
+					style::margins(28, 0, 0, 0));
+			}
 		} else {
 			renderedCount += int(grouped[folder].size());
 		}
@@ -2758,6 +2859,11 @@ void AccountsList::rebuild() {
 	}
 	inner->resizeToWidth(_outer->width());
 	accountContainers.push_back(inner);
+	// ggtg: waiting accounts without a folder, after the live ones.
+	const auto pendingInner = wrap->add(object_ptr<Ui::VerticalLayout>(wrap));
+	for (const auto &preview : pendingUngrouped) {
+		pendingInner->add(MakePendingAccountButton(pendingInner, preview));
+	}
 
 	// Recomputes the *entire* flat account order (every folder's own list
 	// plus the ungrouped list) from what's actually on screen right now -
@@ -2821,7 +2927,7 @@ void AccountsList::rebuild() {
 	if (!folderBlocks.empty()) {
 		const auto blocksReorder = wrap->lifetime(
 		).make_state<Ui::VerticalLayoutReorder>(wrap);
-		blocksReorder->addPinnedInterval(int(folderBlocks.size()), 1);
+		blocksReorder->addPinnedInterval(int(folderBlocks.size()), 2);
 		blocksReorder->setMouseEventProxy([=](int i) -> not_null<Ui::RpWidget*> {
 			return (i >= 0 && i < int(folderHeaderButtons.size()))
 				? folderHeaderButtons[i]
@@ -2884,7 +2990,10 @@ not_null<Ui::SettingsButton*> AccountsList::addFolderHeader(
 		not_null<Ui::VerticalLayout*> container,
 		const QString &folder,
 		const std::vector<not_null<::Main::Account*>> &accountsIn,
-		const std::vector<QString> &folderOrderIn) {
+		const std::vector<QString> &folderOrderIn,
+		int pendingTotal) {
+	const auto title = FolderTitle(folder); // ggtg:
+	const auto isTrash = (folder == TrashFolderKey());
 	const auto accounts = accountsIn;
 	const auto folderOrder = folderOrderIn;
 	const auto collapsed = GlobalFoldersUiState().collapsed.contains(folder);
@@ -2900,7 +3009,7 @@ not_null<Ui::SettingsButton*> AccountsList::addFolderHeader(
 	for (const auto &account : accounts) {
 		weakAccounts.push_back(base::make_weak(account.get()));
 	}
-	const auto baseText = arrow + u" "_q + folder + u" "_q;
+	const auto baseText = arrow + u" "_q + title + u" "_q;
 	const auto button = container->add(object_ptr<Ui::SettingsButton>(
 		container,
 		rpl::single(baseText),
@@ -2913,7 +3022,7 @@ not_null<Ui::SettingsButton*> AccountsList::addFolderHeader(
 		};
 		const auto &bst = st::mainMenuAddAccountButton;
 		const auto font = bst.style.font;
-		const auto total = int(weakAccounts.size());
+		const auto total = int(weakAccounts.size()) + pendingTotal;
 		const auto counts = Ui::CreateChild<Ui::RpWidget>(button);
 		counts->setAttribute(Qt::WA_TransparentForMouseEvents);
 		const auto cs = counts->lifetime().make_state<CountsState>();
@@ -3005,7 +3114,7 @@ not_null<Ui::SettingsButton*> AccountsList::addFolderHeader(
 	}
 	const auto emptyUserpic = std::make_shared<Ui::EmptyUserpic>(
 		Ui::EmptyUserpic::UserpicColor(Ui::EmptyUserpic::ColorIndex(nameHash)),
-		folder);
+		title);
 	const auto userpicSkip = 2 * st::mainMenuAccountLine + st::lineWidth;
 	const auto userpicSize = st::mainMenuAccountSize + userpicSkip * 2;
 	// The whole point of this ring is to stay visible while the folder is
@@ -3159,12 +3268,14 @@ not_null<Ui::SettingsButton*> AccountsList::addFolderHeader(
 			return;
 		}
 		_folderContextMenu = base::make_unique_q<Ui::PopupMenu>(_outer, st::folderContextMenu);
-		_folderContextMenu->addAction(
-			GlobalFoldersUiState().pinned.contains(folder)
-				? u"Открепить папку"_q
-				: u"Закрепить папку"_q,
-			[=] { toggleFolderPinned(folder); },
-			&st::menuIconPin);
+		if (!isTrash) {
+			_folderContextMenu->addAction(
+				GlobalFoldersUiState().pinned.contains(folder)
+					? u"Открепить папку"_q
+					: u"Закрепить папку"_q,
+				[=] { toggleFolderPinned(folder); },
+				&st::menuIconPin);
+		}
 		_folderContextMenu->addAction(u"В онлайн"_q, [=] {
 			for (const auto &acc : accounts) {
 				acc->setAlwaysOffline(false);
@@ -3184,12 +3295,14 @@ not_null<Ui::SettingsButton*> AccountsList::addFolderHeader(
 			}
 			scheduleRebuild();
 		}, &st::menuIconMute);
-		_folderContextMenu->addAction(u"Переименовать..."_q, [=] {
-			promptRenameFolder(folder);
-		}, &st::menuIconEdit);
-		_folderContextMenu->addAction(u"Убрать папку"_q, [=] {
-			removeFolder(folder);
-		}, &st::menuIconRemove);
+		if (!isTrash) {
+			_folderContextMenu->addAction(u"Переименовать..."_q, [=] {
+				promptRenameFolder(folder);
+			}, &st::menuIconEdit);
+			_folderContextMenu->addAction(u"Убрать папку"_q, [=] {
+				removeFolder(folder);
+			}, &st::menuIconRemove);
+		}
 		_folderContextMenu->addAction(u"Экспорт папки..."_q, [=] {
 			exportFolder(folder, accounts);
 		}, &st::menuIconExport);

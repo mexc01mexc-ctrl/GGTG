@@ -215,7 +215,11 @@ object GgtgAccountMenus {
 
     private fun slotsOf(folder: String): List<Int> =
         (0 until UserConfig.MAX_ACCOUNT_COUNT).filter {
-            UserConfig.getInstance(it).isClientActivated && UserConfig.getInstance(it).ncgFolder == folder
+            UserConfig.getInstance(it).isClientActivated && if (folder == GgtgAccounts.TRASH_FOLDER) {
+                UserConfig.getInstance(it).ncgTrashed
+            } else {
+                !UserConfig.getInstance(it).ncgTrashed && UserConfig.getInstance(it).ncgFolder == folder
+            }
         }
 
     @JvmStatic
@@ -223,8 +227,10 @@ object GgtgAccountMenus {
         val slots = slotsOf(folder)
         val pinned = AccountFolderStore.isPinned(folder)
         val entries = ArrayList<Entry>()
-        entries += Entry(if (pinned) "Открепить папку" else "Закрепить папку", if (pinned) R.drawable.msg_unpin else R.drawable.msg_pin) {
-            AccountFolderStore.setPinned(folder, !pinned); onChanged()
+        if (folder != GgtgAccounts.TRASH_FOLDER) {
+            entries += Entry(if (pinned) "Открепить папку" else "Закрепить папку", if (pinned) R.drawable.msg_unpin else R.drawable.msg_pin) {
+                AccountFolderStore.setPinned(folder, !pinned); onChanged()
+            }
         }
         entries += Entry("Перевести папку в онлайн", R.drawable.msg_retry) {
             slots.forEach { s ->
@@ -246,11 +252,13 @@ object GgtgAccountMenus {
             toast(context, "Папка «$folder» переведена в офлайн")
             onChanged()
         }
-        entries += Entry("Переименовать папку", R.drawable.msg_edit) {
-            AccountFolderLogic.promptRenameFolder(context, folder) { onChanged() }
-        }
-        entries += Entry("Удалить папку", R.drawable.msg_folders) {
-            AccountFolderLogic.deleteFolder(folder) { onChanged() }
+        if (folder != GgtgAccounts.TRASH_FOLDER) { // ggtg: the trash cannot be renamed or removed
+            entries += Entry("Переименовать папку", R.drawable.msg_edit) {
+                AccountFolderLogic.promptRenameFolder(context, folder) { onChanged() }
+            }
+            entries += Entry("Удалить папку", R.drawable.msg_folders) {
+                AccountFolderLogic.deleteFolder(folder) { onChanged() }
+            }
         }
         entries += Entry("Удалить папку и аккаунты…", R.drawable.msg_delete) {
             confirm(context, "Удалить ${slots.size} аккаунт(ов) из папки «$folder» из приложения? Сессии на сервере Telegram останутся.", "Удалить") {

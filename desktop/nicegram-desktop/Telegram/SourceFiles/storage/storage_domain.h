@@ -143,6 +143,10 @@ public:
 	// and Main::Domain starts them a batch at a time once the app is up.
 	[[nodiscard]] int pendingCount() const;
 	[[nodiscard]] bool isPendingIndex(int index) const;
+	// ggtg: indices still waiting to start, and starting one of them right
+	// away (out of turn) when the user opens it from the accounts list.
+	[[nodiscard]] std::vector<int> pendingIndices() const;
+	[[nodiscard]] Main::Account *startPendingIndex(int index);
 	// Starts up to `count` waiting accounts (fewer if some have no session
 	// to start - those drop out of the list, as they always did at launch).
 	[[nodiscard]] std::vector<not_null<Main::Account*>> startPending(

@@ -31,7 +31,7 @@ public class AccountFolderLogic {
             folderNames.add(folder);
         }
         for (int acc : accounts) {
-            if (UserConfig.getInstance(acc).ncgTrashed) continue; // ggtg: «Корзина» is hidden from Telegram's lists
+            if (UserConfig.getInstance(acc).ncgTrashed) continue; // ggtg: trashed accounts sit in the «Корзина» group
             if (UserConfig.getInstance(acc).ncgFolder.isEmpty()) ungrouped.add(acc);
         }
 
@@ -53,6 +53,8 @@ public class AccountFolderLogic {
             if (ob == -1) return -1;
             return Integer.compare(oa, ob);
         });
+        // ggtg: the «Корзина» group always goes last
+        if (topLevel.remove(app.ggtg.GgtgAccounts.TRASH_FOLDER)) topLevel.add(app.ggtg.GgtgAccounts.TRASH_FOLDER);
         return topLevel;
     }
 
@@ -60,7 +62,10 @@ public class AccountFolderLogic {
         java.util.LinkedHashMap<String, List<Integer>> byFolder = new java.util.LinkedHashMap<>();
         for (int acc : accounts) {
             UserConfig uc = UserConfig.getInstance(acc);
-            if (uc.ncgTrashed) continue;
+            if (uc.ncgTrashed) { // ggtg: «Корзина» is its own group, reachable from the lists
+                byFolder.computeIfAbsent(app.ggtg.GgtgAccounts.TRASH_FOLDER, k -> new ArrayList<>()).add(acc);
+                continue;
+            }
             if (!uc.ncgFolder.isEmpty()) {
                 byFolder.computeIfAbsent(uc.ncgFolder, k -> new ArrayList<>()).add(acc);
             }

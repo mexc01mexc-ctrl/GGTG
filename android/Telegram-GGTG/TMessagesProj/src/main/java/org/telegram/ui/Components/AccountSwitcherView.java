@@ -404,9 +404,10 @@ public class AccountSwitcherView extends FrameLayout {
         }
 
         void bind(FolderItem item) {
-            String letters = item.name.length() >= 2 ? item.name.substring(0, 2) : item.name.substring(0, 1);
+            String title = app.ggtg.GgtgAccounts.INSTANCE.folderTitle(item.name); // ggtg: «Корзина» key -> title
+            String letters = title.length() >= 2 ? title.substring(0, 2) : title.substring(0, 1);
             avatarLetters.setText(letters.toUpperCase());
-            textView.setText(item.name);
+            textView.setText(title);
             chevron.setRotation(item.expanded ? 90f : 0f);
             if (item.unreadCount > 0) {
                 unreadCountView.setVisibility(VISIBLE);
@@ -415,7 +416,8 @@ public class AccountSwitcherView extends FrameLayout {
                 unreadCountView.setVisibility(GONE);
             }
             pinView.setVisibility(item.pinned ? VISIBLE : GONE);
-            String activeFolder = UserConfig.getInstance(UserConfig.selectedAccount).ncgFolder;
+            UserConfig activeConfig = UserConfig.getInstance(UserConfig.selectedAccount);
+            String activeFolder = activeConfig.ncgTrashed ? app.ggtg.GgtgAccounts.TRASH_FOLDER : activeConfig.ncgFolder;
             containsCurrentAccount = !android.text.TextUtils.isEmpty(activeFolder) && activeFolder.equals(item.name);
             invalidate();
         }
@@ -552,7 +554,9 @@ public class AccountSwitcherView extends FrameLayout {
                 refresh();
             } else {
                 String folder = ((FolderItem) item).name;
-                if (direction == ItemTouchHelper.RIGHT) {
+                if (app.ggtg.GgtgAccounts.TRASH_FOLDER.equals(folder)) { // ggtg: the trash is neither pinned nor deleted
+                    refresh();
+                } else if (direction == ItemTouchHelper.RIGHT) {
                     AccountFolderStore.setPinned(folder, !AccountFolderStore.isPinned(folder));
                     refresh();
                 } else {

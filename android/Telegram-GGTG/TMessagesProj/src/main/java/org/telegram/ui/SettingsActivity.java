@@ -1103,7 +1103,7 @@ public class SettingsActivity extends BaseFragment implements NotificationCenter
             emojiStatusDrawable.set((Drawable) null, false);
             textView.setLeftDrawable(null);
             textView.setRightDrawable(null);
-            textView.setText(name + " \u00B7 " + members);
+            textView.setText(app.ggtg.GgtgAccounts.INSTANCE.folderTitle(name) + " \u00B7 " + members);
             counterView.setVisibility(unread > 0 ? View.VISIBLE : View.GONE);
             counterView.setText(LocaleController.formatNumber(unread, ','));
             arrowView.setRotation(expanded ? 90 : 0);

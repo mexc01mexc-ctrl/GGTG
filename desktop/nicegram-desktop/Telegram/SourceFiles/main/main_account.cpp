@@ -353,6 +353,7 @@ QString Account::folderTag() const {
 
 void Account::setFolderTag(const QString &folder) {
 	local().writeFolderTag(folder);
+	_domain->scheduleAccountCacheWrite(); // ggtg:
 }
 
 bool Account::pinned() const {
@@ -379,6 +380,7 @@ void Account::setTrashed(bool trashed) {
 		wake();
 	}
 	_domain->notifyUnreadBadgeChanged();
+	_domain->scheduleAccountCacheWrite(); // ggtg:
 }
 
 bool Account::asleep() const {

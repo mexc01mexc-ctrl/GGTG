@@ -470,6 +470,9 @@ jobs:
           _CL_: ""
           MSYS2_ARG_CONV_EXCL: "*"
         run: |
+          # Windows' own find.exe must win over MSYS's GNU find (libwebp's Makefile.vc
+          # pipes cl.exe through `find` to detect the architecture).
+          $env:PATH = "C:\Windows\System32;$env:PATH"
           & cmd.exe /c "call build\prepare\win.bat silent 2>&1" | Tee-Object -FilePath "D:\TBuild\prepare_deps.log"
           if ($LASTEXITCODE -ne 0) {
             exit $LASTEXITCODE

@@ -751,6 +751,19 @@ bool Domain::isPendingIndex(int index) const {
 	return ranges::contains(_pendingIndices, index);
 }
 
+std::vector<int> Domain::pendingIndices() const {
+	return std::vector<int>(_pendingIndices.begin(), _pendingIndices.end());
+}
+
+Main::Account *Domain::startPendingIndex(int index) {
+	const auto i = ranges::find(_pendingIndices, index);
+	if (i == _pendingIndices.end()) {
+		return nullptr;
+	}
+	_pendingIndices.erase(i);
+	return startIndex(index, false);
+}
+
 std::vector<not_null<Main::Account*>> Domain::startPending(int count) {
 	auto result = std::vector<not_null<Main::Account*>>();
 	if (!_pendingIndices.empty()) {

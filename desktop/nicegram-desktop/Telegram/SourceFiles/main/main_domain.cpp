@@ -6,6 +6,9 @@ For license and copyright information please follow this link:
 https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
 #include "main/main_domain.h"
+#include "settings.h"
+#include <QtCore/QJsonObject>
+#include <QtCore/QJsonArray>
 #include "settings/bulk_accounts_actions.h"
 #include <QtCore/QJsonDocument>
 #include <QtCore/QFileInfo>
@@ -88,6 +91,109 @@ Domain::Domain(const QString &dataName)
 	}, _lifetime);
 }
 
+// ggtg: index -> {name, phone, folder, trashed} of every account, kept next
+// to the accounts so the list can show the ones still waiting to start.
+namespace {
+
+[[nodiscard]] QString AccountCachePath() {
+	return cWorkingDir() + u"tdata/ggtg_account_cache.json"_q;
+}
+
+[[nodiscard]] QJsonObject ReadAccountCache() {
+	auto file = QFile(AccountCachePath());
+	if (!file.open(QIODevice::ReadOnly)) {
+		return {};
+	}
+	return QJsonDocument::fromJson(file.readAll()).object();
+}
+
+} // namespace
+
+void Domain::scheduleAccountCacheWrite() {
+	if (!_cacheTimer.isActive()) {
+		_cacheTimer.setCallback([=] { writeAccountCache(); });
+		_cacheTimer.callOnce(2000);
+	}
+}
+
+void Domain::writeAccountCache() {
+	auto cache = ReadAccountCache();
+	// Drop entries of accounts that are neither live nor waiting any more.
+	auto known = base::flat_set<int>();
+	for (const auto &[index, account] : _accounts) {
+		known.emplace(index);
+	}
+	for (const auto index : _local->pendingIndices()) {
+		known.emplace(index);
+	}
+	for (const auto &key : cache.keys()) {
+		if (!known.contains(key.toInt())) {
+			cache.remove(key);
+		}
+	}
+	for (const auto &[index, account] : _accounts) {
+		if (!account->sessionExists()) {
+			continue;
+		}
+		const auto user = account->session().user();
+		const auto name = user->name();
+		if (name.isEmpty()) {
+			continue;
+		}
+		cache[QString::number(index)] = QJsonObject{
+			{ "name", name },
+			{ "phone", user->phone() },
+			{ "folder", account->folderTag() },
+			{ "trashed", account->trashed() },
+		};
+	}
+	auto file = QFile(AccountCachePath());
+	if (file.open(QIODevice::WriteOnly | QIODevice::Truncate)) {
+		file.write(QJsonDocument(cache).toJson(QJsonDocument::Compact));
+	}
+}
+
+std::vector<Domain::PendingPreview> Domain::pendingPreviews() const {
+	auto result = std::vector<PendingPreview>();
+	const auto indices = _local->pendingIndices();
+	if (indices.empty()) {
+		return result;
+	}
+	const auto cache = ReadAccountCache();
+	for (const auto index : indices) {
+		const auto entry = cache.value(QString::number(index)).toObject();
+		auto preview = PendingPreview{
+			.index = index,
+			.name = entry.value("name").toString(),
+			.phone = entry.value("phone").toString(),
+			.folder = entry.value("folder").toString(),
+			.trashed = entry.value("trashed").toBool(),
+		};
+		if (preview.name.isEmpty()) {
+			preview.name = u"Аккаунт "_q + QString::number(index + 1);
+		}
+		result.push_back(std::move(preview));
+	}
+	return result;
+}
+
+Account *Domain::startPendingNow(int index) {
+	const auto account = _local->startPendingIndex(index);
+	if (!account) {
+		return nullptr;
+	}
+	watchSession(account);
+	_startBatch.push_back(base::make_weak(account));
+	_pendingAccounts = _local->pendingCount();
+	_accountsChanges.fire({});
+	if (!_local->pendingCount()) {
+		_startBatchTimer.cancel();
+		_startBatch.clear();
+		scheduleWriteAccounts();
+	}
+	return account;
+}
+
 Domain::~Domain() {
 	if (_walletKeyring) {
 		_walletKeyring->clear();
@@ -127,6 +233,7 @@ Storage::StartResult Domain::startWith(
 			_startBatchAt = crl::now();
 			_startBatchTimer.setCallback([=] { checkStartBatch(); });
 			_startBatchTimer.callEach(kStartBatchCheck);
+			scheduleAccountCacheWrite(); // ggtg:
 		}
 	} else {
 		Assert(!started());
@@ -233,6 +340,7 @@ void Domain::startNextBatch() {
 	if (!started.empty()) {
 		_accountsChanges.fire({});
 	}
+	scheduleAccountCacheWrite();
 	if (!_local->pendingCount()) {
 		_startBatchTimer.cancel();
 		_startBatch.clear();

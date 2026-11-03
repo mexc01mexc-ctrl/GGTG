@@ -192,6 +192,21 @@ public:
 	[[nodiscard]] int pendingAccounts() const;
 	[[nodiscard]] rpl::producer<int> pendingAccountsValue() const;
 
+	// ggtg: what the accounts list shows for an account that has not
+	// started yet (read from a small cache written while the app runs), so
+	// every account is listed at launch while they still connect in batches.
+	struct PendingPreview {
+		int index = 0;
+		QString name;
+		QString phone;
+		QString folder;
+		bool trashed = false;
+	};
+	[[nodiscard]] std::vector<PendingPreview> pendingPreviews() const;
+	// Starts a waiting account right now, out of its turn in the queue.
+	[[nodiscard]] Account *startPendingNow(int index);
+	void scheduleAccountCacheWrite();
+
 	// Interface for Storage::Domain.
 	void accountAddedInStorage(AccountWithIndex accountWithIndex);
 	void activateFromStorage(int index);
@@ -233,8 +248,10 @@ private:
 	[[nodiscard]] bool indexTaken(int index) const;
 	void checkStartBatch();
 	void startNextBatch();
+	void writeAccountCache();
 
 	const QString _dataName;
+	base::Timer _cacheTimer;
 	const std::unique_ptr<Storage::Domain> _local;
 
 	std::shared_ptr<Wallet::VaultRuntime> _walletKeyring;

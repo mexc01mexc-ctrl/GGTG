@@ -141,3 +141,11 @@ Android: `filesDir/ggtg_bulk_db/id_calibration.json`.
 на «Примерная дата регистрации» → «Уточнить дату по Telegram». Запрос `messages.getPeerSettings`,
 поле `registration_month` ("MM.YYYY", Telegram отдаёт его, когда незнакомый человек пишет первым);
 точка ставится на середину месяца (`ParseRegistrationMonth` / `parseRegistrationMonth`).
+
+## Список аккаунтов при старте (Desktop)
+
+Аккаунты стартуют пачками по 5 (`Domain::startNextBatch`), но в боковом списке видны все сразу: для ещё не
+запущенных строка берётся из `tdata/ggtg_account_cache.json` (`{индекс: {name, phone, folder, trashed}}`,
+пишется с задержкой при смене списка, папки и корзины). Клик по такой строке запускает аккаунт вне очереди
+(`Domain::startPendingNow`) и открывает его. Группа «Корзина» (ключ `⁣Корзина`, как на Android) стоит
+последней и показывается и в списке Desktop, и в переключателе Android.
