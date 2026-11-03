@@ -60,7 +60,8 @@ object GgtgSync {
         val twoFactor: String,
         val proxy: JSONObject?,
         val mainDcId: Int,
-        val device: String
+        val device: String,
+        val trashed: Boolean = false // ggtg: «Корзина» is synced like folders
     )
 
     private val lock = Any()
@@ -306,6 +307,7 @@ object GgtgSync {
                 put("lastName", user.last_name.orEmpty())
                 put("username", user.username.orEmpty())
                 put("folder", uc.ncgFolder.orEmpty())
+                if (GgtgAccounts.isTrashed(slot)) put("trashed", true) // ggtg:
                 val twoFa = GgtgTwoFaStore.get(user.id) ?: GgtgSessions.listForUser(user.id).firstOrNull { it.twoFactor.isNotEmpty() }?.twoFactor.orEmpty()
                 if (twoFa.isNotEmpty()) put("twoFactor", twoFa)
                 val pAddress = if (uc.ncgProxyEnabled && uc.ncgProxyAddress.isNotEmpty()) uc.ncgProxyAddress else {
@@ -686,7 +688,8 @@ object GgtgSync {
                 twoFactor = o.optString("twoFactor"),
                 proxy = o.optJSONObject("proxy"),
                 mainDcId = o.optInt("mainDcId"),
-                device = device
+                device = device,
+                trashed = o.optBoolean("trashed", false)
             ))
         }
         return list

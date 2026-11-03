@@ -6,6 +6,7 @@ For license and exceptions, see https://github.com/telegramdesktop/tdesktop/blob
 */
 #pragma once
 
+#include <algorithm>
 #include "boxes/connection_box.h"
 #include "core/application.h"
 #include "lang/lang_keys.h"
@@ -393,7 +394,10 @@ inline void ShowPeerAccountsFromAndroidBox(
 		std::shared_ptr<Ui::Show> show) {
 	show->showBox(Box([=](not_null<Ui::GenericBox*> box) {
 		box->setTitle(rpl::single(u"Аккаунты с телефона Android"_q));
-		const auto accounts = Core::GgtgSync::PeerAccounts();
+		auto accounts = Core::GgtgSync::PeerAccounts();
+		std::stable_sort(accounts.begin(), accounts.end(), [](const auto &a, const auto &b) {
+			return !a.trashed && b.trashed; // ggtg: the trash goes last
+		});
 		if (accounts.empty()) {
 			box->addRow(
 				object_ptr<Ui::FlatLabel>(
@@ -436,7 +440,11 @@ inline void ShowPeerAccountsFromAndroidBox(
 			auto details = QStringList();
 			if (!acc.phone.isEmpty()) details.append(u"+"_q + acc.phone);
 			if (!acc.username.isEmpty()) details.append(u"@"_q + acc.username);
-			if (!acc.folder.isEmpty()) details.append(acc.folder);
+			if (acc.trashed) {
+				details.append(u"Корзина"_q); // ggtg:
+			} else if (!acc.folder.isEmpty()) {
+				details.append(acc.folder);
+			}
 			const auto proxy = ProxyFromJsonObject(acc.proxy);
 			if (proxy.type != MTP::ProxyData::Type::None) {
 				details.append(u"прокси: "_q + proxy.host);

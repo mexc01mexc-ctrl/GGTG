@@ -59,9 +59,13 @@ class GgtgPeerAccountPicker(context: Context) : LinearLayout(context) {
         }
 
         for (acc in allAccounts) {
-            val folder = acc.folder.trim().ifEmpty { "Без папки" }
+            // ggtg: same grouping as the account list - the trash is its own last group
+            val folder = if (acc.trashed) GgtgAccounts.TRASH_FOLDER else acc.folder.trim().ifEmpty { "Без папки" }
             accountsByFolder.getOrPut(folder) { ArrayList() }.add(acc)
         }
+        val ordered = accountsByFolder.entries.sortedWith(compareBy({ it.key == GgtgAccounts.TRASH_FOLDER }, { it.key == "Без папки" }, { it.key }))
+        accountsByFolder.clear()
+        ordered.forEach { accountsByFolder[it.key] = it.value }
 
         for ((folder, accs) in accountsByFolder) {
             val body = LinearLayout(context).apply {
@@ -84,11 +88,11 @@ class GgtgPeerAccountPicker(context: Context) : LinearLayout(context) {
                 gravity = Gravity.CENTER_VERTICAL
                 setBackgroundColor(Theme.getColor(Theme.key_windowBackgroundWhite))
                 setPadding(AndroidUtilities.dp(16f), AndroidUtilities.dp(8f), AndroidUtilities.dp(12f), AndroidUtilities.dp(8f))
-                addView(folderIcon(context, folder), LayoutParams(AndroidUtilities.dp(36f), AndroidUtilities.dp(36f)))
+                addView(folderIcon(context, folder, folder == GgtgAccounts.TRASH_FOLDER), LayoutParams(AndroidUtilities.dp(36f), AndroidUtilities.dp(36f)))
                 addView(LinearLayout(context).apply {
                     orientation = VERTICAL
                     addView(TextView(context).apply {
-                        text = folder
+                        text = GgtgAccounts.folderTitle(folder).let { if (folder == "Без папки") folder else it }
                         textSize = 16f
                         setTextColor(Theme.getColor(Theme.key_windowBackgroundWhiteBlackText))
                     })
@@ -151,7 +155,15 @@ class GgtgPeerAccountPicker(context: Context) : LinearLayout(context) {
         }
     }
 
-    private fun folderIcon(context: Context, name: String): View {
+    private fun folderIcon(context: Context, name: String, trash: Boolean = false): View {
+        if (trash) {
+            return android.widget.FrameLayout(context).apply {
+                background = GradientDrawable().apply { shape = GradientDrawable.OVAL; setColor(Theme.getColor(Theme.key_windowBackgroundWhiteGrayIcon)) }
+                addView(android.widget.ImageView(context).apply {
+                    setImageDrawable(GgtgUi.icon(context, org.telegram.messenger.R.drawable.msg_delete, Color.WHITE))
+                }, android.widget.FrameLayout.LayoutParams(AndroidUtilities.dp(20f), AndroidUtilities.dp(20f), Gravity.CENTER))
+            }
+        }
         val colors = intArrayOf(
             0xFFE17076.toInt(), 0xFFFAA774.toInt(), 0xFFA695E7.toInt(),
             0xFF7BC862.toInt(), 0xFF6EC9CB.toInt(), 0xFF65AADD.toInt(), 0xFFEE7AAE.toInt()

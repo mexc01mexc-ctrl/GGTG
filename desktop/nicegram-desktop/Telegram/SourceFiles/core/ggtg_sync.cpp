@@ -373,6 +373,9 @@ Snapshot BuildSnapshot(const Settings &settings) {
 			{ "folder", account->folderTag() },
 			{ "mainDcId", account->session().mainDcId() },
 		};
+		if (account->trashed()) { // ggtg:
+			entry["trashed"] = true;
+		}
 		const auto twoFa = account->twoFactorPassword();
 		if (!twoFa.isEmpty()) {
 			entry["twoFactor"] = twoFa;
@@ -727,6 +730,7 @@ std::vector<PeerAccount> PeerAccounts() {
 			.proxy = obj["proxy"].toObject(),
 			.mainDcId = obj["mainDcId"].toInt(),
 			.device = device,
+			.trashed = obj["trashed"].toBool(),
 		});
 	}
 	return result;

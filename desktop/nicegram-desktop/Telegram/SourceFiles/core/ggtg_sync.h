@@ -97,6 +97,7 @@ struct PeerAccount {
 	QJsonObject proxy;
 	int mainDcId = 0;
 	QString device;
+	bool trashed = false; // ggtg: «Корзина» is synced like folders
 };
 
 [[nodiscard]] std::vector<PeerAccount> PeerAccounts();

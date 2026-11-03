@@ -120,6 +120,8 @@ class GgtgSyncAccountsActivity : BaseFragment() {
 
         val progress = TdataImportProgressDialog(activity, "Создание сессий на Android")
         progress.show()
+        val process = GgtgProcess.start("Создание сессий с Desktop (${selected.size})", GgtgProcess.Kind.Other)
+        process.progress(0, selected.size)
 
         scope.launch {
             val successful = ArrayList<GgtgSync.PeerAccount>()
@@ -128,7 +130,16 @@ class GgtgSyncAccountsActivity : BaseFragment() {
 
             for ((index, acc) in selected.withIndex()) {
                 progress.setWorking(acc.phone, index + 1, selected.size)
-                val (ok, resOrSlot, reason) = mintSingleAccount(acc, progress)
+                process.log("+${acc.phone}: начало")
+                // ggtg: nothing thrown while minting may take the whole app down - it becomes a failed row
+                val (ok, resOrSlot, reason) = try {
+                    mintSingleAccount(acc, progress, process)
+                } catch (t: Throwable) {
+                    org.telegram.messenger.FileLog.e(t)
+                    Triple(false, null, "Сбой: ${t.message ?: t.javaClass.simpleName}")
+                }
+                process.progress(index + 1, selected.size)
+                process.log("+${acc.phone}: " + if (ok) "готово, слот #$resOrSlot" else (reason ?: "ошибка"))
                 if (ok) {
                     successful.add(acc)
                     if (firstImportedSlot == null && resOrSlot is Int) {
@@ -140,6 +151,8 @@ class GgtgSyncAccountsActivity : BaseFragment() {
             }
 
             try { progress.dismiss() } catch (_: Throwable) {}
+            if (failed.isEmpty()) process.succeed("Создано сессий: ${successful.size}")
+            else process.fail("Не создано: ${failed.size} из ${selected.size}")
 
             withContext(Dispatchers.Main) {
                 peerPicker?.rebuild()
@@ -189,7 +202,8 @@ class GgtgSyncAccountsActivity : BaseFragment() {
 
     private suspend fun mintSingleAccount(
         acc: GgtgSync.PeerAccount,
-        progress: TdataImportProgressDialog
+        progress: TdataImportProgressDialog,
+        process: GgtgProcess.Handle
     ): Triple<Boolean, Int?, String?> = withContext(Dispatchers.IO) {
         val digits = acc.phone.filter(Char::isDigit)
         if (digits.isEmpty()) return@withContext Triple(false, null, "Номер телефона пуст")
@@ -216,7 +230,27 @@ class GgtgSyncAccountsActivity : BaseFragment() {
             val user = proxy.optString("user")
             val pass = proxy.optString("password")
             val secret = proxy.optString("secret")
+            // ggtg: a dead proxy would only show up as a long silent wait - check it first
+            val reachable = try {
+                java.net.Socket().use { it.connect(java.net.InetSocketAddress(host, port), 6000) }
+                true
+            } catch (_: Throwable) { false }
+            if (!reachable) {
+                process.log("Прокси $host:$port не отвечает")
+                return@withContext Triple(false, null, "Прокси $host:$port не отвечает")
+            }
+            if (proxy.optString("type") == "http") {
+                return@withContext Triple(false, null, "HTTP-прокси не поддерживается на Android (нужен SOCKS5 или MTProto)")
+            }
             ConnectionsManager.setProxySettingsForAccount(freeSlot, true, host, port, user, pass, secret)
+            // ggtg: keep the account's own proxy with the account (shown in its info, used after restart, exported again)
+            uc.ncgProxyEnabled = true
+            uc.ncgProxyAddress = host
+            uc.ncgProxyPort = port
+            uc.ncgProxyUsername = user
+            uc.ncgProxyPassword = pass
+            uc.ncgProxySecret = secret
+            uc.saveConfig(false)
         } else {
             ConnectionsManager.setProxySettingsForAccount(freeSlot, false, "", 0, "", "", "")
         }
@@ -231,6 +265,8 @@ class GgtgSyncAccountsActivity : BaseFragment() {
         val flags = ConnectionsManager.RequestFlagWithoutLogin or ConnectionsManager.RequestFlagFailOnServerErrors
 
         // 3. Send code
+        process.log("Запрос кода в Telegram")
+        progress.setWorkingText("+${acc.phone}: запрос кода…")
         val (sent, sendError) = cm.sendSuspend(TLRPC.TL_auth_sendCode().apply {
             phone_number = digits
             api_id = targetAppId
@@ -264,6 +300,8 @@ class GgtgSyncAccountsActivity : BaseFragment() {
         }
 
         // 5. Sign in
+        process.log("Вход по коду")
+        progress.setWorkingText("+${acc.phone}: вход…")
         val (signed, signError) = cm.sendSuspend(TLRPC.TL_auth_signIn().apply {
             this.flags = this.flags or 1
             phone_number = digits
@@ -345,6 +383,8 @@ class GgtgSyncAccountsActivity : BaseFragment() {
             cm.setDefaultDatacenterId(dcId)
         }
 
+        process.log("Активация слота #$freeSlot")
+        progress.setWorkingText("+${acc.phone}: настройка аккаунта…")
         val actRes = GgtgImportSupport.activateSlot(freeSlot, user, dcId)
         if (actRes.isFailure) {
             cleanupSlot()
@@ -355,6 +395,12 @@ class GgtgSyncAccountsActivity : BaseFragment() {
             uc.ncgFolder = acc.folder
             uc.saveConfig(false)
         }
+        if (acc.twoFactor.isNotEmpty()) {
+            uc.ncgTwoFactor = acc.twoFactor
+            uc.saveConfig(false)
+        }
+        // ggtg: the trash is synced like folders
+        if (acc.trashed) GgtgAccounts.setTrashed(listOf(freeSlot), true)
 
         return@withContext Triple(true, freeSlot, null)
     }
