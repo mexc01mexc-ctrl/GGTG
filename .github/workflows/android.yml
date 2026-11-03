@@ -9,6 +9,10 @@ on:
       - 'android/**'
       - '.github/workflows/android.yml'
 
+concurrency:
+  group: android-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   build:
     name: Build Android APK
@@ -63,6 +67,7 @@ jobs:
             -Dorg.gradle.jvmargs="-Xmx6g -XX:MaxMetaspaceSize=1g" \
             -Dorg.gradle.caching=true \
             --max-workers=4 \
+            -PggtgAbis=arm64-v8a \
             -Pandroid.injected.build.abi=arm64-v8a \
             -Pandroid.injected.testOnly=false \
             :TMessagesProj_AppStandalone:assembleAfatStandalone 2>&1 | tee "$GITHUB_WORKSPACE/gradle_build.log"

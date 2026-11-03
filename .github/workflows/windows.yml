@@ -10,6 +10,10 @@ on:
       - 'windows/**'
       - '.github/workflows/windows.yml'
 
+concurrency:
+  group: windows-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   build:
     name: Build Windows (x64)
@@ -472,14 +476,14 @@ jobs:
           }
 
       - name: Save ThirdParty Cache
-        if: always() && steps.restore-thirdparty.outputs.cache-hit != 'true'
+        if: ${{ !cancelled() && steps.restore-thirdparty.outputs.cache-hit != 'true' }}
         uses: actions/cache/save@v4
         with:
           path: D:\TBuild\ThirdParty
           key: ${{ runner.os }}-x64-thirdparty-v6-${{ hashFiles('desktop/nicegram-desktop/Telegram/build/prepare/prepare.py') }}
 
       - name: Save Libraries Cache (Incremental)
-        if: always() && steps.restore-libraries.outputs.cache-hit != 'true'
+        if: ${{ !cancelled() && steps.restore-libraries.outputs.cache-hit != 'true' }}
         uses: actions/cache/save@v4
         with:
           path: D:\TBuild\Libraries\win64

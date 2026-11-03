@@ -10,6 +10,10 @@ on:
       - 'desktop/**'
       - '.github/workflows/macos.yml'
 
+concurrency:
+  group: macos-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   build:
     name: Build macOS (ARM64)
