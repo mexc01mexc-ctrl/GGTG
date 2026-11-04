@@ -66,6 +66,15 @@ jobs:
             fi
           done
 
+          echo "Restoring Qt host tools (moc, uic, ...): the cached Qt has only dangling links to them..."
+          python3 -m pip install --user aqtinstall
+          python3 -m aqt install-qt mac desktop 6.11.2 clang_64 --archives qtbase -O /tmp/qthost
+          QT_TOOLS=/tmp/qt-clean/GGTG/desktop/Libraries/local/Qt-6.11.2
+          mkdir -p "$QT_TOOLS/libexec" "$QT_TOOLS/bin"
+          cp -R /tmp/qthost/6.11.2/macos/libexec/. "$QT_TOOLS/libexec/"
+          cp -R /tmp/qthost/6.11.2/macos/bin/. "$QT_TOOLS/bin/"
+          "$QT_TOOLS/libexec/moc" --version
+
           echo "Regenerating the Xcode project for the current sources (upstream adds/removes files)..."
           brew upgrade cmake || brew install cmake || true
           cmake --version
