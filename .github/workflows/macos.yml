@@ -66,6 +66,11 @@ jobs:
             fi
           done
 
+          echo "Regenerating the Xcode project for the current sources (upstream adds/removes files)..."
+          brew upgrade cmake || brew install cmake || true
+          cmake --version
+          (cd "$GITHUB_WORKSPACE/desktop/nicegram-desktop/out" && cmake .)
+
           echo "Bypassing ReRunCMake in CI..."
           printf 'all:\n\t@echo "Skipping CMake regeneration in CI"\n' > "$GITHUB_WORKSPACE/desktop/nicegram-desktop/out/CMakeScripts/ReRunCMake.make"
 
