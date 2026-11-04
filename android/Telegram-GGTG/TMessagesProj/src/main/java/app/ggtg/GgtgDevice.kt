@@ -416,13 +416,6 @@ object GgtgDevice {
         return "${geo.ip}, ${geo.country} → ${geo.lang.system}, UTC${formatOffset(geo.offset)}"
     }
 
-    /**
-     * A freshly added account's identity, set BEFORE its ConnectionsManager is first touched: what the export carried
-     * in [device] (deviceModel / systemVersion / systemLangCode / cloudLangCode / tzOffset), otherwise a random device
-     * matching [isDesktop] (Desktop or Android) with language / time zone fitted to the proxy once it answers. Returns true when [device] was used.
-     */
-    @JvmOverloads
-    @JvmStatic
     // ggtg: set by the import flows while they run: geo of the chosen proxy list (wins over phone / proxy IP)
     @Volatile
     @JvmField
@@ -437,6 +430,13 @@ object GgtgDevice {
         }
     }
 
+    /**
+     * A freshly added account's identity, set BEFORE its ConnectionsManager is first touched: what the export carried
+     * in [device] (deviceModel / systemVersion / systemLangCode / cloudLangCode / tzOffset), otherwise a random device
+     * matching [isDesktop] (Desktop or Android) with language / time zone fitted to the proxy once it answers. Returns true when [device] was used.
+     */
+    @JvmOverloads
+    @JvmStatic
     fun assignNew(slot: Int, device: org.json.JSONObject? = null, isDesktop: Boolean = false): Boolean {
         val rawModel = device?.optString("deviceModel").orEmpty()
         if (rawModel.isNotEmpty()) {
