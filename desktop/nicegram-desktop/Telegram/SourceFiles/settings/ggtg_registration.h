@@ -4213,6 +4213,7 @@ private:
 			auto mobileStored = Core::GgtgSessions::StoredSession();
 			FillStoredMeta(mobileStored, _pendingAccount);
 			mobileStored.role = u"android"_q;
+			mobileStored.platform = u"android"_q;
 			mobileStored.source = u"mobile_registration"_q;
 			mobileStored.note = u"Android: "_q + _currentMobileProfile.device + u" ("_q + _currentMobileProfile.sdk + u")"_q;
 			mobileStored = Core::GgtgSessions::AddStored(mobileStored);

@@ -195,16 +195,38 @@ inline void AddIdCalibration(uint64 id, int64 time) {
 	file.commit();
 }
 
-// Telegram's "MM.YYYY" (peerSettings.registration_month) -> unix seconds of the middle of that month, 0 if unreadable.
+// Month and year as a person types them or Telegram writes them: "03.2025", "3 2025", "март 2025", "Mar 2025".
+// Returns unix seconds of the middle of that month, 0 if unreadable.
 [[nodiscard]] inline int64 ParseRegistrationMonth(const QString &text) {
 	auto month = 0;
 	auto year = 0;
-	for (const auto &part : text.split(QRegularExpression(u"[^0-9]+"_q), Qt::SkipEmptyParts)) {
-		const auto value = part.toInt();
-		if (part.size() == 4) {
-			year = value;
-		} else if (value >= 1 && value <= 12) {
-			month = value;
+	static const auto names = std::vector<std::pair<QString, int>>{
+		{ u"янв"_q, 1 }, { u"фев"_q, 2 }, { u"мар"_q, 3 }, { u"апр"_q, 4 },
+		{ u"мая"_q, 5 }, { u"май"_q, 5 }, { u"июн"_q, 6 }, { u"июл"_q, 7 },
+		{ u"авг"_q, 8 }, { u"сен"_q, 9 }, { u"окт"_q, 10 }, { u"ноя"_q, 11 },
+		{ u"дек"_q, 12 },
+		{ u"jan"_q, 1 }, { u"feb"_q, 2 }, { u"mar"_q, 3 }, { u"apr"_q, 4 },
+		{ u"may"_q, 5 }, { u"jun"_q, 6 }, { u"jul"_q, 7 }, { u"aug"_q, 8 },
+		{ u"sep"_q, 9 }, { u"oct"_q, 10 }, { u"nov"_q, 11 }, { u"dec"_q, 12 },
+	};
+	for (const auto &part : text.toLower().split(
+			QRegularExpression(u"[^0-9a-zа-яё]+"_q),
+			Qt::SkipEmptyParts)) {
+		auto ok = false;
+		const auto value = part.toInt(&ok);
+		if (ok) {
+			if (part.size() == 4) {
+				year = value;
+			} else if (value >= 1 && value <= 12) {
+				month = value;
+			}
+			continue;
+		}
+		for (const auto &[name, number] : names) {
+			if (part.startsWith(name)) {
+				month = number;
+				break;
+			}
 		}
 	}
 	if (year < 2013 || year > 2100 || month < 1) {

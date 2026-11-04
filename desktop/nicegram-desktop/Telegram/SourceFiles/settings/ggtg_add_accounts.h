@@ -161,6 +161,22 @@ inline void Inform(std::shared_ptr<Ui::Show> show, const QString &text) {
 	return true;
 }
 
+// Language / time zone from the country of the proxy list the user picked
+// (list names carry the country / phone code). Returns false if the list
+// had none, so the caller falls back to the phone / proxy IP detection.
+inline bool ApplyPickedListGeo(not_null<::Main::Account*> account) {
+	const auto geo = LastPickedProxyListGeo();
+	if (!geo) {
+		return false;
+	}
+	auto value = account->deviceOverride();
+	value.systemLangCode = geo->systemLang;
+	value.cloudLangCode = geo->cloudLang;
+	value.tzOffset = geo->tzOffset;
+	account->setDeviceOverride(value);
+	return true;
+}
+
 // The folder, proxy and 2FA of a freshly imported account from its
 // "ggtg.json" (written by this app's export), else the folder is taken from
 // where it sits: "<picked>/<folder>/<phone>/tdata", or "<picked>/<phone>/
@@ -232,10 +248,16 @@ inline void ApplyImportedMeta(
 			account->setProxyOverride(data);
 			// Language / time zone follow the proxy, unless the export
 			// carried this account's own device data.
-			if (!info.contains(u"device"_q)) {
+			if (!info.contains(u"device"_q)
+				&& !ApplyPickedListGeo(account)) {
 				AutoDeviceGeo(account);
 			}
 		}
+	}
+
+	if (!info.contains(u"device"_q)
+		&& account->deviceOverride().systemLangCode.isEmpty()) {
+		ApplyPickedListGeo(account);
 	}
 
 	// Persist the imported session in Session Vault
@@ -454,22 +476,18 @@ inline void FillAddAccountsBox(
 		Ui::AddSkip(layout, st::defaultVerticalListSkip);
 	};
 
-	Ui::AddSubsectionTitle(layout, rpl::single(u"1. Прокси"_q));
 	const auto lists = MTP::GlobalProxyPool().lists();
 	auto total = 0;
 	for (const auto &list : lists) {
 		total += int(list.entries.size());
 	}
 	hint(lists.empty()
-		? u"Списков прокси ещё нет. Добавьте их до аккаунтов: каждому "
-			"новому аккаунту выдаётся свой прокси из списка."_q
-		: (u"Списков: "_q + QString::number(lists.size())
+		? u"Списков прокси ещё нет. Добавьте их в разделе «Прокси» до "
+			"аккаунтов: каждому новому аккаунту выдаётся свой прокси."_q
+		: (u"Прокси для новых аккаунтов (раздел «Прокси»). Списков: "_q + QString::number(lists.size())
 			+ u", свободных прокси: "_q + QString::number(total) + u"."_q));
-	action(u"Списки прокси…"_q, st::menuIconNetwork, [=] {
-		show->showBox(MakeProxyPoolManagerBox());
-	});
 
-	Ui::AddSubsectionTitle(layout, rpl::single(u"2. Аккаунты"_q));
+	Ui::AddSubsectionTitle(layout, rpl::single(u"Аккаунты"_q));
 	action(u"Импорт папки tdata…"_q, st::menuIconShowInFolder, [=] {
 		ImportTdataFolder(show);
 	});
@@ -484,24 +502,6 @@ inline void FillAddAccountsBox(
 	action(u"Войти по номеру телефона…"_q, st::menuIconPhone, [=] {
 		AddAccountByPhone(show);
 	});
-	if (Core::GgtgSync::MainSession()) {
-		const auto weak = QPointer<Ui::GenericBox>(box.get());
-		action(u"Принять аккаунты с Android…"_q, st::menuIconDevices, [=] {
-			Core::GgtgSync::FindIncoming([=](
-					std::vector<Core::GgtgSync::Remote> list,
-					QString error) {
-				if (!weak) {
-					return;
-				} else if (!error.isEmpty()) {
-					AddAccounts::Inform(show, error);
-				} else if (list.empty()) {
-					AddAccounts::Inform(show, u"С Android пока ничего не пришло"_q);
-				} else {
-					AcceptAccountsFromAndroid(weak.data(), list.front());
-				}
-			});
-		});
-	}
 	auto any = false;
 	for (const auto &[index, account] : Core::App().domain().accounts()) {
 		any = any || account->sessionExists();

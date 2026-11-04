@@ -8409,51 +8409,6 @@ void ExportSpecificSession(
 	}));
 }
 
-void ShowStoredSessionPicker(
-		std::shared_ptr<Ui::Show> show,
-		not_null<Main::Account*> account,
-		const std::vector<Core::GgtgSessions::StoredSession> &stored) {
-	namespace Sessions = Core::GgtgSessions;
-	if (stored.empty()) {
-		Ggtg::Notice(show, u"Нет сохранённых сессий для экспорта"_q);
-		return;
-	}
-	if (stored.size() == 1) {
-		ExportSpecificSession(show, account, stored.front());
-		return;
-	}
-	show->showBox(Box([=](not_null<Ui::GenericBox*> box) {
-		box->setWidth(style::ConvertScale(440));
-		box->setTitle(rpl::single(u"Выбор сессии для экспорта"_q));
-
-		const auto group = std::make_shared<Ui::RadiobuttonGroup>(0);
-		for (size_t i = 0; i < stored.size(); ++i) {
-			const auto &item = stored[i];
-			const auto devModel = item.device.value(u"deviceModel"_q).toString();
-			const auto title = (devModel.isEmpty() ? Sessions::RoleTitle(item.role) : devModel)
-				+ u" ("_q + Sessions::RoleTitle(item.role) + u" · "_q
-				+ QDateTime::fromSecsSinceEpoch(item.createdAt).toString(u"dd.MM.yyyy"_q) + u")"_q;
-			box->addRow(
-				object_ptr<Ui::Radiobutton>(
-					box,
-					group,
-					int(i),
-					title),
-				st::ggtgChoiceRowPadding);
-		}
-
-		box->addButton(rpl::single(u"Далее"_q), [=] {
-			const auto idx = size_t(group->current());
-			if (idx < stored.size()) {
-				const auto item = stored[idx];
-				box->closeBox();
-				ExportSpecificSession(show, account, item);
-			}
-		});
-		box->addButton(tr::lng_cancel(), [=] { box->closeBox(); });
-	}));
-}
-
 // The account's sessions as in Settings > Privacy > Active sessions: this
 // one first, then the others by last activity - device, app, IP/location
 // and when it was last active. Filled in as soon as Telegram answers.
@@ -8677,18 +8632,7 @@ void AddSessionsSection(
 					++number;
 				}
 			}
-			auto baseRole = Sessions::RoleTitle(item.role);
-			if (!item.note.isEmpty()) {
-				if (item.note.contains(u"Android"_q, Qt::CaseInsensitive)) {
-					baseRole = (item.role == u"exported"_q)
-						? u"экспорт для Android"_q
-						: (baseRole + u" (Android)"_q);
-				} else if (item.note.contains(u"iOS"_q, Qt::CaseInsensitive)) {
-					baseRole = (item.role == u"exported"_q)
-						? u"экспорт для iOS"_q
-						: (baseRole + u" (iOS)"_q);
-				}
-			}
+			const auto baseRole = Sessions::SessionTitle(item);
 			return baseRole
 				+ ((number > 1) ? (u" "_q + QString::number(number)) : QString());
 		};
@@ -8824,7 +8768,7 @@ void AddSessionsSection(
 			wrap->add(MakeSessionRow(
 				wrap,
 				synth,
-				u" (резервная"
+				u" ("_q + Sessions::SessionTitle(item)
 					+ (item.note.isEmpty() ? QString() : (u" · "_q + item.note))
 					+ u" · "_q + createdDt.toString(u"dd.MM.yyyy"_q) + u")"_q,
 				[=] {
@@ -8884,22 +8828,6 @@ void AddSessionsSection(
 					(*fillAgain)();
 				}
 			});
-		});
-
-		wrap->add(
-			object_ptr<Ui::LinkButton>(
-				wrap,
-				u"Экспортировать сохранённую сессию..."_q),
-			style::margins(
-				st::boxRowPadding.left(),
-				0,
-				st::boxRowPadding.right(),
-				st::defaultVerticalListSkip)
-		)->setClickedCallback([=] {
-			if (!Main::AccountIsLive(account)) {
-				return;
-			}
-			ShowStoredSessionPicker(box->uiShow(), account, stored);
 		});
 
 		wrap->add(
@@ -11801,6 +11729,7 @@ void CreateBackupSessionWith(
 		FillStoredMeta(entry, weak.get());
 		entry.device = DeviceOverrideToJson(device);
 		entry.role = asAndroid ? u"android"_q : u"backup"_q;
+		entry.platform = asAndroid ? u"android"_q : u"desktop"_q;
 		entry.source = asAndroid ? u"duplicate_android"_q : u"duplicate"_q;
 		entry.note = note;
 		entry.hash = hash;
@@ -12147,6 +12076,7 @@ void SwapToStoredSession(
 	old.role = u"previous"_q;
 	old.source = u"swap"_q;
 	old.note = u"бывшая рабочая"_q;
+	old.platform = u"desktop"_q;
 	old = Sessions::AddStored(old);
 	auto error = QString();
 	if (!Storage::ExportRawAuthorizationAsTdata(
@@ -12176,7 +12106,8 @@ void SwapToStoredSession(
 		[=](QString switchError) {
 			if (switchError.isEmpty()) {
 				// Mark target session as active in vault, never remove it.
-				Sessions::UpdateStoredRole(targetId, target->role, u"активная (текущая)"_q);
+				Sessions::MarkCurrent(targetId);
+				Sessions::PruneFormer(target->userId, oldId);
 			} else if (const auto alive = weak.get()
 				; alive && Main::AccountIsLive(alive)) {
 				// Still running on it: no need for the copy. (If the
@@ -12239,7 +12170,7 @@ void MoveToNewSession(
 		Sessions::VaultFolder(spare),
 		[=](QString switchError) {
 			if (switchError.isEmpty()) {
-				Sessions::UpdateStoredRole(spareId, u"backup"_q, u"активная (текущая)"_q);
+				Sessions::MarkCurrent(spareId);
 			}
 			done(switchError);
 		});

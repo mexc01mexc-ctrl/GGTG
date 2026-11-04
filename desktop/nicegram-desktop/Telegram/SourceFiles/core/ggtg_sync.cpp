@@ -308,6 +308,12 @@ Snapshot BuildSnapshot(const Settings &settings) {
 		if (item.createdAt > 0) {
 			obj["createdAt"] = double(item.createdAt);
 		}
+		if (const auto platform = Core::GgtgSessions::Platform(item); !platform.isEmpty()) {
+			obj["platform"] = platform;
+		}
+		if (Core::GgtgSessions::IsCurrent(item)) {
+			obj["current"] = true;
+		}
 		if (item.hash) {
 			obj["hash"] = QString::number(item.hash);
 		}
@@ -585,6 +591,8 @@ MergeResult MergeSnapshot(const QByteArray &json) {
 				entry.userId = uId;
 				entry.phone = phone;
 				entry.role = role.isEmpty() ? u"stored"_q : role;
+				entry.platform = obj["platform"].toString();
+				entry.current = obj["current"].toBool();
 				entry.source = u"sync"_q;
 				entry.note = note;
 				entry.createdAt = qint64(obj["createdAt"].toDouble());

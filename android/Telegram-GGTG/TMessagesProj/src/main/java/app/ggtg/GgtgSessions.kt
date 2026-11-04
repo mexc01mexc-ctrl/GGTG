@@ -35,6 +35,8 @@ object GgtgSessions {
         var source: String,
         var note: String,
         var state: String = "ok", // "ok", "revoked"
+        var platform: String = "", // "desktop", "android", "ios" or empty (see platformOf)
+        var current: Boolean = false, // the session the account works on right now
         val createdAt: Long = System.currentTimeMillis() / 1000,
         val hash: Long = 0L,
         val phone: String = "",
@@ -93,6 +95,8 @@ object GgtgSessions {
                             source = obj.optString("source", "duplicate"),
                             note = obj.optString("note"),
                             state = obj.optString("state", "ok"),
+                            platform = obj.optString("platform"),
+                            current = obj.optBoolean("current", false),
                             createdAt = obj.optLong("createdAt", System.currentTimeMillis() / 1000),
                             hash = obj.optString("hash").toLongOrNull() ?: 0L,
                             phone = obj.optString("phone"),
@@ -129,7 +133,7 @@ object GgtgSessions {
             s.keys.isNotEmpty() ||
             File(vaultRoot(), "${s.userId}/${s.id}/session.json").exists() ||
             File(vaultRoot(), "${s.userId}/${s.id}/tdata").exists() ||
-            s.role in listOf("backup", "duplicate", "imported", "exported", "desktop", "previous", "android")
+            s.role in listOf("backup", "duplicate", "imported", "purchased", "anti_theft_backup", "exported", "desktop", "previous", "android")
         }
     }
 
@@ -160,19 +164,77 @@ object GgtgSessions {
     }
 
     @JvmStatic
+    // One vocabulary on both platforms (same as Core::GgtgSessions on desktop): original (bought),
+    // reserve (our spare), handed (given away), former (left by a swap).
     fun roleTitle(role: String): String {
         return when (role) {
-            "backup" -> "Резервная"
-            "anti_theft_backup" -> "Резервная (анти-угон)"
-            "purchased" -> "Купленная"
-            "duplicate" -> "Дублированная"
-            "imported" -> "Импортированная"
-            "exported" -> "Экспортированная"
-            "desktop" -> "Десктоп"
-            "android" -> "Android"
+            "purchased", "imported" -> "Оригинал"
+            "exported", "android" -> "Передана"
             "previous" -> "Бывшая рабочая"
-            "active" -> "Активная"
-            else -> "Сохранённая"
+            "anti_theft_backup" -> "Запасная (анти-угон)"
+            "stored", "" -> "Сохранённая"
+            "active" -> "Текущая"
+            else -> "Запасная"
+        }
+    }
+
+    const val ACTIVE_NOTE = "активная (текущая)"
+
+    @JvmStatic
+    fun platformOf(s: StoredSession): String {
+        if (s.platform.isNotEmpty()) return s.platform
+        // older entries: guess from what they were saved with
+        val text = "${s.role} ${s.source} ${s.note}".lowercase(Locale.ROOT)
+        return when {
+            text.contains("android") -> "android"
+            text.contains("ios") -> "ios"
+            s.role == "desktop" -> "desktop"
+            else -> ""
+        }
+    }
+
+    @JvmStatic
+    fun isCurrent(s: StoredSession): Boolean = s.current || s.note == ACTIVE_NOTE || s.note == "Активирована в приложении"
+
+    /** "Запасная · Android", "Текущая · Запасная", "Оригинал" ... */
+    @JvmStatic
+    fun sessionTitle(s: StoredSession): String {
+        val base = if (isCurrent(s)) "Текущая · " + roleTitle(s.role).lowercase(Locale.getDefault()) else roleTitle(s.role)
+        val platform = when (platformOf(s)) {
+            "android" -> "Android"
+            "ios" -> "iOS"
+            "desktop" -> "десктоп"
+            else -> ""
+        }
+        return if (platform.isEmpty()) base else "$base · $platform"
+    }
+
+    /** Exactly one session of an account is the current one. */
+    fun markCurrent(id: String) {
+        synchronized(lock) {
+            val all = listAll().toMutableList()
+            val item = all.firstOrNull { it.id == id } ?: return
+            for (s in all) {
+                if (s.userId != item.userId) continue
+                s.current = (s.id == id)
+                // the old marker that was kept in the note text
+                if (s.note == ACTIVE_NOTE || s.note == "Активирована в приложении") s.note = ""
+            }
+            saveIndex(all)
+        }
+    }
+
+    /** Only the latest "former working" session of an account is kept: each swap leaves one. */
+    fun pruneFormer(userId: Long, keepId: String) {
+        synchronized(lock) {
+            val all = listAll().toMutableList()
+            val drop = all.filter { it.userId == userId && it.id != keepId && it.role == "previous" && !isCurrent(it) }
+            if (drop.isEmpty()) return
+            all.removeAll(drop)
+            saveIndex(all)
+            for (d in drop) {
+                try { File(vaultRoot(), "${d.userId}/${d.id}").deleteRecursively() } catch (_: Throwable) { }
+            }
         }
     }
 
@@ -182,7 +244,7 @@ object GgtgSessions {
             return " (основная · эта сессия)"
         }
         if (stored == null) return ""
-        val roleStr = roleTitle(stored.role).lowercase(Locale.getDefault())
+        val roleStr = sessionTitle(stored).lowercase(Locale.getDefault())
         val noteStr = if (stored.note.isNotEmpty()) " · ${stored.note}" else ""
         val dateStr = if (stored.createdAt > 0L) {
             " · " + SimpleDateFormat("dd.MM.yyyy", Locale.getDefault()).format(Date(stored.createdAt * 1000))
@@ -350,6 +412,8 @@ object GgtgSessions {
                 put("source", item.source)
                 put("note", item.note)
                 put("state", item.state)
+                if (item.platform.isNotEmpty()) put("platform", item.platform)
+                if (item.current) put("current", true)
                 put("createdAt", item.createdAt)
                 put("hash", item.hash.toString())
                 put("phone", item.phone)
@@ -550,6 +614,7 @@ object GgtgSessions {
         val target = if (targetId != null) sessions.firstOrNull { it.id == targetId } else sessions.firstOrNull()
         if (target == null) return Result.failure(Exception("Сессия не найдена"))
 
+        var formerId: String? = null
         try {
             val currentAcc = TdataExportHelper.currentSession(slot)
             val oldId = "${System.currentTimeMillis()}_${(1000..9999).random()}"
@@ -569,6 +634,7 @@ object GgtgSessions {
                 id = oldId,
                 userId = userId,
                 role = "previous",
+                platform = "android",
                 source = "android",
                 note = "Бывшая рабочая от " + SimpleDateFormat("dd.MM.yyyy HH:mm", Locale.getDefault()).format(Date()),
                 state = "ok",
@@ -588,6 +654,7 @@ object GgtgSessions {
                 saveToVault(oldStored, currentAcc)
             }
             addStored(oldStored)
+            formerId = oldId
         } catch (_: Throwable) { }
 
         val cm = ConnectionsManager.getInstance(slot)
@@ -665,7 +732,8 @@ object GgtgSessions {
             return Result.failure(res.exceptionOrNull() ?: Exception("Не удалось активировать слот"))
         }
 
-        updateRole(target.id, target.role, "Активирована в приложении")
+        markCurrent(target.id)
+        formerId?.let { pruneFormer(userId, it) }
         return Result.success("Аккаунт успешно переключён на выбранную сессию!")
     }
 

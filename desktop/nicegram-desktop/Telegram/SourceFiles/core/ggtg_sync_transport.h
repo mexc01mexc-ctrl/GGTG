@@ -10,6 +10,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "base/basic_types.h"
 
 #include <QtCore/QByteArray>
+#include <QtCore/QJsonObject>
 #include <QtCore/QString>
 
 #include <vector>
@@ -64,6 +65,16 @@ void SendAccounts(
 void FetchIncoming(
 	const Remote &remote,
 	Fn<void(QByteArray payload, QString error)> done);
+
+// Small control messages between the devices (login code / QR login), see
+// ggtg_sync_transport.cpp.
+void SendControl(const QJsonObject &message);
+// The next QR login token shown in this app is offered to the phone that has
+// this account (it confirms it by itself).
+void SetQrTarget(quint64 userId);
+void OfferQrLink(const QByteArray &link);
+void WatchLoginCodes(not_null<Main::Session*> session);
+void WatchControl(not_null<Main::Session*> session);
 
 // Called for every session that is created: starts the periodic sync when
 // the session is the main account's.

@@ -662,7 +662,22 @@ void ImportSessionJsonFolder(std::shared_ptr<Ui::Show> show) {
 		return;
 	}
 
-	const auto runImport = [=](Fn<MTP::ProxyData()> nextProxy) {
+	const auto runImport = [=](Fn<MTP::ProxyData()> nextPoolProxy) {
+		// Same as the tdata import: each account takes the next proxy of the
+		// chosen list; the proxy written in its own JSON is only a fallback
+		// (chosen "no proxy" / list ran out). Called once per account, in
+		// the order of notYetAdded.
+		const auto position = std::make_shared<int>(0);
+		const auto nextProxy = [=]() -> MTP::ProxyData {
+			const auto &acc = notYetAdded[std::min(
+				*position,
+				int(notYetAdded.size()) - 1)];
+			++*position;
+			const auto pool = nextPoolProxy();
+			return (pool.type != MTP::ProxyData::Type::None)
+				? pool
+				: acc.proxy;
+		};
 		auto authorizations = std::vector<Storage::ForeignTdataAuthorization>();
 		for (const auto &acc : notYetAdded) {
 			auto auth = Storage::ForeignTdataAuthorization();
@@ -688,9 +703,6 @@ void ImportSessionJsonFolder(std::shared_ptr<Ui::Show> show) {
 						if (acc.pinned) {
 							account->setPinned(true);
 						}
-						if (acc.proxy.type != MTP::ProxyData::Type::None) {
-							account->setProxyOverride(acc.proxy);
-						}
 						if (acc.device.apiId > 0 || !acc.device.deviceModel.isEmpty()) {
 							account->setDeviceOverride(acc.device);
 						}
@@ -704,6 +716,15 @@ void ImportSessionJsonFolder(std::shared_ptr<Ui::Show> show) {
 				show,
 				u"Не удалось импортировать аккаунты: проверьте файлы сессий."_q);
 			return;
+		}
+
+		// Like a tdata import: language / time zone follow the account's
+		// phone number (or proxy) unless the JSON carried its own.
+		for (const auto &accPtr : imported) {
+			if (accPtr->deviceOverride().systemLangCode.isEmpty()
+				&& !AddAccounts::ApplyPickedListGeo(accPtr)) {
+				AutoDeviceGeo(accPtr);
+			}
 		}
 
 		const auto hadSession = domain.started() && domain.active().sessionExists();
@@ -754,18 +775,10 @@ void ImportSessionJsonFolder(std::shared_ptr<Ui::Show> show) {
 				.arg(imported.size()));
 	};
 
-	// Check if any accounts have no proxy in their JSON
-	const auto needsProxy = std::any_of(notYetAdded.begin(), notYetAdded.end(), [](const SessionJsonAccount &a) {
-		return a.proxy.type == MTP::ProxyData::Type::None;
-	});
-
-	if (needsProxy) {
-		show->showBox(MakeMultiProxyBox([=](Fn<MTP::ProxyData()> nextProxy) {
-			runImport(nextProxy);
-		}));
-	} else {
-		runImport([] { return MTP::ProxyData(); });
-	}
+	// Always asks for the proxy list, as the tdata import does.
+	show->showBox(MakeMultiProxyBox([=](Fn<MTP::ProxyData()> nextProxy) {
+		runImport(nextProxy);
+	}));
 }
 
 } // namespace Settings

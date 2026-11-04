@@ -72,8 +72,8 @@ class GgtgSyncAccountsActivity : BaseFragment() {
         }
         GgtgUi.addCard(root, refreshRow, top = 8f)
 
-        GgtgUi.addCard(root, GgtgUi.infoCard(context, R.drawable.msg_channel, "Синхронизация в обратную сторону",
-            "Все активные аккаунты с этого телефона автоматически доступны в списке на Mac («Настройки» → «Синхронизация» → «Аккаунты с телефона Android»). Никаких файлов пересылать вручную не требуется."), top = 14f)
+        GgtgUi.addCard(root, GgtgUi.infoCard(context, R.drawable.msg_channel, "Аккаунты этого телефона на Mac",
+            "На Mac: «Синхронизация» → «Аккаунты с телефона Android» → «Войти по QR». Телефон сам подтвердит вход этим аккаунтом, прокси, язык и время берутся с аккаунта. Для аккаунтов Mac на телефоне код тоже приходит сам."), top = 14f)
 
         root.addView(GgtgUi.spacer(context))
 
@@ -219,6 +219,7 @@ class GgtgSyncAccountsActivity : BaseFragment() {
             try {
                 uc.clearConfig()
                 ConnectionsManager.setProxySettingsForAccount(freeSlot, false, "", 0, "", "", "")
+                cm.setAsleep(true)
             } catch (_: Throwable) {}
         }
 
@@ -264,6 +265,10 @@ class GgtgSyncAccountsActivity : BaseFragment() {
 
         val flags = ConnectionsManager.RequestFlagWithoutLogin or ConnectionsManager.RequestFlagFailOnServerErrors
 
+        // ggtg: a free slot is kept asleep (no network) by earlier imports / cleanups; without
+        // waking it the code request never leaves the phone and just times out
+        cm.setAsleep(false)
+
         // 3. Send code
         process.log("Запрос кода в Telegram")
         progress.setWorkingText("+${acc.phone}: запрос кода…")
@@ -285,8 +290,11 @@ class GgtgSyncAccountsActivity : BaseFragment() {
 
         val phoneCodeHash = sent.phone_code_hash
 
-        // 4. Ask code from Desktop session
-        val code = progress.askCodeSuspend(
+        // 4. The code lands in Telegram on the Mac: it passes it back by itself (the sync); by hand only if it does not
+        process.log("Ждём код от Mac")
+        progress.setWorkingText("+${acc.phone}: ждём код от Mac…")
+        val auto = GgtgSyncTransport.requestLoginCode(acc.userId, 75_000)
+        val code = if (!auto.isNullOrBlank()) auto else progress.askCodeSuspend(
             acc.phone,
             "Код подтверждения отправлен в Telegram на Mac\nдля +${acc.phone}"
         )

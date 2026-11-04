@@ -97,6 +97,8 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "ui/widgets/buttons.h"
 #include "ui/widgets/checkbox.h"
 #include "ui/widgets/labels.h"
+#include "ui/widgets/fields/input_field.h"
+#include "ui/layers/generic_box.h"
 #include "ui/widgets/menu/menu_add_action_callback.h"
 #include "ui/widgets/menu/menu_add_action_callback_factory.h"
 #include "ui/widgets/popup_menu.h"
@@ -1780,7 +1782,7 @@ Section DetailsFiller::makeInfo() {
 					const auto dateLine = addInfoOneLine(
 						u"Примерная дата регистрации"_q,
 						rpl::single(TextWithEntities{ dateValue }),
-						u"Копировать дату"_q,
+						u"Уточнить дату"_q,
 						st::infoProfileLabeledPadding,
 						st::popupMenuWithIcons);
 					const auto dateText = dateLine.text;
@@ -1792,6 +1794,70 @@ Section DetailsFiller::makeInfo() {
 					if (dateContainer) {
 						dateContainer->setCursor(style::cur_pointer);
 					}
+
+					// ggtg: Telegram itself knows the month and year of registration (the "Registration" line
+					// of the new-contact card, sent only when a stranger writes first); ask for it.
+					const auto askTelegram = [=](Fn<void()> saved) {
+						user->session().api().request(MTPmessages_GetPeerSettings(
+							user->input()
+						)).done([=](const MTPmessages_PeerSettings &result) {
+							const auto &settings = result.match([&](const auto &d) -> const MTPPeerSettings & {
+								return d.vsettings();
+							});
+							const auto month = settings.match([&](const MTPDpeerSettings &d) {
+								const auto raw = d.vregistration_month();
+								return raw ? QString::fromUtf8(raw->v) : QString();
+							});
+							const auto when = Ggtg::ParseRegistrationMonth(month);
+							if (when <= 0) {
+								controller->showToast(u"Telegram не сообщает дату для этого аккаунта (она приходит, только когда пишет незнакомый человек)"_q);
+								return;
+							}
+							Ggtg::AddIdCalibration(rawUserId, when);
+							controller->showToast(u"Дата уточнена: "_q + month + u". Откройте профиль заново."_q);
+							saved();
+						}).fail([=] {
+							controller->showToast(u"Не удалось получить данные от Telegram"_q);
+						}).send();
+					};
+					// A click on the date: the month and year as Telegram shows them to this person; the program
+					// remembers "this id registered then" and dates other accounts by it more exactly.
+					const auto showRefineBox = [=] {
+						controller->uiShow()->showBox(Box([=](not_null<Ui::GenericBox*> box) {
+							box->setTitle(rpl::single(u"Дата регистрации"_q));
+							box->addRow(
+								object_ptr<Ui::FlatLabel>(
+									box,
+									u"Введите месяц и год регистрации так, как их показывает Telegram "
+										"(например: 03.2025 или март 2025). Программа запомнит дату "
+										"для этого ID и будет точнее оценивать другие аккаунты."_q,
+									st::boxLabel),
+								st::boxRowPadding);
+							const auto field = box->addRow(
+								object_ptr<Ui::InputField>(
+									box,
+									st::defaultInputField,
+									rpl::single(u"Месяц и год"_q)),
+								st::boxRowPadding);
+							const auto save = [=] {
+								const auto when = Ggtg::ParseRegistrationMonth(field->getLastText());
+								if (when <= 0) {
+									field->showError();
+									return;
+								}
+								Ggtg::AddIdCalibration(rawUserId, when);
+								controller->showToast(u"Дата уточнена. Откройте профиль заново."_q);
+								box->closeBox();
+							};
+							field->submits() | rpl::on_next(save, field->lifetime());
+							box->setFocusCallback([=] { field->setFocusFast(); });
+							box->addButton(tr::lng_settings_save(), save);
+							box->addLeftButton(rpl::single(u"Спросить у Telegram"_q), [=] {
+								askTelegram([=] { box->closeBox(); });
+							});
+							box->addButton(tr::lng_cancel(), [=] { box->closeBox(); });
+						}));
+					};
 
 					const auto copyDate = [=] {
 						TextUtilities::SetClipboardText(
@@ -1810,29 +1876,8 @@ Section DetailsFiller::makeInfo() {
 						// ggtg: Telegram itself knows the month and year of registration (the "Registration" line
 						// of the new-contact card); ask for it and feed it to the id -> date calibration.
 						dateState->menu->addAction(
-							u"Уточнить дату по Telegram"_q,
-							[=] {
-								user->session().api().request(MTPmessages_GetPeerSettings(
-									user->input()
-								)).done([=](const MTPmessages_PeerSettings &result) {
-									const auto &settings = result.match([&](const auto &d) -> const MTPPeerSettings & {
-										return d.vsettings();
-									});
-									const auto month = settings.match([&](const MTPDpeerSettings &d) {
-										const auto raw = d.vregistration_month();
-										return raw ? QString::fromUtf8(raw->v) : QString();
-									});
-									const auto when = Ggtg::ParseRegistrationMonth(month);
-									if (when <= 0) {
-										controller->showToast(u"Telegram не сообщает дату для этого аккаунта (она приходит, только когда пишет незнакомый человек)"_q);
-										return;
-									}
-									Ggtg::AddIdCalibration(rawUserId, when);
-									controller->showToast(u"Дата уточнена: "_q + month + u". Откройте профиль заново."_q);
-								}).fail([=] {
-									controller->showToast(u"Не удалось получить данные от Telegram"_q);
-								}).send();
-							},
+							u"Указать месяц и год…"_q,
+							showRefineBox,
 							&st::menuIconInfo);
 						dateState->menu->addAction(
 							u"Копировать дату"_q,
@@ -1861,7 +1906,7 @@ Section DetailsFiller::makeInfo() {
 							const auto me = static_cast<QMouseEvent*>(e.get());
 							if (me->button() == Qt::LeftButton) {
 								if ((me->globalPos() - dateState->pressPos).manhattanLength() < QApplication::startDragDistance()) {
-									copyDate();
+									showRefineBox();
 									return base::EventFilterResult::Cancel;
 								}
 							}

@@ -423,6 +423,20 @@ object GgtgDevice {
      */
     @JvmOverloads
     @JvmStatic
+    // ggtg: set by the import flows while they run: geo of the chosen proxy list (wins over phone / proxy IP)
+    @Volatile
+    @JvmField
+    var importListGeo: GgtgGeo.GeoMatch? = null
+
+    suspend fun <T> withListGeo(source: GgtgProxySource?, block: suspend () -> T): T {
+        importListGeo = source?.geo()
+        try {
+            return block()
+        } finally {
+            importListGeo = null
+        }
+    }
+
     fun assignNew(slot: Int, device: org.json.JSONObject? = null, isDesktop: Boolean = false): Boolean {
         val rawModel = device?.optString("deviceModel").orEmpty()
         if (rawModel.isNotEmpty()) {
@@ -456,10 +470,13 @@ object GgtgDevice {
                     else -> "eb06d4abfb49dc3eeb1aeb98ae0f581e"
                 }
             }
+            val listGeo = importListGeo
+            val useList = listGeo != null && device.optString("systemLangCode").isEmpty() && !device.has("tzOffset")
             save(
                 slot, model, system,
-                device.optString("systemLangCode"), device.optString("cloudLangCode"),
-                if (device.has("tzOffset")) device.optInt("tzOffset") else null,
+                if (useList) listGeo!!.systemLang.lowercase() else device.optString("systemLangCode"),
+                if (useList) listGeo!!.cloudLang else device.optString("cloudLangCode"),
+                if (useList) listGeo!!.tzOffset else if (device.has("tzOffset")) device.optInt("tzOffset") else null,
                 device.optString("appVersion").ifEmpty {
                     when {
                         isDevIos -> GgtgIosProfiles.randomAppVersion()
@@ -470,13 +487,14 @@ object GgtgDevice {
                 langPack, appId, appHash
             )
             // an export that carried no language / time zone: fit them to the proxy
-            if (device.optString("systemLangCode").isEmpty() && !device.has("tzOffset")) autoGeoAfterProxy(slot)
+            if (!useList && device.optString("systemLangCode").isEmpty() && !device.has("tzOffset")) autoGeoAfterProxy(slot)
             return true
         }
 
         val uc = UserConfig.getInstance(slot)
         val phone = uc.currentUser?.phone.orEmpty()
-        val phoneGeo = if (phone.isNotEmpty()) matchForPhone(phone) else null
+        val phoneGeo = importListGeo?.let { GeoMatch(it.country, it.tzOffset, it.systemLang.lowercase(), it.cloudLang) }
+            ?: if (phone.isNotEmpty()) matchForPhone(phone) else null
 
         val sysLang = phoneGeo?.systemLang ?: "ru-ru"
         val cloudLang = phoneGeo?.cloudLang ?: "ru"

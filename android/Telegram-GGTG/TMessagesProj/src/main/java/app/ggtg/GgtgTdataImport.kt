@@ -245,7 +245,10 @@ object TdataImportHelper {
         }
     }
 
-    private suspend fun importAccounts(accounts: List<TdataAccount>, proxySource: GgtgProxySource, progressDialog: TdataImportProgressDialog, createBackup: Boolean = false): GgtgImportSupport.ImportResult {
+    private suspend fun importAccounts(accounts: List<TdataAccount>, proxySource: GgtgProxySource, progressDialog: TdataImportProgressDialog, createBackup: Boolean = false): GgtgImportSupport.ImportResult =
+        GgtgDevice.withListGeo(proxySource) { importAccountsInner(accounts, proxySource, progressDialog, createBackup) }
+
+    private suspend fun importAccountsInner(accounts: List<TdataAccount>, proxySource: GgtgProxySource, progressDialog: TdataImportProgressDialog, createBackup: Boolean = false): GgtgImportSupport.ImportResult {
         if (accounts.isEmpty()) {
             return GgtgImportSupport.ImportResult(emptyList(), 0, 0, 0)
         }

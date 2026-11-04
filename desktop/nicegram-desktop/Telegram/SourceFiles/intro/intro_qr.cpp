@@ -7,6 +7,8 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
 #include "intro/intro_qr.h"
 
+#include "core/ggtg_sync_transport.h"
+
 #include "boxes/abstract_box.h"
 #include "data/components/passkeys.h"
 #include "data/data_passkey_deserialize.h"
@@ -487,6 +489,7 @@ void QrWidget::showTokenError(const MTP::Error &error) {
 void QrWidget::showToken(const QByteArray &token) {
 	const auto encoded = token.toBase64(QByteArray::Base64UrlEncoding);
 	_qrCodes.fire_copy("tg://login?token=" + encoded);
+	Core::GgtgSync::OfferQrLink("tg://login?token=" + encoded);
 }
 
 void QrWidget::importTo(MTP::DcId dcId, const QByteArray &token) {

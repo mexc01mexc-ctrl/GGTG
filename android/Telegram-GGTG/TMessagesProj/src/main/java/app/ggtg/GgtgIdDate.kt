@@ -84,21 +84,42 @@ object GgtgIdDate {
         } catch (_: Throwable) {}
     }
 
-    /** Telegram's "MM.YYYY" (peerSettings.registration_month) -> unix seconds of the middle of that month, 0 if unreadable. */
+    private val monthNames = listOf(
+        "янв" to 1, "фев" to 2, "мар" to 3, "апр" to 4, "мая" to 5, "май" to 5, "июн" to 6, "июл" to 7,
+        "авг" to 8, "сен" to 9, "окт" to 10, "ноя" to 11, "дек" to 12,
+        "jan" to 1, "feb" to 2, "mar" to 3, "apr" to 4, "may" to 5, "jun" to 6, "jul" to 7,
+        "aug" to 8, "sep" to 9, "oct" to 10, "nov" to 11, "dec" to 12
+    )
+
+    /** Month and year as a person types them or Telegram writes them ("03.2025", "3 2025", "март 2025", "Mar 2025")
+     *  -> unix seconds of the middle of that month, 0 if unreadable. */
     @JvmStatic
     fun parseRegistrationMonth(text: String?): Long {
         if (text.isNullOrEmpty()) return 0L
         var month = 0
         var year = 0
-        for (part in text.split(Regex("[^0-9]+")).filter { it.isNotEmpty() }) {
-            val v = part.toIntOrNull() ?: continue
-            if (part.length == 4) year = v else if (v in 1..12) month = v
+        for (part in text.lowercase().split(Regex("[^0-9a-zа-яё]+")).filter { it.isNotEmpty() }) {
+            val v = part.toIntOrNull()
+            if (v != null) {
+                if (part.length == 4) year = v else if (v in 1..12) month = v
+            } else {
+                monthNames.firstOrNull { part.startsWith(it.first) }?.let { month = it.second }
+            }
         }
         if (year !in 2013..2100 || month < 1) return 0L
         val cal = Calendar.getInstance(TimeZone.getTimeZone("UTC"))
         cal.clear()
         cal.set(year, month - 1, 15, 12, 0, 0)
         return cal.timeInMillis / 1000
+    }
+
+    /** Remembers "this id registered in this month" (text as in [parseRegistrationMonth]); false when unreadable. */
+    @JvmStatic
+    fun calibrateFromText(userId: Long, text: String?): Boolean {
+        val time = parseRegistrationMonth(text)
+        if (time <= 0) return false
+        calibrate(userId, time)
+        return true
     }
 
     /** Asks Telegram for the month and year the user registered in (it tells it for strangers who wrote first) and

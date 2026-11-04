@@ -293,6 +293,11 @@ struct StoredSession {
 	QString source;
 	QString note;
 	QString state; // "ok", "revoked" or empty (not checked).
+	// Device family it was made for: "desktop", "android", "ios" or empty
+	// (not known - see Platform(), which then guesses from the old fields).
+	QString platform;
+	// The session the account works on right now.
+	bool current = false;
 	qint64 createdAt = 0;
 	qint64 checkedAt = 0;
 	quint64 hash = 0;
@@ -327,6 +332,8 @@ struct StoredSession {
 		{ "source", entry.source },
 		{ "note", entry.note },
 		{ "state", entry.state },
+		{ "platform", entry.platform },
+		{ "current", entry.current },
 		{ "createdAt", double(entry.createdAt) },
 		{ "checkedAt", double(entry.checkedAt) },
 		{ "hash", QString::number(entry.hash) },
@@ -348,6 +355,8 @@ struct StoredSession {
 	result.source = object["source"].toString();
 	result.note = object["note"].toString();
 	result.state = object["state"].toString();
+	result.platform = object["platform"].toString();
+	result.current = object["current"].toBool();
 	result.createdAt = qint64(object["createdAt"].toDouble());
 	result.checkedAt = qint64(object["checkedAt"].toDouble());
 	result.hash = object["hash"].toString().toULongLong();
@@ -464,28 +473,88 @@ inline void RemoveStored(const QString &id) {
 		|| entry.role == u"previous"_q;
 }
 
-// Labels for UI representation (strict UI style: official Telegram wording, no emoji).
-[[nodiscard]] inline QString RoleTitle(const QString &role) {
-	if (role == u"backup"_q) {
-		return u"резервная"_q;
-	} else if (role == u"anti_theft_backup"_q) {
-		return u"резервная (анти-угон)"_q;
-	} else if (role == u"purchased"_q) {
-		return u"купленная"_q;
-	} else if (role == u"duplicate"_q) {
-		return u"дублированная"_q;
-	} else if (role == u"imported"_q) {
-		return u"импортированная"_q;
-	} else if (role == u"exported"_q) {
-		return u"экспортированная"_q;
-	} else if (role == u"android"_q) {
-		return u"Android"_q;
-	} else if (role == u"desktop"_q) {
-		return u"десктоп"_q;
+// One vocabulary for the UI (strict UI style: official Telegram wording, no
+// emoji). Whatever the stored role string is, a session is one of four kinds:
+//  - original: bought (tdata / session + JSON), kept untouched;
+//  - reserve: a spare of ours, the account can be switched onto it;
+//  - handed: given away (another device, GGTG for Android, ...);
+//  - former: the working session that was left by a swap.
+[[nodiscard]] inline QString Kind(const QString &role) {
+	if (role == u"purchased"_q || role == u"imported"_q) {
+		return u"original"_q;
+	} else if (role == u"exported"_q || role == u"android"_q) {
+		return u"handed"_q;
 	} else if (role == u"previous"_q) {
-		return u"бывшая рабочая"_q;
+		return u"former"_q;
 	}
-	return u"сохранённая"_q;
+	return u"reserve"_q;
+}
+
+[[nodiscard]] inline QString RoleTitle(const QString &role) {
+	const auto kind = Kind(role);
+	if (kind == u"original"_q) {
+		return u"оригинал"_q;
+	} else if (kind == u"handed"_q) {
+		return u"передана"_q;
+	} else if (kind == u"former"_q) {
+		return u"бывшая рабочая"_q;
+	} else if (role == u"anti_theft_backup"_q) {
+		return u"запасная (анти-угон)"_q;
+	} else if (role == u"stored"_q || role.isEmpty()) {
+		return u"сохранённая"_q;
+	}
+	return u"запасная"_q;
+}
+
+[[nodiscard]] inline QString Platform(const StoredSession &entry) {
+	if (!entry.platform.isEmpty()) {
+		return entry.platform;
+	}
+	// Older entries: guess from what they were saved with.
+	const auto has = [&](const QString &text) {
+		return entry.role.contains(text, Qt::CaseInsensitive)
+			|| entry.source.contains(text, Qt::CaseInsensitive)
+			|| entry.note.contains(text, Qt::CaseInsensitive);
+	};
+	if (has(u"android"_q)) {
+		return u"android"_q;
+	} else if (has(u"ios"_q)) {
+		return u"ios"_q;
+	} else if (entry.role == u"desktop"_q) {
+		return u"desktop"_q;
+	}
+	return QString();
+}
+
+[[nodiscard]] inline QString PlatformTitle(const QString &platform) {
+	if (platform == u"android"_q) {
+		return u"Android"_q;
+	} else if (platform == u"ios"_q) {
+		return u"iOS"_q;
+	} else if (platform == u"desktop"_q) {
+		return u"десктоп"_q;
+	}
+	return QString();
+}
+
+inline constexpr auto kActiveNote = "активная (текущая)";
+
+[[nodiscard]] inline bool IsCurrent(const StoredSession &entry) {
+	// Older entries kept this only in the note text.
+	return entry.current || (entry.note == QString::fromUtf8(kActiveNote));
+}
+
+// "запасная · Android", "передана · iOS", "оригинал", ...; "текущая" first
+// when the account works on it.
+[[nodiscard]] inline QString SessionTitle(const StoredSession &entry) {
+	auto result = IsCurrent(entry)
+		? (u"текущая · "_q + RoleTitle(entry.role))
+		: RoleTitle(entry.role);
+	const auto platform = PlatformTitle(Platform(entry));
+	if (!platform.isEmpty()) {
+		result += u" · "_q + platform;
+	}
+	return result;
 }
 
 // Anti-theft trust cooldown: Telegram requires a newly created authorization
@@ -537,6 +606,48 @@ inline void UpdateStoredRole(
 		}
 	}
 	SaveVault(entries);
+}
+
+// Exactly one session of an account is the current one. The user's own note
+// stays as it is; the old marker kept in the note text is cleared.
+inline void MarkCurrent(const QString &id) {
+	auto entries = LoadVault();
+	auto userId = QString();
+	for (const auto &entry : entries) {
+		if (entry.id == id) {
+			userId = entry.userId;
+		}
+	}
+	if (userId.isEmpty()) {
+		return;
+	}
+	for (auto &entry : entries) {
+		if (entry.userId == userId) {
+			entry.current = (entry.id == id);
+			if (entry.note == QString::fromUtf8(kActiveNote)) {
+				entry.note = QString();
+			}
+		}
+	}
+	SaveVault(entries);
+}
+
+// Only the latest "бывшая рабочая" of an account is kept: each swap leaves
+// one, and a list of dozens of them says nothing.
+inline void PruneFormer(const QString &userId, const QString &keepId) {
+	auto entries = LoadVault();
+	auto drop = std::vector<QString>();
+	for (const auto &entry : entries) {
+		if (entry.userId == userId
+			&& entry.id != keepId
+			&& entry.role == u"previous"_q
+			&& !IsCurrent(entry)) {
+			drop.push_back(entry.id);
+		}
+	}
+	for (const auto &id : drop) {
+		RemoveStored(id);
+	}
 }
 
 inline void UpdateStoredNote(const QString &id, const QString &note) {

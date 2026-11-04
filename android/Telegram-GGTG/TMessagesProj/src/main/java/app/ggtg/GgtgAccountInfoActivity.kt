@@ -405,21 +405,19 @@ class GgtgAccountInfoActivity(private val slot: Int, private val onChanged: () -
         val backupText = if (hasBackup) "Доступно сессий: $backupCount" else "Нет (нажмите, чтобы создать)"
         line(context, account, "Сессии аккаунта", backupText, accent = true) {
             val act = context as? androidx.fragment.app.FragmentActivity ?: return@line
+            // what the account runs on first, then making / switching spares, then protection and transfer
             val items = ArrayList<String>()
-            items.add("Защита от угона (Анти-угон)")
-            items.add("Смена номера (миграция)")
+            items.add("Устройства и активные сессии")
             if (hasBackup) {
                 if (backups.size == 1) {
-                    items.add("Перейти на ${GgtgSessions.roleTitle(backups[0].role).lowercase()}")
+                    items.add("Перейти на ${GgtgSessions.sessionTitle(backups[0]).lowercase()}")
                 } else {
                     items.add("Выбрать сессию для переключения ($backupCount)")
                 }
-                items.add("Создать резервную сессию")
-            } else {
-                items.add("Создать резервную сессию")
             }
+            items.add("Создать резервную сессию")
+            items.add("Защита от угона (Анти-угон)")
             items.add("Принять сессию с Desktop")
-            items.add("Устройства и активные сессии")
 
             androidx.appcompat.app.AlertDialog.Builder(context)
                 .setTitle("Сессии аккаунта")
@@ -455,12 +453,12 @@ class GgtgAccountInfoActivity(private val slot: Int, private val onChanged: () -
                             val pickAction: (GgtgSessions.StoredSession) -> Unit = { target ->
                                 val actions = arrayOf("Переключить аккаунт на эту сессию", "Подписать сессию (где используется)")
                                 androidx.appcompat.app.AlertDialog.Builder(context)
-                                    .setTitle(GgtgSessions.roleTitle(target.role) + if (target.note.isNotEmpty()) " (${target.note})" else "")
+                                    .setTitle(GgtgSessions.sessionTitle(target) + if (target.note.isNotEmpty()) " (${target.note})" else "")
                                     .setItems(actions) { _, actIdx ->
                                         if (actIdx == 0) {
                                             val warning = GgtgSessions.switchWarning(target)
                                             val msg = (if (!warning.isNullOrEmpty()) "Внимание: $warning\n\n" else "") +
-                                                "Текущая сессия сохранится в хранилище, а аккаунт переключится на эту сессию (${GgtgSessions.roleTitle(target.role)})."
+                                                "Текущая сессия сохранится в хранилище, а аккаунт переключится на эту сессию (${GgtgSessions.sessionTitle(target)})."
                                             androidx.appcompat.app.AlertDialog.Builder(context)
                                                 .setTitle("Переключить сессию?")
                                                 .setMessage(msg)
@@ -491,7 +489,7 @@ class GgtgAccountInfoActivity(private val slot: Int, private val onChanged: () -
                                 pickAction(backups[0])
                             } else {
                                 val sessionNames = backups.map { s ->
-                                    val title = GgtgSessions.roleTitle(s.role)
+                                    val title = GgtgSessions.sessionTitle(s)
                                     val dev = s.device?.optString("deviceModel", "")?.ifEmpty { null }
                                     val dateStr = java.text.SimpleDateFormat("dd.MM.yyyy", java.util.Locale.getDefault()).format(java.util.Date(s.createdAt * 1000))
                                     val noteStr = if (s.note.isNotEmpty()) " · ${s.note}" else ""

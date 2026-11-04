@@ -249,6 +249,8 @@ object GgtgSync {
                 put("userId", s.userId.toString())
                 if (s.phone.isNotEmpty()) put("phone", s.phone)
                 if (s.role.isNotEmpty()) put("role", s.role)
+                GgtgSessions.platformOf(s).takeIf { it.isNotEmpty() }?.let { put("platform", it) }
+                if (GgtgSessions.isCurrent(s)) put("current", true)
                 if (s.note.isNotEmpty()) put("note", s.note)
                 if (s.createdAt > 0L) put("createdAt", s.createdAt)
                 if (s.hash != 0L) put("hash", s.hash.toString())
@@ -510,6 +512,8 @@ object GgtgSync {
                         id = if (remoteId.isNotEmpty()) remoteId else "${System.currentTimeMillis()}_${(1000..9999).random()}",
                         userId = uId,
                         role = role.ifEmpty { "stored" },
+                        platform = obj.optString("platform"),
+                        current = obj.optBoolean("current", false),
                         source = "sync",
                         note = note,
                         state = "ok",

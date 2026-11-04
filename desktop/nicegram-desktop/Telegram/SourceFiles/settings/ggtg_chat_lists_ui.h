@@ -238,20 +238,40 @@ constexpr auto kPage = 100;
 		|| entry.accountName.contains(query, Qt::CaseInsensitive);
 }
 
-[[nodiscard]] inline int CountEntriesForLiveAccounts(const Core::GgtgLists::List &list) {
-	auto liveAccounts = base::flat_set<quint64>();
+[[nodiscard]] inline base::flat_set<quint64> LiveAccountIds() {
+	auto result = base::flat_set<quint64>();
 	for (const auto &[index, account] : Core::App().domain().accounts()) {
 		if (Main::AccountIsLive(account.get()) && account->sessionExists()) {
-			liveAccounts.insert(quint64(account->session().user()->id.value));
+			result.insert(quint64(account->session().user()->id.value));
 		}
 	}
-	auto count = 0;
-	for (const auto &entry : list.entries) {
-		if (liveAccounts.contains(entry.account)) {
-			++count;
-		}
-	}
-	return count;
+	return result;
+}
+
+// Every chat stays in its list, also when its account is no longer in the
+// program: only the user takes a chat out.
+[[nodiscard]] inline int CountEntriesForLiveAccounts(const Core::GgtgLists::List &list) {
+	return int(list.entries.size());
+}
+
+[[nodiscard]] inline QString EntryTitle(const Core::GgtgLists::Entry &entry) {
+	return entry.name.isEmpty() ? (u"@"_q + entry.username) : entry.name;
+}
+
+[[nodiscard]] inline QString EntrySubtitle(
+		const Core::GgtgLists::Entry &entry,
+		const base::flat_set<quint64> &live,
+		const QString &listName = QString()) {
+	return (listName.isEmpty() ? QString() : (listName + u" · "_q))
+		+ (entry.username.isEmpty()
+			? QString()
+			: (u"@"_q + entry.username + u" · "_q))
+		+ entry.accountName
+		+ (live.contains(entry.account)
+			? QString()
+			: u" (аккаунта нет в программе)"_q)
+		+ u" · "_q
+		+ QDateTime::fromSecsSinceEpoch(entry.at).toString(u"dd.MM.yyyy"_q);
 }
 
 } // namespace ChatListsUi
@@ -316,15 +336,10 @@ inline void ShowChatListBox(
 			wrap->clear();
 			const auto again = [=] { Ui::PostponeCall(box, *rebuild); };
 			const auto query = search->getLastText().trimmed();
-			auto liveAccounts = base::flat_set<quint64>();
-			for (const auto &[index, account] : Core::App().domain().accounts()) {
-				if (Main::AccountIsLive(account.get()) && account->sessionExists()) {
-					liveAccounts.insert(quint64(account->session().user()->id.value));
-				}
-			}
+			const auto liveAccounts = ChatListsUi::LiveAccountIds();
 			auto entries = std::vector<Lists::Entry>();
 			for (const auto &entry : list->entries) {
-				if (liveAccounts.contains(entry.account) && ChatListsUi::Matches(entry, query)) {
+				if (ChatListsUi::Matches(entry, query)) {
 					entries.push_back(entry);
 				}
 			}
@@ -347,16 +362,10 @@ inline void ShowChatListBox(
 				const auto entry = entries[i];
 				auto wrapOwned = object_ptr<Ui::RpWidget>(wrap);
 				const auto row = wrapOwned.data();
-				const auto name = entry.name.isEmpty()
-					? (u"@"_q + entry.username)
-					: entry.name;
-				const auto subtitle = (entry.username.isEmpty()
-						? QString()
-						: (u"@"_q + entry.username + u" · "_q))
-					+ entry.accountName
-					+ u" · "_q
-					+ QDateTime::fromSecsSinceEpoch(entry.at).toString(
-						u"dd.MM.yyyy"_q);
+				const auto name = ChatListsUi::EntryTitle(entry);
+				const auto subtitle = ChatListsUi::EntrySubtitle(
+					entry,
+					liveAccounts);
 				const auto info = Ui::CreateChild<Ggtg::InfoRow>(
 					row,
 					rpl::single(Ggtg::InfoRowData{
@@ -466,6 +475,13 @@ inline void ShowChatListBox(
 		namespace Lists = Core::GgtgLists;
 		box->setWidth(st::boxWideWidth);
 		box->setTitle(rpl::single(u"Списки чатов"_q));
+		// One search over all the lists, also chats of accounts that are
+		// no longer in the program.
+		const auto search = box->addRow(object_ptr<Ui::InputField>(
+			box,
+			st::defaultInputField,
+			rpl::single(u"Найти чат во всех списках"_q),
+			QString()));
 		const auto wrap = box->addRow(
 			object_ptr<Ui::VerticalLayout>(box),
 			style::margins());
@@ -475,6 +491,54 @@ inline void ShowChatListBox(
 			*shown = Lists::Version();
 			const Ggtg::ScrollKeeper keepScroll(wrap);
 			wrap->clear();
+			const auto query = search->getLastText().trimmed();
+			if (!query.isEmpty()) {
+				struct Found {
+					Lists::Entry entry;
+					QString list;
+				};
+				auto found = std::vector<Found>();
+				for (const auto &list : Lists::Lists()) {
+					for (const auto &entry : list.entries) {
+						if (ChatListsUi::Matches(entry, query)) {
+							found.push_back({ entry, list.name });
+						}
+					}
+				}
+				std::stable_sort(found.begin(), found.end(), [](
+						const Found &a,
+						const Found &b) {
+					return a.entry.at > b.entry.at;
+				});
+				if (found.empty()) {
+					wrap->add(object_ptr<Ggtg::EmptyState>(
+						wrap,
+						u"Ничего не найдено."_q));
+					return;
+				}
+				const auto live = ChatListsUi::LiveAccountIds();
+				const auto count = std::min(int(found.size()), 200);
+				for (auto i = 0; i != count; ++i) {
+					const auto entry = found[i].entry;
+					wrap->add(
+						object_ptr<Ggtg::ActionRow>(
+							wrap,
+							rpl::single(ChatListsUi::EntryTitle(entry)
+								+ u"\n"_q
+								+ ChatListsUi::EntrySubtitle(
+									entry,
+									live,
+									found[i].list)),
+							QString(),
+							&st::menuIconChats),
+						st::boxRowPadding
+					)->setClickedCallback([=] {
+						OpenListedChat(entry);
+					});
+				}
+				Ui::AddSkip(wrap);
+				return;
+			}
 			if (Lists::Lists().empty()) {
 				wrap->add(object_ptr<Ggtg::EmptyState>(
 					wrap,
@@ -499,6 +563,10 @@ inline void ShowChatListBox(
 			Ui::AddSkip(wrap);
 		};
 		(*rebuild)();
+		search->changes(
+		) | rpl::on_next([=] {
+			(*rebuild)();
+		}, search->lifetime());
 		box->addButton(rpl::single(u"Новый список"_q), [=] {
 			ShowListNamePrompt(
 				box->uiShow(),

@@ -422,18 +422,10 @@ class GgtgAccountManagerActivity : BaseFragment() {
         }
         if (trashCount > 0) chip(row, "Корзина", trashCount, viewTrash, false, onClick = { viewTrash = true; filterFolder = null; exitSelectionSilently(); rebuildAll() }, trashIcon = true)
 
-        // status filters: how many accounts of the chosen folder are free / in trouble / without a proxy
-        val srow = statusChips ?: return
-        srow.removeAllViews()
-        val base = inScope()
-        val free = base.count { statusKind(it) == STATUS_FREE }
-        val problem = base.count { statusKind(it) == STATUS_PROBLEM }
-        val noProxy = base.count { statusKind(it) == STATUS_NOPROXY }
-        if (statusFilter == STATUS_FREE && free == 0 || statusFilter == STATUS_PROBLEM && problem == 0 || statusFilter == STATUS_NOPROXY && noProxy == 0) statusFilter = STATUS_ALL
-        chip(srow, "Любой статус", base.size, statusFilter == STATUS_ALL, onClick = { statusFilter = STATUS_ALL; rebuildAll() })
-        if (free > 0) chip(srow, "Свободны", free, statusFilter == STATUS_FREE, tint = 0xFF4CD964.toInt(), onClick = { statusFilter = STATUS_FREE; rebuildAll() })
-        if (problem > 0) chip(srow, "Проблемы", problem, statusFilter == STATUS_PROBLEM, tint = color(Theme.key_text_RedRegular), onClick = { statusFilter = STATUS_PROBLEM; rebuildAll() })
-        if (noProxy > 0) chip(srow, "Без прокси", noProxy, statusFilter == STATUS_NOPROXY, tint = 0xFFFF9F0A.toInt(), onClick = { statusFilter = STATUS_NOPROXY; rebuildAll() })
+        // the status is written on every account's card; no status filter chips
+        statusFilter = STATUS_ALL
+        statusChips?.removeAllViews()
+        (statusChips?.parent as? View)?.visibility = View.GONE
     }
 
     // A change of the view (another folder, trash) drops the selection.
@@ -1003,7 +995,7 @@ class GgtgAccountManagerActivity : BaseFragment() {
             })
         }
         if (isCurrent) addTag(tag(context, "текущий", accent))
-        if (status.rank != 0) addTag(tag(context, status.text, status.color))
+        addTag(tag(context, status.text, status.color))
         val folder = uc.ncgFolder.orEmpty()
         val folderOutsideGroup = folder.isNotEmpty() && !(filterFolder == null && query.isEmpty() && statusFilter == STATUS_ALL && !viewTrash)
         if (folderOutsideGroup) addTag(tag(context, folder, gray, R.drawable.msg_folders))
@@ -1024,12 +1016,21 @@ class GgtgAccountManagerActivity : BaseFragment() {
             }, LinearLayout.LayoutParams(dp(40f), dp(40f)).apply { gravity = Gravity.CENTER_VERTICAL })
         }
 
-        card.setOnClickListener { if (selectionMode) toggleSelected(slot) else showAccountMenu(slot) }
+        card.setOnClickListener { if (selectionMode) toggleSelected(slot) else openAccount(slot) }
         card.setOnLongClickListener {
             if (selectionMode) toggleSelected(slot) else enterSelection(slot)
             true
         }
         return card
+    }
+
+    // A tap opens the account itself (its chat list); the menu stays on the "⋮" button.
+    private fun openAccount(slot: Int) {
+        if (slot == UserConfig.selectedAccount) {
+            finishFragment()
+        } else {
+            LaunchActivity.instance?.switchToAccount(slot, true)
+        }
     }
 
     // What can be done with one account.

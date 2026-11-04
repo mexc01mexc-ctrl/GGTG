@@ -12,6 +12,7 @@ import org.telegram.messenger.AccountInstance
 import org.telegram.messenger.AndroidUtilities
 import org.telegram.messenger.ApplicationLoader
 import org.telegram.messenger.FileLog
+import org.telegram.messenger.NotificationCenter
 import org.telegram.messenger.SendMessagesHelper
 import org.telegram.messenger.UserConfig
 import org.telegram.tgnet.ConnectionsManager
@@ -107,6 +108,7 @@ object GgtgSyncTransport {
                 }
                 stem.startsWith("ggtg-accounts-pack-") -> out.add(Remote(m.id, "pack", stem.substring(19), doc))
                 stem.startsWith("ggtg-accounts-keys-") -> out.add(Remote(m.id, "keys", stem.substring(19), doc))
+                stem.startsWith("ggtg-accounts-ctl-") -> out.add(Remote(m.id, "ctl", stem.substring(18), doc))
             }
         }
         return out
@@ -353,6 +355,108 @@ object GgtgSyncTransport {
     private fun tick() {
         val settings = GgtgSync.loadSettings()
         if (settings.enabled && !running && mainSlot() != null) runSync()
+        if (settings.enabled && mainSlot() != null) pollControl()
+    }
+
+    // ---- control messages between the devices (login code / QR login) ----
+    // Small encrypted files "ggtg-accounts-ctl-<device>.bin" in the main account's "Saved messages".
+    // They are taken the moment they arrive and deleted once handled. Same as the desktop.
+
+    private val codeWaiters = java.util.concurrent.ConcurrentHashMap<Long, kotlinx.coroutines.CompletableDeferred<String>>()
+    private val watchedSlots = HashSet<Int>()
+    @Volatile private var controlPolling = false
+
+    private val controlObserver = object : NotificationCenter.NotificationCenterDelegate {
+        override fun didReceivedNotification(id: Int, account: Int, vararg args: Any?) {
+            if (id != NotificationCenter.didReceiveNewMessages) return
+            val main = mainSlot() ?: return
+            if (account != main) return
+            val dialogId = args.getOrNull(0) as? Long ?: return
+            if (dialogId != UserConfig.getInstance(main).clientUserId) return
+            val list = args.getOrNull(1) as? List<*> ?: return
+            val ours = list.any { item ->
+                val media = (item as? org.telegram.messenger.MessageObject)?.messageOwner?.media as? TLRPC.TL_messageMediaDocument
+                val name = media?.document?.attributes?.filterIsInstance<TLRPC.TL_documentAttributeFilename>()?.firstOrNull()?.file_name.orEmpty()
+                name.startsWith("ggtg-accounts-ctl-")
+            }
+            if (ours) pollControl()
+        }
+    }
+
+    private fun watchControl() {
+        val main = mainSlot() ?: return
+        if (!watchedSlots.add(main)) return
+        NotificationCenter.getInstance(main).addObserver(controlObserver, NotificationCenter.didReceiveNewMessages)
+    }
+
+    fun sendControl(message: org.json.JSONObject, done: (Boolean) -> Unit = {}) {
+        sendAccounts("ctl", message.toString().toByteArray(Charsets.UTF_8)) { ok, _ -> done(ok) }
+    }
+
+    /** Asks the Mac (which has this account signed in) for the login code Telegram just sent it. null = none came. */
+    suspend fun requestLoginCode(userId: Long, timeoutMs: Long): String? {
+        val waiter = kotlinx.coroutines.CompletableDeferred<String>()
+        codeWaiters[userId] = waiter
+        return try {
+            sendControl(org.json.JSONObject()
+                .put("type", "code_req")
+                .put("userId", userId.toString())
+                .put("ts", (System.currentTimeMillis() / 1000).toString())) { ok -> if (!ok) waiter.complete("") }
+            withTimeoutOrNull(timeoutMs) { waiter.await() }?.takeIf { it.isNotBlank() }
+        } finally {
+            codeWaiters.remove(userId)
+        }
+    }
+
+    fun pollControl() {
+        if (controlPolling) return
+        val slot = mainSlot() ?: return
+        controlPolling = true
+        val mine = GgtgSync.loadSettings().deviceId
+        scope.launch {
+            try {
+                val found = searchAll(slot).orEmpty().filter { it.kind == "ctl" && it.device != mine }.sortedBy { it.msgId }
+                for (remote in found) {
+                    val data = download(slot, remote.doc)
+                    val plain = data?.let { GgtgSync.unpack(it, GgtgSync.loadSettings().passphrase) }
+                    deleteIncoming(remote)
+                    if (plain != null) handleControl(org.json.JSONObject(String(plain, Charsets.UTF_8)))
+                }
+            } catch (t: Throwable) {
+                FileLog.e(t)
+            } finally {
+                controlPolling = false
+            }
+        }
+    }
+
+    private suspend fun handleControl(message: org.json.JSONObject) {
+        val userId = message.optString("userId").toLongOrNull() ?: return
+        when (message.optString("type")) {
+            "code" -> codeWaiters[userId]?.complete(message.optString("code"))
+            "qr" -> acceptQr(userId, message.optString("link"))
+        }
+    }
+
+    /** The Mac shows a QR login for an account that is signed in on this phone: confirm it with that account. */
+    private suspend fun acceptQr(userId: Long, link: String) {
+        val prefix = "tg://login?token="
+        if (!link.startsWith(prefix)) return
+        val slot = (0 until UserConfig.MAX_ACCOUNT_COUNT).firstOrNull {
+            UserConfig.getInstance(it).isClientActivated && UserConfig.getInstance(it).clientUserId == userId
+        } ?: return
+        val token = try {
+            android.util.Base64.decode(link.substring(prefix.length).replace('/', '_').replace('+', '-'), android.util.Base64.URL_SAFE)
+        } catch (_: Throwable) { return }
+        val req = TLRPC.TL_auth_acceptLoginToken()
+        req.token = token
+        val (_, err) = rpc(slot, req)
+        FileLog.d("qr login for $userId: ${err?.text ?: "accepted"}")
+        if (err == null) {
+            AndroidUtilities.runOnUIThread {
+                android.widget.Toast.makeText(ApplicationLoader.applicationContext, "Вход на Mac подтверждён: ${GgtgAccounts.label(slot)}", android.widget.Toast.LENGTH_LONG).show()
+            }
+        }
     }
 
     /** Called when the app starts and whenever the settings change. */
@@ -362,6 +466,7 @@ object GgtgSyncTransport {
             AndroidUtilities.cancelRunOnUIThread(afterChange)
             val settings = GgtgSync.loadSettings()
             if (!settings.enabled || settings.passphrase.isEmpty()) return@runOnUIThread
+            watchControl()
             if (!started) {
                 started = true
                 GgtgDb.addListener {

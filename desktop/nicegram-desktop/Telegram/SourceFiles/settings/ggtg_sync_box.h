@@ -18,6 +18,7 @@ For license and exceptions, see https://github.com/telegramdesktop/tdesktop/blob
 #include "data/data_user.h"
 #include "main/main_account.h"
 #include "main/main_domain.h"
+#include "core/ggtg_geo.h"
 #include "main/main_session.h"
 #include "mtproto/mtproto_proxy_data.h"
 #include "settings/ggtg_api_override_box.h"
@@ -133,6 +134,7 @@ inline void AcceptAccountsFromAndroid(
 				auto entry = Sessions::StoredSession();
 				entry.userId = uIdStr;
 				entry.role = u"android"_q;
+				entry.platform = u"android"_q;
 				entry.source = u"android_sync"_q;
 				entry.note = finalNote;
 				entry.phone = account["phone"].toString();
@@ -412,7 +414,7 @@ inline void ShowPeerAccountsFromAndroidBox(
 		box->addRow(
 			object_ptr<Ui::FlatLabel>(
 				box,
-				u"Аккаунты, активные на подключённом телефоне. Выберите аккаунт для добавления на этот Mac."_q,
+				u"Аккаунты, активные на подключённом телефоне. Выберите аккаунт: вход по QR подтвердится на телефоне сам."_q,
 				st::boxDividerLabel),
 			st::boxRowPadding);
 
@@ -458,7 +460,7 @@ inline void ShowPeerAccountsFromAndroidBox(
 				object_ptr<Ggtg::ActionRow>(
 					box,
 					rpl::single(rowText),
-					alreadyOnMac ? QString() : u"Войти"_q),
+					alreadyOnMac ? QString() : u"Войти по QR"_q),
 				st::boxRowPadding);
 
 			if (!alreadyOnMac) {
@@ -469,21 +471,38 @@ inline void ShowPeerAccountsFromAndroidBox(
 						Ggtg::Notice(show, u"Достигнут лимит аккаунтов на компьютере"_q);
 						return;
 					}
+					// Language / time zone follow the account's phone number,
+					// the proxy comes from the phone (see `proxy` above).
+					const auto geo = acc.phone.isEmpty()
+						? std::optional<Core::GgtgGeo::GeoMatch>()
+						: std::make_optional(Core::GgtgGeo::MatchForPhone(acc.phone));
+					Core::GgtgSync::SetQrTarget(acc.userId);
+					const auto prepare = [=](not_null<Main::Domain*> d) {
+						auto &active = d->active();
+						if (!active.sessionExists()) {
+							if (!acc.folder.isEmpty()) {
+								active.setFolderTag(acc.folder);
+							}
+							if (geo) {
+								auto value = active.deviceOverride();
+								value.systemLangCode = geo->systemLang;
+								value.cloudLangCode = geo->cloudLang;
+								value.tzOffset = geo->tzOffset;
+								active.setDeviceOverride(value);
+							}
+						}
+					};
 					if (const auto window = Core::App().activePrimaryWindow()) {
 						window->preventOrInvoke([=] {
 							auto &d = Core::App().domain();
 							d.addActivated(MTP::Environment::Production, proxy);
-							if (!acc.folder.isEmpty() && !d.active().sessionExists()) {
-								d.active().setFolderTag(acc.folder);
-							}
+							prepare(&d);
 						});
 					} else {
 						domain.addActivated(MTP::Environment::Production, proxy);
-						if (!acc.folder.isEmpty() && !domain.active().sessionExists()) {
-							domain.active().setFolderTag(acc.folder);
-						}
+						prepare(&domain);
 					}
-					Ggtg::Notice(show, u"Аккаунт "_q + title + u" добавлен на этот Mac. Введите код подтверждения, который пришёл на телефон."_q);
+					Ggtg::Notice(show, u"Аккаунт "_q + title + u": QR-код отправлен на телефон, вход подтвердится сам (телефон должен быть в сети)."_q);
 				});
 			}
 		}

@@ -178,6 +178,12 @@ object GgtgGeo {
         return GeoMatch("US", -18000, "en-US", "en")
     }
 
+    // ggtg: proxy list names carry the country / phone code, e.g. "Germany (+49)"
+    fun matchForName(name: String): GeoMatch? {
+        val m = Regex("\\(\\+?([0-9]+)\\)").find(name) ?: return null
+        return matchForPhone(m.groupValues[1])
+    }
+
     fun matchForCountry(country: String): GeoMatch {
         val c = country.uppercase().trim()
         val table = mapOf(

@@ -7410,16 +7410,39 @@ public class ProfileActivity extends BaseFragment implements NotificationCenter.
             }
             return true;
         } else if (position == userIdRow) {
-            try {
-                String est = app.ggtg.GgtgIdDate.estimate(userId, app.ggtg.GgtgFakeDetector.photoBound(getMessagesController().getUserFull(userId)));
-                String copyText = !android.text.TextUtils.isEmpty(est) ? est : String.valueOf(userId);
-                android.content.ClipboardManager clipboard = (android.content.ClipboardManager) ApplicationLoader.applicationContext.getSystemService(Context.CLIPBOARD_SERVICE);
-                android.content.ClipData clip = android.content.ClipData.newPlainText("Registration Date", copyText);
-                clipboard.setPrimaryClip(clip);
-                BulletinFactory.of(this).createCopyBulletin(!android.text.TextUtils.isEmpty(est) ? "Дата регистрации скопирована" : "ID скопирован в буфер", resourcesProvider).show();
-            } catch (Exception e) {
-                FileLog.e(e);
-            }
+            // ggtg: a tap asks for the month and year Telegram shows for this person and remembers it for this id
+            // (the id -> date estimate of other accounts gets more exact); copying stays in the long-press menu
+            final android.widget.EditText input = new android.widget.EditText(getParentActivity());
+            input.setSingleLine(true);
+            input.setHint("03.2025 или март 2025");
+            final org.telegram.ui.ActionBar.AlertDialog.Builder builder = new org.telegram.ui.ActionBar.AlertDialog.Builder(getParentActivity(), resourcesProvider);
+            builder.setTitle("Дата регистрации");
+            builder.setMessage("Введите месяц и год регистрации так, как их показывает Telegram. Программа запомнит дату для этого ID и будет точнее оценивать другие аккаунты.");
+            builder.setView(input);
+            builder.setPositiveButton("Сохранить", (d, w) -> {
+                if (app.ggtg.GgtgIdDate.calibrateFromText(userId, input.getText().toString())) {
+                    BulletinFactory.of(this).createSimpleBulletin(R.drawable.msg_info, "Дата уточнена").show();
+                    if (listAdapter != null && userIdRow >= 0) {
+                        listAdapter.notifyItemChanged(userIdRow);
+                    }
+                } else {
+                    BulletinFactory.of(this).createErrorBulletin("Не удалось разобрать месяц и год").show();
+                }
+            });
+            builder.setNeutralButton("Спросить у Telegram", (d, w) -> {
+                app.ggtg.GgtgIdDate.refineFromTelegram(currentAccount, userId, month -> {
+                    if (month == null) {
+                        BulletinFactory.of(this).createErrorBulletin("Telegram не сообщает дату для этого аккаунта (приходит, только когда пишет незнакомый человек)").show();
+                    } else {
+                        BulletinFactory.of(this).createSimpleBulletin(R.drawable.msg_info, "Дата уточнена: " + month).show();
+                        if (listAdapter != null && userIdRow >= 0) {
+                            listAdapter.notifyItemChanged(userIdRow);
+                        }
+                    }
+                });
+            });
+            builder.setNegativeButton("Отмена", null);
+            showDialog(builder.create());
             return true;
         } else if (position == ggtgSourceRow || position == ggtgWriterRow) {
             final TLRPC.User ggtgUser = getMessagesController().getUser(userId);
@@ -16473,22 +16496,6 @@ public class ProfileActivity extends BaseFragment implements NotificationCenter.
             final String text = textToCopy;
             itemOptions.add(R.drawable.msg_copy, copyButton, () -> {
                 AndroidUtilities.addToClipboard(text);
-            });
-        }
-
-        if (position == userIdRow) {
-            // ggtg: Telegram tells the month of registration of a stranger who wrote first - feed it to the id -> date estimate
-            itemOptions.add(R.drawable.msg_info, "Уточнить дату по Telegram", () -> {
-                app.ggtg.GgtgIdDate.refineFromTelegram(currentAccount, userId, month -> {
-                    if (month == null) {
-                        BulletinFactory.of(this).createErrorBulletin("Telegram не сообщает дату для этого аккаунта (приходит, только когда пишет незнакомый человек)").show();
-                    } else {
-                        BulletinFactory.of(this).createSimpleBulletin(R.drawable.msg_info, "Дата уточнена: " + month).show();
-                        if (listAdapter != null && userIdRow >= 0) {
-                            listAdapter.notifyItemChanged(userIdRow);
-                        }
-                    }
-                });
             });
         }
 

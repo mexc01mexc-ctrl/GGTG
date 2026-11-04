@@ -17,6 +17,10 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "core/ggtg_log.h"
 #include "core/ggtg_paths.h"
 #include "data/data_session.h"
+#include "data/data_document.h"
+#include "data/data_media_types.h"
+#include "history/history_item.h"
+#include "base/call_delayed.h"
 #include "data/data_user.h"
 #include "data/scraped_members_db.h"
 #include "history/history.h"
@@ -31,6 +35,10 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 
 #include <QtCore/QDir>
 #include <QtCore/QFile>
+#include <QtCore/QJsonDocument>
+#include <QtCore/QJsonObject>
+#include <QtCore/QRegularExpression>
+#include <map>
 
 namespace Core::GgtgSync {
 namespace {
@@ -300,6 +308,9 @@ void MergeNext(const std::shared_ptr<Round> &round, int index) {
 						} else if (stem.startsWith(u"ggtg-accounts-keys-"_q)) {
 							remote.kind = u"keys"_q;
 							remote.device = stem.mid(19);
+						} else if (stem.startsWith(u"ggtg-accounts-ctl-"_q)) {
+							remote.kind = u"ctl"_q;
+							remote.device = stem.mid(18);
 						} else {
 							return;
 						}
@@ -691,8 +702,9 @@ void Restart() {
 }
 
 void SessionStarted(not_null<Main::Session*> session) {
-	Q_UNUSED(session);
 	Restart();
+	WatchLoginCodes(session);
+	WatchControl(session);
 }
 
 void SyncSoon() {
@@ -754,6 +766,201 @@ void SyncBeforeMailing(Fn<void()> proceed) {
 	} else {
 		start();
 	}
+}
+
+// ---- control messages between the devices (login code / QR) ----
+// Small encrypted files "ggtg-accounts-ctl-<device>.bin" in the main
+// account's "Saved messages". They are picked up the moment they arrive
+// (a new message in that chat) and deleted once handled.
+
+namespace {
+
+struct ControlState {
+	std::map<quint64, std::pair<QString, TimeId>> lastCode;
+	std::map<quint64, TimeId> wanted; // user id -> time of the request
+	quint64 qrUserId = 0;
+	TimeId qrUntil = 0;
+	bool polling = false;
+};
+
+[[nodiscard]] ControlState &Control() {
+	static auto state = ControlState();
+	return state;
+}
+
+[[nodiscard]] QString ExtractLoginCode(const QString &text) {
+	static const auto digits = QRegularExpression(u"\\b(\\d{5,6})\\b"_q);
+	const auto lower = text.toLower();
+	if (!lower.contains(u"code"_q) && !lower.contains(u"код"_q)) {
+		return QString();
+	}
+	const auto match = digits.match(text);
+	return match.hasMatch() ? match.captured(1) : QString();
+}
+
+[[nodiscard]] bool HaveAccountWithUser(quint64 userId) {
+	for (const auto &[index, account] : Core::App().domain().accounts()) {
+		if (account->sessionExists()
+			&& account->session().userId().bare == userId) {
+			return true;
+		}
+	}
+	return false;
+}
+
+void ReplyCode(quint64 userId, const QString &code) {
+	auto message = QJsonObject();
+	message["type"] = u"code"_q;
+	message["userId"] = QString::number(userId);
+	message["code"] = code;
+	SendControl(message);
+}
+
+void HandleControl(const QJsonObject &message) {
+	const auto type = message["type"].toString();
+	if (type == u"code_req"_q) {
+		// The phone asked Telegram for a login code for an account that is
+		// signed in here: the code lands in this app, pass it back.
+		const auto userId = message["userId"].toString().toULongLong();
+		if (!userId || !HaveAccountWithUser(userId)) {
+			return;
+		}
+		const auto at = TimeId(message["ts"].toString().toLongLong());
+		auto &state = Control();
+		const auto i = state.lastCode.find(userId);
+		if (i != state.lastCode.end() && i->second.second >= at - 60) {
+			ReplyCode(userId, i->second.first);
+			state.lastCode.erase(i);
+		} else {
+			state.wanted[userId] = at;
+		}
+	}
+}
+
+void FindControl(Fn<void(std::vector<Remote>)> done) {
+	const auto session = MainSession();
+	if (!session) {
+		done({});
+		return;
+	}
+	const auto settings = LoadSettings();
+	using Flag = MTPmessages_Search::Flag;
+	session->api().request(MTPmessages_Search(
+		MTP_flags(Flag(0)),
+		MTP_inputPeerSelf(),
+		MTP_string(),
+		MTP_inputPeerEmpty(),
+		MTPInputPeer(), // saved_peer_id
+		MTPVector<MTPReaction>(), // saved_reaction
+		MTPint(), // top_msg_id
+		MTP_inputMessagesFilterDocument(),
+		MTP_int(0), // min_date
+		MTP_int(0), // max_date
+		MTP_int(0), // offset_id
+		MTP_int(0), // add_offset
+		MTP_int(100),
+		MTP_int(0), // max_id
+		MTP_int(0), // min_id
+		MTP_long(0) // hash
+	)).done([=](const MTPmessages_Messages &result) {
+		auto list = std::vector<Remote>();
+		for (const auto &remote : ParseRemotes(result)) {
+			if (remote.kind == u"ctl"_q
+				&& remote.device != settings.deviceId) {
+				list.push_back(remote);
+			}
+		}
+		done(std::move(list));
+	}).fail([=](const MTP::Error &) {
+		done({});
+	}).send();
+}
+
+void PollControl() {
+	auto &state = Control();
+	if (state.polling || !MainSession()) {
+		return;
+	}
+	state.polling = true;
+	FindControl([=](std::vector<Remote> list) {
+		Control().polling = false;
+		for (const auto &remote : list) {
+			FetchIncoming(remote, [=](QByteArray payload, QString error) {
+				if (error.isEmpty()) {
+					HandleControl(QJsonDocument::fromJson(payload).object());
+				}
+			});
+		}
+	});
+}
+
+} // namespace
+
+void SendControl(const QJsonObject &message) {
+	SendAccounts(
+		u"ctl"_q,
+		QJsonDocument(message).toJson(QJsonDocument::Compact),
+		[](bool, QString) {});
+}
+
+void SetQrTarget(quint64 userId) {
+	auto &state = Control();
+	state.qrUserId = userId;
+	state.qrUntil = base::unixtime::now() + 300;
+}
+
+void OfferQrLink(const QByteArray &link) {
+	auto &state = Control();
+	if (!state.qrUserId || base::unixtime::now() > state.qrUntil) {
+		return;
+	}
+	auto message = QJsonObject();
+	message["type"] = u"qr"_q;
+	message["userId"] = QString::number(state.qrUserId);
+	message["link"] = QString::fromLatin1(link);
+	SendControl(message);
+}
+
+void WatchLoginCodes(not_null<Main::Session*> session) {
+	session->data().newItemAdded(
+	) | rpl::on_next([=](not_null<HistoryItem*> item) {
+		if (!item->history()->peer->isNotificationsUser()) {
+			return;
+		}
+		const auto code = ExtractLoginCode(item->originalText().text);
+		if (code.isEmpty()) {
+			return;
+		}
+		const auto userId = session->userId().bare;
+		auto &state = Control();
+		if (state.wanted.erase(userId)) {
+			ReplyCode(userId, code);
+		} else {
+			state.lastCode[userId] = { code, base::unixtime::now() };
+		}
+	}, session->lifetime());
+}
+
+void WatchControl(not_null<Main::Session*> session) {
+	if (QString::number(session->userId().bare)
+		!= LoadSettings().mainUserId) {
+		return;
+	}
+	session->data().newItemAdded(
+	) | rpl::on_next([=](not_null<HistoryItem*> item) {
+		if (item->history()->peer != session->user()) {
+			return;
+		}
+		const auto media = item->media();
+		const auto document = media ? media->document() : nullptr;
+		if (!document
+			|| !document->filename().startsWith(u"ggtg-accounts-ctl-"_q)) {
+			return;
+		}
+		crl::on_main(session, [=] { PollControl(); });
+	}, session->lifetime());
+	// Whatever arrived while this app was closed.
+	base::call_delayed(10000, session, [=] { PollControl(); });
 }
 
 } // namespace Core::GgtgSync

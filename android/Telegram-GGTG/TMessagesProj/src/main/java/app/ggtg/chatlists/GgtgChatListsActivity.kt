@@ -21,6 +21,9 @@ import java.util.Locale
 class GgtgChatListsActivity : BaseFragment() {
 
     private var column: LinearLayout? = null
+    private var query = ""
+    private var search: android.widget.EditText? = null
+    private var results: LinearLayout? = null
     private val changed: () -> Unit = { rebuild() }
 
     override fun onFragmentCreate(): Boolean { GgtgChatLists.addListener(changed); return super.onFragmentCreate() }
@@ -53,11 +56,55 @@ class GgtgChatListsActivity : BaseFragment() {
             "«⋮» → «В список GGTG» (или выделите чаты в списке чатов и выберите это в меню). Список открывается нажатием; в нём нажатие на чат " +
             "открывает его в нужном аккаунте, а «назад» возвращает в список.", 13f))
         GgtgUi.addCard(col, head, top = 12f)
+        val hadFocus = search?.hasFocus() == true
+        // one search over all the lists (also chats of accounts that are no longer in the program)
+        val searchCard = GgtgUi.card(context)
+        val field = app.ggtg.GgtgPageUi.field(context, "Найти чат во всех списках", query)
+        field.addTextChangedListener(object : TextWatcher {
+            override fun beforeTextChanged(p0: CharSequence?, p1: Int, p2: Int, p3: Int) {}
+            override fun onTextChanged(p0: CharSequence?, p1: Int, p2: Int, p3: Int) {}
+            override fun afterTextChanged(p0: Editable?) {
+                val text = p0?.toString().orEmpty().trim()
+                if (text != query) { query = text; showBody() }
+            }
+        })
+        search = field
+        searchCard.addView(field, LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT))
+        GgtgUi.addCard(col, searchCard, top = 12f)
+        results = LinearLayout(context).apply { orientation = LinearLayout.VERTICAL }
+        col.addView(results)
+        showBody()
+        if (hadFocus) field.requestFocus()
+    }
+
+    private fun showBody() {
+        val col = results ?: return
+        val context = col.context
+        col.removeAllViews()
+        if (query.isNotEmpty()) {
+            val fmt = SimpleDateFormat("dd.MM.yyyy", Locale.getDefault())
+            val found = ArrayList<Pair<GgtgChatLists.ChatList, GgtgChatLists.Entry>>()
+            for (l in GgtgChatLists.all()) for (e in l.entries) {
+                if (e.name.contains(query, true) || e.username.contains(query, true) || e.accountName.contains(query, true)) found.add(l to e)
+            }
+            found.sortByDescending { it.second.at }
+            if (found.isEmpty()) GgtgUi.addCard(col, GgtgUi.card(context).also { it.addView(GgtgUi.body(context, "Ничего не найдено.")) }, top = 8f)
+            for ((l, e) in found.take(200)) {
+                val title = e.name.ifEmpty { if (e.username.isEmpty()) "Чат" else "@" + e.username }
+                val gone = app.ggtg.GgtgPageUi.slotOf(e.accountUserId) < 0
+                val sub = l.name + " · " + (if (e.username.isEmpty()) "" else "@${e.username} · ") + e.accountName +
+                    (if (gone) " (аккаунта нет в программе)" else "") + " · " + fmt.format(Date(e.at * 1000))
+                GgtgUi.addCard(col, app.ggtg.GgtgPageUi.row(context, app.ggtg.GgtgPageUi.iconBadge(context, R.drawable.msg_list), title, sub) {
+                    GgtgChatLists.openChat(this, e)
+                }, top = 4f)
+            }
+            col.addView(app.ggtg.GgtgPageUi.gap(context, 24f))
+            return
+        }
         val lists = GgtgChatLists.all()
         if (lists.isEmpty()) GgtgUi.addCard(col, GgtgUi.card(context).also { it.addView(GgtgUi.body(context, "Списков пока нет. Нажмите «+» вверху.")) })
         for (l in lists) {
-            val liveCount = l.entries.count { app.ggtg.GgtgPageUi.slotOf(it.accountUserId) >= 0 }
-            GgtgUi.addCard(col, app.ggtg.GgtgPageUi.row(context, app.ggtg.GgtgPageUi.iconBadge(context, R.drawable.msg_list), l.name, "Чатов: $liveCount") {
+            GgtgUi.addCard(col, app.ggtg.GgtgPageUi.row(context, app.ggtg.GgtgPageUi.iconBadge(context, R.drawable.msg_list), l.name, "Чатов: ${l.entries.size}") {
                 presentFragment(GgtgChatListActivity(l.id))
             })
         }
@@ -115,9 +162,8 @@ class GgtgChatListActivity(private val listId: String) : BaseFragment() {
         col.removeAllViews()
         actionBar.setTitle(list.name)
 
-        val liveCount = list.entries.count { app.ggtg.GgtgPageUi.slotOf(it.accountUserId) >= 0 }
         val head = GgtgUi.card(context)
-        head.addView(GgtgUi.title(context, "${list.name} · $liveCount", 16f))
+        head.addView(GgtgUi.title(context, "${list.name} · ${list.entries.size}", 16f))
         val field = app.ggtg.GgtgPageUi.field(context, "Найти чат по имени или @username", query)
         field.addTextChangedListener(object : TextWatcher {
             override fun beforeTextChanged(p0: CharSequence?, p1: Int, p2: Int, p3: Int) {}
@@ -145,8 +191,8 @@ class GgtgChatListActivity(private val listId: String) : BaseFragment() {
         val context = box.context
         val list = GgtgChatLists.find(listId) ?: return
         box.removeAllViews()
+        // all chats stay, also of accounts that are gone from the program: only the user takes them out
         val entries = list.entries.filter {
-            app.ggtg.GgtgPageUi.slotOf(it.accountUserId) >= 0 &&
             (query.isEmpty() || it.name.contains(query, true) || it.username.contains(query, true) || it.accountName.contains(query, true))
         }.sortedByDescending { it.at }
         if (entries.isEmpty()) {
@@ -158,7 +204,8 @@ class GgtgChatListActivity(private val listId: String) : BaseFragment() {
         val fmt = SimpleDateFormat("dd.MM.yyyy", Locale.getDefault())
         for (e in entries.take(limit)) {
             val title = e.name.ifEmpty { if (e.username.isEmpty()) "Чат" else "@" + e.username }
-            val sub = (if (e.username.isEmpty()) "" else "@${e.username} · ") + e.accountName + " · " + fmt.format(Date(e.at * 1000))
+            val sub = (if (e.username.isEmpty()) "" else "@${e.username} · ") + e.accountName +
+                (if (app.ggtg.GgtgPageUi.slotOf(e.accountUserId) < 0) " (аккаунта нет в программе)" else "") + " · " + fmt.format(Date(e.at * 1000))
             val card = GgtgUi.card(context) { GgtgChatLists.openChat(this, e) }
             val line = LinearLayout(context).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL }
             val texts = LinearLayout(context).apply { orientation = LinearLayout.VERTICAL }

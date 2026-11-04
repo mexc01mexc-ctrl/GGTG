@@ -11,6 +11,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "base/object_ptr.h"
 #include "base/weak_ptr.h"
 #include "core/core_settings_proxy.h"
+#include "core/ggtg_geo.h"
 #include "mtproto/connection_abstract.h"
 #include "mtproto/mtproto_proxy_data.h"
 
@@ -58,6 +59,10 @@ class SessionController;
 // direct, so extra accounts stay proxied-but-disconnected until the user
 // sets a real proxy for them. Manual entry has only one value to give, so
 // every account ends up sharing it.
+// ggtg: country / language / time zone of the proxy list picked last in
+// MakeMultiProxyBox (from its name, e.g. "Germany (+49)"), if it has one.
+[[nodiscard]] std::optional<Core::GgtgGeo::GeoMatch> LastPickedProxyListGeo();
+
 [[nodiscard]] object_ptr<Ui::BoxContent> MakeMultiProxyBox(
 	Fn<void(Fn<MTP::ProxyData()> nextProxy)> submit);
 

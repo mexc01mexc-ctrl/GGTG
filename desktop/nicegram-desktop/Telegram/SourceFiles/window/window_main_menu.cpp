@@ -2838,7 +2838,7 @@ void FillGgtgShell(
 		.icon = &st::menuIconAddAccount,
 		.label = rpl::single(u"Добавить"_q),
 		.title = u"Добавить аккаунты"_q,
-		.subtitle = u"Новые аккаунты: импорт tdata, вход по номеру, приём с Android."_q,
+		.subtitle = u"Новые аккаунты: импорт tdata, вход по номеру."_q,
 		.description = u"Сначала добавьте списки прокси: каждому новому аккаунту выдаётся свой прокси из списка, без него аккаунт не подключается. Потом импортируйте папку tdata (одну или папку с несколькими: пароль 2FA берётся из файла рядом, папка аккаунта - из имени папки), войдите по номеру телефона или примите аккаунты с GGTG Android."_q,
 		.makeBox = [=](not_null<Ui::SeparatePanel*>) {
 			return Settings::MakeAddAccountsBox();

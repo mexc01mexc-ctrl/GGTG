@@ -338,6 +338,14 @@ object GgtgSessionJsonSupport {
         proxySource: GgtgProxySource?,
         progressDialog: TdataImportProgressDialog,
         createBackup: Boolean = false
+    ): GgtgImportSupport.ImportResult =
+        GgtgDevice.withListGeo(proxySource) { importAccountsInner(accounts, proxySource, progressDialog, createBackup) }
+
+    private suspend fun importAccountsInner(
+        accounts: List<SessionAccount>,
+        proxySource: GgtgProxySource?,
+        progressDialog: TdataImportProgressDialog,
+        createBackup: Boolean = false
     ): GgtgImportSupport.ImportResult {
         var alreadyLoggedIn = 0
         val toImport = mutableListOf<SessionAccount>()

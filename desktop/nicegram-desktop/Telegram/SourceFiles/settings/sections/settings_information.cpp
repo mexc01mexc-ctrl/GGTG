@@ -1287,7 +1287,7 @@ private:
 			[=](QString error) {
 				if (error.isEmpty()) {
 					// Its key lives in the account now; keep it marked active in vault.
-					Sessions::UpdateStoredRole(targetId, target->role, u"активная (текущая)"_q);
+					Sessions::MarkCurrent(targetId);
 					self.succeed(u"готово, программа на другой сессии"_q,
 						warning);
 				} else if (self.alive()) {

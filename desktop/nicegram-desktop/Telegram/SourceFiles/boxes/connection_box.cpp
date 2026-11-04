@@ -2056,8 +2056,17 @@ object_ptr<Ui::BoxContent> MakeNewProxyBox(
 	return MakeProxyListPickerBox(MTP::ProxyData(), submit);
 }
 
+namespace {
+std::optional<Core::GgtgGeo::GeoMatch> PickedListGeo;
+} // namespace
+
+std::optional<Core::GgtgGeo::GeoMatch> LastPickedProxyListGeo() {
+	return PickedListGeo;
+}
+
 object_ptr<Ui::BoxContent> MakeMultiProxyBox(
 		Fn<void(Fn<MTP::ProxyData()> nextProxy)> submit) {
+	PickedListGeo = std::nullopt;
 	const auto &lists = MTP::GlobalProxyPool().lists();
 	const auto hasAny = ranges::any_of(lists, [](const MTP::ProxyList &list) {
 		return !list.entries.empty();
@@ -2066,6 +2075,7 @@ object_ptr<Ui::BoxContent> MakeMultiProxyBox(
 		// No lists to pull several distinct entries from - the one proxy
 		// typed in manually ends up shared by every imported account.
 		return MakeManualProxyBox([=](const MTP::ProxyData &proxy) {
+			PickedListGeo = std::nullopt;
 			submit([proxy] { return proxy; });
 		});
 	}
@@ -2083,6 +2093,8 @@ object_ptr<Ui::BoxContent> MakeMultiProxyBox(
 			button->clicks(
 			) | rpl::on_next([=](Qt::MouseButton) {
 				box->closeBox();
+				// ggtg: list name carries the country / phone code
+				PickedListGeo = Core::GgtgGeo::MatchForName(lists[i].name);
 				// Pulls a fresh, distinct entry from this same list for
 				// every account being imported - once the list runs dry,
 				// the rest fall back to a placeholder that can never
