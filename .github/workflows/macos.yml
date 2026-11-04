@@ -80,6 +80,9 @@ jobs:
           cmake --version
           (cd "$GITHUB_WORKSPACE/desktop/nicegram-desktop/out" && cmake .)
 
+          echo "Dropping duplicated *_DEPLOYMENT_TARGET variables Xcode exports to script phases (clang rejects them)..."
+          sed -i '' 's/shellScript = "/shellScript = "unset IPHONEOS_DEPLOYMENT_TARGET TVOS_DEPLOYMENT_TARGET WATCHOS_DEPLOYMENT_TARGET XROS_DEPLOYMENT_TARGET DRIVERKIT_DEPLOYMENT_TARGET\\n/' "$GITHUB_WORKSPACE/desktop/nicegram-desktop/out/Telegram.xcodeproj/project.pbxproj"
+
           echo "Bypassing ReRunCMake in CI..."
           printf 'all:\n\t@echo "Skipping CMake regeneration in CI"\n' > "$GITHUB_WORKSPACE/desktop/nicegram-desktop/out/CMakeScripts/ReRunCMake.make"
 

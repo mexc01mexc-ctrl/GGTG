@@ -61,6 +61,9 @@ public:
 	}
 	[[nodiscard]] auto sessionControllerValue() const
 		-> rpl::producer<SessionController*>;
+	// ggtg: upstream 7.3.5 dropped it as unused, window_main_menu.cpp needs it.
+	[[nodiscard]] auto sessionControllerChanges() const
+		-> rpl::producer<SessionController*>;
 	[[nodiscard]] bool locked() const;
 
 	[[nodiscard]] Adaptive &adaptive() const;
