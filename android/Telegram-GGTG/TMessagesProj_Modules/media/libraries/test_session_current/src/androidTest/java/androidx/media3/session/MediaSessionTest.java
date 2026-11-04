@@ -16,6 +16,7 @@
 package androidx.media3.session;
 
 import static android.os.Build.VERSION.SDK_INT;
+import static android.view.KeyEvent.KEYCODE_HEADSETHOOK;
 import static android.view.KeyEvent.KEYCODE_MEDIA_FAST_FORWARD;
 import static android.view.KeyEvent.KEYCODE_MEDIA_NEXT;
 import static android.view.KeyEvent.KEYCODE_MEDIA_PAUSE;
@@ -47,25 +48,28 @@ import androidx.media.MediaSessionManager;
 import androidx.media3.common.ForwardingPlayer;
 import androidx.media3.common.MediaLibraryInfo;
 import androidx.media3.common.Player;
+import androidx.media3.common.Timeline;
 import androidx.media3.common.util.Log;
 import androidx.media3.session.MediaSession.ControllerInfo;
 import androidx.media3.test.session.common.HandlerThreadTestRule;
 import androidx.media3.test.session.common.MainLooperTestRule;
 import androidx.media3.test.session.common.TestHandler;
+import androidx.media3.test.utils.FakeTimeline;
 import androidx.test.core.app.ApplicationProvider;
 import androidx.test.ext.junit.runners.AndroidJUnit4;
 import androidx.test.filters.LargeTest;
+import androidx.test.filters.SdkSuppress;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.Future;
 import java.util.concurrent.TimeoutException;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
 import org.junit.After;
 import org.junit.Assert;
-import org.junit.Assume;
 import org.junit.Before;
 import org.junit.ClassRule;
 import org.junit.Rule;
@@ -207,8 +211,8 @@ public class MediaSessionTest {
   }
 
   @Test
+  @SdkSuppress(minSdkVersion = 31)
   public void builderSetSessionActivity_nonActivityIntent_throwsIllegalArgumentException() {
-    Assume.assumeTrue(SDK_INT >= 31);
     PendingIntent pendingIntent =
         PendingIntent.getBroadcast(
             ApplicationProvider.getApplicationContext(),
@@ -225,8 +229,8 @@ public class MediaSessionTest {
   }
 
   @Test
+  @SdkSuppress(minSdkVersion = 31)
   public void setSessionActivity_nonActivityIntent_throwsIllegalArgumentException() {
-    Assume.assumeTrue(SDK_INT >= 31);
     PendingIntent pendingIntent =
         PendingIntent.getBroadcast(
             ApplicationProvider.getApplicationContext(),
@@ -384,15 +388,10 @@ public class MediaSessionTest {
   @Test
   public void creatingTwoSessionWithSameId() {
     String sessionId = "testSessionId";
-    MediaSession session =
-        new MediaSession.Builder(
-                context, new MockPlayer.Builder().setApplicationLooper(handler.getLooper()).build())
-            .setId(sessionId)
-            .build();
+    Player player = new MockPlayer.Builder().setApplicationLooper(handler.getLooper()).build();
+    MediaSession session = new MediaSession.Builder(context, player).setId(sessionId).build();
 
-    MediaSession.Builder builderWithSameId =
-        new MediaSession.Builder(
-            context, new MockPlayer.Builder().setApplicationLooper(handler.getLooper()).build());
+    MediaSession.Builder builderWithSameId = new MediaSession.Builder(context, player);
     try {
       builderWithSameId.setId(sessionId).build();
       assertWithMessage(
@@ -404,7 +403,8 @@ public class MediaSessionTest {
 
     session.release();
     // Creating a new session with ID of the closed session is okay.
-    MediaSession sessionWithSameId = builderWithSameId.build();
+    MediaSession sessionWithSameId =
+        new MediaSession.Builder(context, player).setId(sessionId).build();
     sessionWithSameId.release();
   }
 
@@ -479,6 +479,33 @@ public class MediaSessionTest {
 
     player.awaitMethodCalled(MockPlayer.METHOD_SEEK_TO, TIMEOUT_MS);
     assertThat(player.seekPositionMs).isEqualTo(testSeekPositionMs);
+  }
+
+  @Test
+  public void getPlatformToken_inApp_ensuresControllerInfoIsTrusted() throws Exception {
+    AtomicBoolean controllerIsTrusted = new AtomicBoolean();
+    MediaSession session =
+        sessionTestRule.ensureReleaseAfterTest(
+            new MediaSession.Builder(context, player)
+                .setId("getPlatformToken_inApp_ensuresControllerInfoIsTrusted")
+                .setCallback(
+                    new MediaSession.Callback() {
+                      @Override
+                      public MediaSession.ConnectionResult onConnect(
+                          MediaSession session, ControllerInfo controller) {
+                        controllerIsTrusted.set(controller.isTrusted());
+                        return MediaSession.Callback.super.onConnect(session, controller);
+                      }
+                    })
+                .build());
+    android.media.session.MediaSession.Token token = session.getPlatformToken();
+
+    android.media.session.MediaController platformController =
+        new android.media.session.MediaController(context, token);
+    platformController.getTransportControls().seekTo(100);
+    player.awaitMethodCalled(MockPlayer.METHOD_SEEK_TO, TIMEOUT_MS);
+
+    assertThat(controllerIsTrusted.get()).isTrue();
   }
 
   @Test
@@ -632,6 +659,14 @@ public class MediaSessionTest {
                       impl.onMediaButtonEvent(
                           controllerInfo, getMediaButtonIntent(KEYCODE_MEDIA_STOP)))
                   .isTrue();
+              assertThat(
+                      impl.onMediaButtonEvent(
+                          controllerInfo, getMediaButtonIntent(KEYCODE_MEDIA_PLAY_PAUSE)))
+                  .isTrue();
+              assertThat(
+                      impl.onMediaButtonEvent(
+                          controllerInfo, getMediaButtonIntent(KEYCODE_HEADSETHOOK)))
+                  .isTrue();
             });
 
     player.awaitMethodCalled(MockPlayer.METHOD_PLAY, TIMEOUT_MS);
@@ -641,7 +676,7 @@ public class MediaSessionTest {
     player.awaitMethodCalled(MockPlayer.METHOD_SEEK_TO_NEXT, TIMEOUT_MS);
     player.awaitMethodCalled(MockPlayer.METHOD_SEEK_TO_PREVIOUS, TIMEOUT_MS);
     player.awaitMethodCalled(MockPlayer.METHOD_STOP, TIMEOUT_MS);
-    assertThat(callerCollectorPlayer.callingControllers).hasSize(7);
+    assertThat(callerCollectorPlayer.callingControllers).hasSize(9);
     for (ControllerInfo controllerInfo : callerCollectorPlayer.callingControllers) {
       assertThat(session.get().isMediaNotificationController(controllerInfo)).isTrue();
     }
@@ -867,10 +902,9 @@ public class MediaSessionTest {
   }
 
   @Test
-  public void onMediaButtonEvent_invalidKeyEvent_returnsFalse() {
+  public void onMediaButtonEvent_keyEventIsNull_returnsFalse() {
     Intent intent = getMediaButtonIntent(KEYCODE_MEDIA_PLAY);
     intent.removeExtra(Intent.EXTRA_KEY_EVENT);
-    intent.putExtra(Intent.EXTRA_KEY_EVENT, new KeyEvent(KeyEvent.ACTION_UP, KEYCODE_MEDIA_PAUSE));
 
     boolean isEventHandled =
         session.getImpl().onMediaButtonEvent(createMediaButtonCaller(), intent);
@@ -879,7 +913,7 @@ public class MediaSessionTest {
   }
 
   @Test
-  public void onMediaButtonEvent_invalidKeyEvent_mediaNotificationControllerConnected_returnsFalse()
+  public void onMediaButtonEvent_keyEventIsNull_mediaNotificationControllerConnected_returnsFalse()
       throws Exception {
     Bundle connectionHints = new Bundle();
     connectionHints.putBoolean(MediaController.KEY_MEDIA_NOTIFICATION_CONTROLLER_FLAG, true);
@@ -889,7 +923,6 @@ public class MediaSessionTest {
         .get();
     Intent intent = getMediaButtonIntent(KEYCODE_MEDIA_PLAY);
     intent.removeExtra(Intent.EXTRA_KEY_EVENT);
-    intent.putExtra(Intent.EXTRA_KEY_EVENT, new KeyEvent(KeyEvent.ACTION_UP, KEYCODE_MEDIA_PAUSE));
 
     boolean isEventHandled =
         session.getImpl().onMediaButtonEvent(createMediaButtonCaller(), intent);
@@ -1012,6 +1045,80 @@ public class MediaSessionTest {
     assertThat(sessionExtraValue.get()).isEqualTo("value");
   }
 
+  @Test
+  public void getCurrentTimeline_commandGetTimelineNotAvailable_onGetTimelineNotCalled()
+      throws Exception {
+    CountDownLatch latch = new CountDownLatch(/* count= */ 1);
+    List<Player.Commands> capturedCommands = new ArrayList<>();
+    Player.Listener availableCommandsListener =
+        new Player.Listener() {
+          @Override
+          public void onAvailableCommandsChanged(Player.Commands availableCommands) {
+            capturedCommands.add(availableCommands);
+            latch.countDown();
+          }
+        };
+    controller.addListener(availableCommandsListener);
+
+    threadTestRule
+        .getHandler()
+        .postAndSync(
+            () -> {
+              player.notifyAvailableCommandsChanged(
+                  new Player.Commands.Builder()
+                      .addAllCommands()
+                      .remove(Player.COMMAND_GET_TIMELINE)
+                      .build());
+            });
+
+    assertThat(latch.await(TIMEOUT_MS, MILLISECONDS)).isTrue();
+    assertThat(capturedCommands).hasSize(1);
+    assertThat(capturedCommands.get(0).contains(Player.COMMAND_GET_TIMELINE)).isFalse();
+    threadTestRule
+        .getHandler()
+        .postAndSync(() -> controller.removeListener(availableCommandsListener));
+    List<Timeline> capturedTimelines = new ArrayList<>();
+    CountDownLatch timelineLatch = new CountDownLatch(/* count= */ 1);
+    Player.Listener timelineListener =
+        new Player.Listener() {
+          @Override
+          public void onTimelineChanged(Timeline timeline, int reason) {
+            capturedTimelines.add(timeline);
+            timelineLatch.countDown();
+          }
+        };
+    controller.addListener(timelineListener);
+    player.closeConditionVariableForMethod(MockPlayer.METHOD_GET_CURRENT_TIMELINE);
+    player.timeline =
+        new FakeTimeline(
+            new FakeTimeline.TimelineWindowDefinition.Builder()
+                .setDynamic(true)
+                .setLive(true)
+                .setSeekable(true)
+                .setPlaceholder(true)
+                .build(),
+            new FakeTimeline.TimelineWindowDefinition.Builder()
+                .setDynamic(true)
+                .setLive(true)
+                .setSeekable(true)
+                .setPlaceholder(true)
+                .build());
+
+    threadTestRule
+        .getHandler()
+        .postAndSync(
+            () -> player.notifyTimelineChanged(Player.TIMELINE_CHANGE_REASON_SOURCE_UPDATE));
+
+    assertThat(timelineLatch.await(TIMEOUT_MS, MILLISECONDS)).isTrue();
+    assertThat(player.hasMethodBeenCalled(MockPlayer.METHOD_GET_CURRENT_TIMELINE)).isFalse();
+    assertThat(capturedTimelines).hasSize(1);
+    assertThat(capturedTimelines.get(0).getWindowCount()).isEqualTo(1);
+    assertThat(capturedTimelines.get(0).getWindow(0, new Timeline.Window()).isPlaceholder)
+        .isFalse();
+    assertThat(capturedTimelines.get(0).getWindow(0, new Timeline.Window()).isDynamic).isTrue();
+    assertThat(capturedTimelines.get(0).getWindow(0, new Timeline.Window()).isLive()).isTrue();
+  }
+
   private static Intent getMediaButtonIntent(int keyCode) {
     Intent intent = new Intent(Intent.ACTION_MEDIA_BUTTON);
     intent.setComponent(
@@ -1020,17 +1127,24 @@ public class MediaSessionTest {
     return intent;
   }
 
+  @Test
+  public void testGetBitmapDimensionLimit() {
+    int limit = MediaSessionImpl.getBitmapDimensionLimit(context);
+    assertThat(limit).isGreaterThan(0);
+    assertThat(limit).isAtMost(4096);
+  }
+
   /**
    * Returns the expected {@link MediaSessionManager.RemoteUserInfo#getPackageName()} of a
    * controller hosted in the test companion app.
    *
-   * <p>Before API 21 and after API 23 the package name is {@link Context#getPackageName()} of the
-   * {@link ApplicationProvider#getApplicationContext() application under test}.
+   * <p>After API 23 the package name is {@link Context#getPackageName()} of the {@link
+   * ApplicationProvider#getApplicationContext() application under test}.
    *
-   * <p>The early implementations (API 21 - 23), the platform MediaSession doesn't report the caller
-   * package name. Instead the package of the RemoteUserInfo is set for all external controllers to
-   * the same {@code MediaSessionManager.RemoteUserInfo.LEGACY_CONTROLLER} (see
-   * MediaSessionCompat.MediaSessionCallbackApi21.setCurrentControllerInfo()).
+   * <p>On API 23, the platform MediaSession doesn't report the caller package name. Instead the
+   * package of the RemoteUserInfo is set for all external controllers to the same {@code
+   * MediaSessionManager.RemoteUserInfo.LEGACY_CONTROLLER} (see
+   * MediaSessionCompat.MediaSessionCallback.setCurrentControllerInfo()).
    *
    * <p>Calling this method should only be required to test legacy behaviour.
    */
@@ -1047,9 +1161,10 @@ public class MediaSessionTest {
         MediaSessionManager.RemoteUserInfo.UNKNOWN_PID,
         MediaSessionManager.RemoteUserInfo.UNKNOWN_UID,
         MediaLibraryInfo.VERSION_INT,
-        MediaControllerStub.VERSION_INT,
+        MediaLibraryInfo.INTERFACE_VERSION,
         /* trusted= */ false,
-        /* connectionHints= */ Bundle.EMPTY);
+        /* connectionHints= */ Bundle.EMPTY,
+        /* isPackageNameVerified= */ false);
   }
 
   private static class CallerCollectorPlayer extends ForwardingPlayer {

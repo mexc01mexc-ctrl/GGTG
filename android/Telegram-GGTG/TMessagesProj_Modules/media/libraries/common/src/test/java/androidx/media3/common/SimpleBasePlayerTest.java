@@ -44,7 +44,6 @@ import androidx.media3.extractor.metadata.icy.IcyInfo;
 import androidx.media3.test.utils.FakeMetadataEntry;
 import androidx.media3.test.utils.FakeTimeline;
 import androidx.media3.test.utils.TestUtil;
-import androidx.test.core.app.ApplicationProvider;
 import androidx.test.ext.junit.runners.AndroidJUnit4;
 import com.google.common.collect.ImmutableList;
 import com.google.common.util.concurrent.Futures;
@@ -931,6 +930,7 @@ public class SimpleBasePlayerTest {
         TrackSelectionParameters.DEFAULT.buildUpon().setMaxVideoBitrate(1000).build();
     AudioAttributes audioAttributes =
         new AudioAttributes.Builder().setContentType(C.AUDIO_CONTENT_TYPE_MOVIE).build();
+    int audioSessionId = 1234;
     VideoSize videoSize = new VideoSize(/* width= */ 200, /* height= */ 400);
     CueGroup cueGroup =
         new CueGroup(
@@ -1006,6 +1006,7 @@ public class SimpleBasePlayerTest {
             .setPlaybackParameters(playbackParameters)
             .setTrackSelectionParameters(trackSelectionParameters)
             .setAudioAttributes(audioAttributes)
+            .setAudioSessionId(audioSessionId)
             .setVolume(0.5f)
             .setVideoSize(videoSize)
             .setCurrentCues(cueGroup)
@@ -1059,6 +1060,7 @@ public class SimpleBasePlayerTest {
     assertThat(player.getContentPosition()).isEqualTo(456);
     assertThat(player.getContentBufferedPosition()).isEqualTo(499);
     assertThat(player.getAudioAttributes()).isEqualTo(audioAttributes);
+    assertThat(player.getAudioSessionId()).isEqualTo(audioSessionId);
     assertThat(player.getVolume()).isEqualTo(0.5f);
     assertThat(player.getVideoSize()).isEqualTo(videoSize);
     assertThat(player.getCurrentCues()).isEqualTo(cueGroup);
@@ -1437,6 +1439,7 @@ public class SimpleBasePlayerTest {
             .setPlaybackParameters(PlaybackParameters.DEFAULT)
             .setTrackSelectionParameters(TrackSelectionParameters.DEFAULT)
             .setAudioAttributes(AudioAttributes.DEFAULT)
+            .setAudioSessionId(1234)
             .setVolume(1f)
             .setVideoSize(VideoSize.UNKNOWN)
             .setCurrentCues(CueGroup.EMPTY_TIME_ZERO)
@@ -1507,6 +1510,7 @@ public class SimpleBasePlayerTest {
             .setPlaybackParameters(playbackParameters)
             .setTrackSelectionParameters(trackSelectionParameters)
             .setAudioAttributes(audioAttributes)
+            .setAudioSessionId(5678)
             .setVolume(0.5f)
             .setVideoSize(videoSize)
             .setCurrentCues(cueGroup)
@@ -1567,6 +1571,7 @@ public class SimpleBasePlayerTest {
     verify(listener).onPlaybackParametersChanged(playbackParameters);
     verify(listener).onTrackSelectionParametersChanged(trackSelectionParameters);
     verify(listener).onAudioAttributesChanged(audioAttributes);
+    verify(listener).onAudioSessionIdChanged(5678);
     verify(listener).onVolumeChanged(0.5f);
     verify(listener).onVideoSizeChanged(videoSize);
     verify(listener).onCues(cueGroup.cues);
@@ -1633,6 +1638,7 @@ public class SimpleBasePlayerTest {
                         Player.EVENT_MAX_SEEK_TO_PREVIOUS_POSITION_CHANGED,
                         Player.EVENT_TRACK_SELECTION_PARAMETERS_CHANGED,
                         Player.EVENT_AUDIO_ATTRIBUTES_CHANGED,
+                        Player.EVENT_AUDIO_SESSION_ID,
                         Player.EVENT_VOLUME_CHANGED,
                         Player.EVENT_SURFACE_SIZE_CHANGED,
                         Player.EVENT_VIDEO_SIZE_CHANGED,
@@ -3072,9 +3078,7 @@ public class SimpleBasePlayerTest {
             .build();
     // Set a different one to the one requested to ensure the updated state is used.
     TrackSelectionParameters updatedParameters =
-        new TrackSelectionParameters.Builder(ApplicationProvider.getApplicationContext())
-            .setMaxVideoBitrate(3000)
-            .build();
+        new TrackSelectionParameters.Builder().setMaxVideoBitrate(3000).build();
     State updatedState = state.buildUpon().setTrackSelectionParameters(updatedParameters).build();
     SimpleBasePlayer player =
         new SimpleBasePlayer(Looper.myLooper()) {
@@ -3096,9 +3100,7 @@ public class SimpleBasePlayerTest {
     player.addListener(listener);
 
     player.setTrackSelectionParameters(
-        new TrackSelectionParameters.Builder(ApplicationProvider.getApplicationContext())
-            .setMaxVideoBitrate(1000)
-            .build());
+        new TrackSelectionParameters.Builder().setMaxVideoBitrate(1000).build());
 
     assertThat(player.getTrackSelectionParameters()).isEqualTo(updatedParameters);
     verify(listener).onTrackSelectionParametersChanged(updatedParameters);
@@ -3113,9 +3115,7 @@ public class SimpleBasePlayerTest {
             .build();
     // Set new parameters to see a difference between the placeholder and new state.
     TrackSelectionParameters updatedParameters =
-        new TrackSelectionParameters.Builder(ApplicationProvider.getApplicationContext())
-            .setMaxVideoBitrate(3000)
-            .build();
+        new TrackSelectionParameters.Builder().setMaxVideoBitrate(3000).build();
     State updatedState = state.buildUpon().setTrackSelectionParameters(updatedParameters).build();
     SettableFuture<?> future = SettableFuture.create();
     SimpleBasePlayer player =
@@ -3135,9 +3135,7 @@ public class SimpleBasePlayerTest {
     player.addListener(listener);
 
     TrackSelectionParameters requestedParameters =
-        new TrackSelectionParameters.Builder(ApplicationProvider.getApplicationContext())
-            .setMaxVideoBitrate(3000)
-            .build();
+        new TrackSelectionParameters.Builder().setMaxVideoBitrate(3000).build();
     player.setTrackSelectionParameters(requestedParameters);
 
     // Verify placeholder state and listener calls.
@@ -3180,9 +3178,7 @@ public class SimpleBasePlayerTest {
         };
 
     player.setTrackSelectionParameters(
-        new TrackSelectionParameters.Builder(ApplicationProvider.getApplicationContext())
-            .setMaxVideoBitrate(1000)
-            .build());
+        new TrackSelectionParameters.Builder().setMaxVideoBitrate(1000).build());
 
     assertThat(callForwarded.get()).isFalse();
   }
@@ -3310,7 +3306,8 @@ public class SimpleBasePlayerTest {
           }
 
           @Override
-          protected ListenableFuture<?> handleSetVolume(float volume) {
+          protected ListenableFuture<?> handleSetVolume(
+              float volume, @C.VolumeOperationType int volumeOperationType) {
             playerState = updatedState;
             return Futures.immediateVoidFuture();
           }
@@ -3342,7 +3339,8 @@ public class SimpleBasePlayerTest {
           }
 
           @Override
-          protected ListenableFuture<?> handleSetVolume(float volume) {
+          protected ListenableFuture<?> handleSetVolume(
+              float volume, @C.VolumeOperationType int volumeOperationType) {
             return future;
           }
         };
@@ -3380,13 +3378,281 @@ public class SimpleBasePlayerTest {
           }
 
           @Override
-          protected ListenableFuture<?> handleSetVolume(float volume) {
+          protected ListenableFuture<?> handleSetVolume(
+              float volume, @C.VolumeOperationType int volumeOperationType) {
             callForwarded.set(true);
             return Futures.immediateVoidFuture();
           }
         };
 
     player.setVolume(.5f);
+
+    assertThat(callForwarded.get()).isFalse();
+  }
+
+  @Test
+  public void mute_immediateHandling_updatesStateAndInformsListeners() {
+    State state =
+        new State.Builder()
+            .setAvailableCommands(new Commands.Builder().addAllCommands().build())
+            .build();
+    // Set a different one to the one requested to ensure the updated state is used.
+    State updatedState = state.buildUpon().setVolume(.8f).build();
+    SimpleBasePlayer player =
+        new SimpleBasePlayer(Looper.myLooper()) {
+          private State playerState = state;
+
+          @Override
+          protected State getState() {
+            return playerState;
+          }
+
+          @Override
+          protected ListenableFuture<?> handleSetVolume(
+              float volume, @C.VolumeOperationType int volumeOperationType) {
+            playerState = updatedState;
+            return Futures.immediateVoidFuture();
+          }
+        };
+    Listener listener = mock(Listener.class);
+    player.addListener(listener);
+
+    player.mute();
+
+    assertThat(player.getVolume()).isEqualTo(.8f);
+    verify(listener).onVolumeChanged(.8f);
+    verifyNoMoreInteractions(listener);
+  }
+
+  @Test
+  public void mute_asyncHandling_usesPlaceholderStateAndInformsListeners() {
+    State state =
+        new State.Builder()
+            .setAvailableCommands(new Commands.Builder().addAllCommands().build())
+            .build();
+    // Set a new volume to see a difference between the placeholder and new state.
+    State updatedState = state.buildUpon().setVolume(.8f).build();
+    SettableFuture<?> future = SettableFuture.create();
+    SimpleBasePlayer player =
+        new SimpleBasePlayer(Looper.myLooper()) {
+          @Override
+          protected State getState() {
+            return future.isDone() ? updatedState : state;
+          }
+
+          @Override
+          protected ListenableFuture<?> handleSetVolume(
+              float volume, @C.VolumeOperationType int volumeOperationType) {
+            return future;
+          }
+        };
+    Listener listener = mock(Listener.class);
+    player.addListener(listener);
+
+    player.mute();
+
+    // Verify placeholder state and listener calls.
+    assertThat(player.getVolume()).isEqualTo(0f);
+    verify(listener).onVolumeChanged(0f);
+    verifyNoMoreInteractions(listener);
+
+    future.set(null);
+
+    // Verify actual state update.
+    assertThat(player.getVolume()).isEqualTo(.8f);
+    verify(listener).onVolumeChanged(.8f);
+    verifyNoMoreInteractions(listener);
+  }
+
+  @Test
+  public void mute_withoutAvailableCommand_isNotForwarded() {
+    State state =
+        new State.Builder()
+            .setAvailableCommands(
+                new Commands.Builder().addAllCommands().remove(Player.COMMAND_SET_VOLUME).build())
+            .build();
+    AtomicBoolean callForwarded = new AtomicBoolean();
+    SimpleBasePlayer player =
+        new SimpleBasePlayer(Looper.myLooper()) {
+          @Override
+          protected State getState() {
+            return state;
+          }
+
+          @Override
+          protected ListenableFuture<?> handleSetVolume(
+              float volume, @C.VolumeOperationType int volumeOperationType) {
+            callForwarded.set(true);
+            return Futures.immediateVoidFuture();
+          }
+        };
+
+    player.mute();
+
+    assertThat(callForwarded.get()).isFalse();
+  }
+
+  @Test
+  public void mute_fromAlreadyMutedState_isNotForwarded() {
+    State state =
+        new State.Builder()
+            .setAvailableCommands(
+                new Commands.Builder().addAllCommands().remove(Player.COMMAND_SET_VOLUME).build())
+            .setVolume(0f)
+            .build();
+    AtomicBoolean callForwarded = new AtomicBoolean();
+    SimpleBasePlayer player =
+        new SimpleBasePlayer(Looper.myLooper()) {
+          @Override
+          protected State getState() {
+            return state;
+          }
+
+          @Override
+          protected ListenableFuture<?> handleSetVolume(
+              float volume, @C.VolumeOperationType int volumeOperationType) {
+            callForwarded.set(true);
+            return Futures.immediateVoidFuture();
+          }
+        };
+
+    player.mute();
+
+    assertThat(callForwarded.get()).isFalse();
+  }
+
+  @Test
+  public void unmute_immediateHandling_updatesStateAndInformsListeners() {
+    State state =
+        new State.Builder()
+            .setAvailableCommands(new Commands.Builder().addAllCommands().build())
+            .setVolume(0f)
+            .build();
+    // Set a different one to the one requested to ensure the updated state is used.
+    State updatedState = state.buildUpon().setVolume(.8f).build();
+    SimpleBasePlayer player =
+        new SimpleBasePlayer(Looper.myLooper()) {
+          private State playerState = state;
+
+          @Override
+          protected State getState() {
+            return playerState;
+          }
+
+          @Override
+          protected ListenableFuture<?> handleSetVolume(
+              float volume, @C.VolumeOperationType int volumeOperationType) {
+            playerState = updatedState;
+            return Futures.immediateVoidFuture();
+          }
+        };
+    Listener listener = mock(Listener.class);
+    player.addListener(listener);
+
+    player.unmute();
+
+    assertThat(player.getVolume()).isEqualTo(.8f);
+    verify(listener).onVolumeChanged(.8f);
+    verifyNoMoreInteractions(listener);
+  }
+
+  @Test
+  public void unmute_asyncHandling_usesPlaceholderStateAndInformsListeners() {
+    State state =
+        new State.Builder()
+            .setAvailableCommands(new Commands.Builder().addAllCommands().build())
+            .setVolume(0f)
+            .setUnmuteVolume(0.75f)
+            .build();
+    // Set a new volume to see a difference between the placeholder and new state.
+    State updatedState = state.buildUpon().setVolume(.8f).build();
+    SettableFuture<?> future = SettableFuture.create();
+    SimpleBasePlayer player =
+        new SimpleBasePlayer(Looper.myLooper()) {
+          @Override
+          protected State getState() {
+            return future.isDone() ? updatedState : state;
+          }
+
+          @Override
+          protected ListenableFuture<?> handleSetVolume(
+              float volume, @C.VolumeOperationType int volumeOperationType) {
+            return future;
+          }
+        };
+    Listener listener = mock(Listener.class);
+    player.addListener(listener);
+
+    player.unmute();
+
+    // Verify placeholder state and listener calls.
+    assertThat(player.getVolume()).isEqualTo(0.75f);
+    verify(listener).onVolumeChanged(0.75f);
+    verifyNoMoreInteractions(listener);
+
+    future.set(null);
+
+    // Verify actual state update.
+    assertThat(player.getVolume()).isEqualTo(.8f);
+    verify(listener).onVolumeChanged(.8f);
+    verifyNoMoreInteractions(listener);
+  }
+
+  @Test
+  public void unmute_fromNonZeroVolume_isNotForwarded() {
+    State state =
+        new State.Builder()
+            .setAvailableCommands(new Commands.Builder().addAllCommands().build())
+            .build();
+    AtomicBoolean callForwarded = new AtomicBoolean();
+
+    SimpleBasePlayer player =
+        new SimpleBasePlayer(Looper.myLooper()) {
+          @Override
+          protected State getState() {
+            return state;
+          }
+
+          @Override
+          protected ListenableFuture<?> handleSetVolume(
+              float volume, @C.VolumeOperationType int volumeOperationType) {
+            callForwarded.set(true);
+            return Futures.immediateVoidFuture();
+          }
+        };
+    Listener listener = mock(Listener.class);
+    player.addListener(listener);
+
+    player.unmute();
+
+    assertThat(callForwarded.get()).isFalse();
+  }
+
+  @Test
+  public void unmute_withoutAvailableCommand_isNotForwarded() {
+    State state =
+        new State.Builder()
+            .setAvailableCommands(
+                new Commands.Builder().addAllCommands().remove(Player.COMMAND_SET_VOLUME).build())
+            .setVolume(0f)
+            .build();
+    AtomicBoolean callForwarded = new AtomicBoolean();
+    SimpleBasePlayer player =
+        new SimpleBasePlayer(Looper.myLooper()) {
+          @Override
+          protected State getState() {
+            return state;
+          }
+
+          @Override
+          protected ListenableFuture<?> handleSetVolume(
+              float volume, @C.VolumeOperationType int volumeOperationType) {
+            callForwarded.set(true);
+            return Futures.immediateVoidFuture();
+          }
+        };
+
+    player.unmute();
 
     assertThat(callForwarded.get()).isFalse();
   }

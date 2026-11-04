@@ -389,20 +389,34 @@ object GgtgSyncTransport {
         NotificationCenter.getInstance(main).addObserver(controlObserver, NotificationCenter.didReceiveNewMessages)
     }
 
-    fun sendControl(message: org.json.JSONObject, done: (Boolean) -> Unit = {}) {
-        sendAccounts("ctl", message.toString().toByteArray(Charsets.UTF_8)) { ok, _ -> done(ok) }
+    fun sendControl(message: org.json.JSONObject, done: (Boolean, String) -> Unit = { _, _ -> }) {
+        sendAccounts("ctl", message.toString().toByteArray(Charsets.UTF_8)) { ok, text -> done(ok, text) }
     }
 
-    /** Asks the Mac (which has this account signed in) for the login code Telegram just sent it. null = none came. */
-    suspend fun requestLoginCode(userId: Long, timeoutMs: Long): String? {
+    /** Asks the Mac (which has this account signed in) for the login code Telegram just sent it. null = none came.
+     *  [onState] gets a short status line for the progress window. */
+    suspend fun requestLoginCode(userId: Long, timeoutMs: Long, onState: (String) -> Unit = {}): String? {
         val waiter = kotlinx.coroutines.CompletableDeferred<String>()
         codeWaiters[userId] = waiter
         return try {
+            val sent = kotlinx.coroutines.CompletableDeferred<String>()
             sendControl(org.json.JSONObject()
                 .put("type", "code_req")
                 .put("userId", userId.toString())
-                .put("ts", (System.currentTimeMillis() / 1000).toString())) { ok -> if (!ok) waiter.complete("") }
-            withTimeoutOrNull(timeoutMs) { waiter.await() }?.takeIf { it.isNotBlank() }
+                .put("ts", (System.currentTimeMillis() / 1000).toString())) { ok, text -> sent.complete(if (ok) "" else text) }
+            val problem = withTimeoutOrNull(20_000) { sent.await() }
+            if (!problem.isNullOrEmpty()) {
+                FileLog.d("code request not sent: $problem")
+                onState(problem)
+                return null
+            }
+            onState("запрос передан на Mac, ждём код…")
+            val until = System.currentTimeMillis() + timeoutMs
+            while (System.currentTimeMillis() < until && !waiter.isCompleted) {
+                pollControl()
+                withTimeoutOrNull(4_000) { waiter.await() }
+            }
+            if (waiter.isCompleted) waiter.await().takeIf { it.isNotBlank() } else null
         } finally {
             codeWaiters.remove(userId)
         }

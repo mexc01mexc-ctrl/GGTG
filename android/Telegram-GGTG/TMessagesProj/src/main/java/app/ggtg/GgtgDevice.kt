@@ -64,6 +64,7 @@ object GgtgDevice {
     )
 
     val curatedBuilds: List<String> = listOf(
+        "13.1.1 (72379)",
         "12.10.6 (71129)",
         "12.10.5 (71059)",
         "12.10.4 (70999)",

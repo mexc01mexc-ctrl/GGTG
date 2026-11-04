@@ -6,7 +6,8 @@ def main():
         print('[ERROR] LIBS_DIR environment variable is not set.')
         return 1
     qt_version = sys.argv[1] if len(sys.argv) > 1 else '5.15.19'
-    patch_dir = os.path.join(libs_dir, 'patches', f'qtbase_{qt_version}')
+    module = sys.argv[2] if len(sys.argv) > 2 else 'qtbase'
+    patch_dir = os.path.join(libs_dir, 'patches', f'{module}_{qt_version}')
     if not os.path.isdir(patch_dir):
         print(f'[ERROR] Patch directory not found: {patch_dir}')
         return 1

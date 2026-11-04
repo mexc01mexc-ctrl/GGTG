@@ -13,6 +13,7 @@
 #include "base/basic_types.h"
 #include "base/event_filter.h"
 #include "base/flat_map.h"
+#include "base/flat_set.h"
 #include "base/invoke_queued.h"
 #include "base/options.h"
 #include "base/timer.h"
@@ -31,7 +32,7 @@
 #include <QtGui/QWindow>
 #include <QtWidgets/QWidget>
 
-#include <crl/common/crl_common_on_main_guarded.h>
+#include <crl/crl_on_main.h>
 #include <rpl/variable.h>
 
 #include <string>
@@ -165,6 +166,49 @@ void KeepProcessesActive(
 	}
 }
 
+[[nodiscard]] bool CreateEngineFolder(const std::wstring &path) {
+	const auto engine = path + L"\\EBWebView";
+	if (!CreateDirectoryW(engine.c_str(), nullptr)
+		&& GetLastError() != ERROR_ALREADY_EXISTS) {
+		return false;
+	}
+	const auto attributes = GetFileAttributesW(engine.c_str());
+	return (attributes != INVALID_FILE_ATTRIBUTES)
+		&& (attributes & FILE_ATTRIBUTE_DIRECTORY)
+		&& !(attributes & FILE_ATTRIBUTE_REPARSE_POINT);
+}
+
+[[nodiscard]] winrt::file_handle PinDirectory(const std::wstring &path) {
+	auto result = winrt::file_handle(CreateFileW(
+		path.c_str(),
+		FILE_LIST_DIRECTORY | FILE_READ_ATTRIBUTES,
+		FILE_SHARE_READ | FILE_SHARE_WRITE,
+		nullptr,
+		OPEN_EXISTING,
+		FILE_FLAG_BACKUP_SEMANTICS | FILE_FLAG_OPEN_REPARSE_POINT,
+		nullptr));
+	auto info = FILE_BASIC_INFO();
+	if (!result
+		|| !GetFileInformationByHandleEx(
+			result.get(),
+			FileBasicInfo,
+			&info,
+			sizeof(info))
+		|| !(info.FileAttributes & FILE_ATTRIBUTE_DIRECTORY)
+		|| (info.FileAttributes & FILE_ATTRIBUTE_REPARSE_POINT)) {
+		return {};
+	}
+	return result;
+}
+
+struct PendingPermission {
+	winrt::com_ptr<ICoreWebView2PermissionRequestedEventArgs3> args;
+	winrt::com_ptr<ICoreWebView2Deferral> deferral;
+	std::string origin;
+	COREWEBVIEW2_PERMISSION_KIND kind
+		= COREWEBVIEW2_PERMISSION_KIND_UNKNOWN_PERMISSION;
+};
+
 class Handler
 	: public winrt::implements<
 		Handler,
@@ -192,6 +236,7 @@ public:
 	Handler(
 		Config config,
 		HWND handle,
+		winrt::file_handle userDataPin,
 		std::function<void(not_null<Handler*>)> saveThis,
 		std::function<void()> readyHandler);
 	~Handler();
@@ -290,7 +335,13 @@ public:
 
 private:
 	void updateHistoryStates();
+	void requestMediaPermission(
+		ICoreWebView2PermissionRequestedEventArgs *args,
+		COREWEBVIEW2_PERMISSION_KIND kind);
+	void processPermissionRequests();
 
+	// Keeps the folder unclaimable until every runtime object below is gone.
+	winrt::file_handle _userDataPin;
 	HWND _window = nullptr;
 	winrt::com_ptr<ICoreWebView2Environment> _environment;
 	winrt::com_ptr<ICoreWebView2Controller> _controller;
@@ -300,11 +351,16 @@ private:
 	std::function<void()> _navigationStartHandler;
 	std::function<void(bool)> _navigationDoneHandler;
 	std::function<DialogResult(DialogArgs)> _dialogHandler;
+	PermissionHandler _permissionHandler;
 	std::function<DataResult(DataRequest)> _dataRequestHandler;
 	std::function<void()> _readyHandler;
 	base::flat_map<
 		winrt::com_ptr<ICoreWebView2WebResourceRequestedEventArgs>,
 		winrt::com_ptr<ICoreWebView2Deferral>> _pending;
+	std::vector<PendingPermission> _permissionRequests;
+	base::flat_set<std::pair<
+		std::string,
+		COREWEBVIEW2_PERMISSION_KIND>> _allowedPermissions;
 
 	rpl::variable<NavigationHistoryState> _navigationHistoryState;
 	rpl::variable<int> _zoomValue;
@@ -313,20 +369,24 @@ private:
 	std::string _restrictedOrigin;
 	bool _debug = false;
 	bool _destroying = false;
+	bool _permissionAsking = false;
 
 };
 
 Handler::Handler(
 	Config config,
 	HWND handle,
+	winrt::file_handle userDataPin,
 	std::function<void(not_null<Handler*>)> saveThis,
 	std::function<void()> readyHandler)
-: _window(handle)
+: _userDataPin(std::move(userDataPin))
+, _window(handle)
 , _messageHandler(std::move(config.messageHandler))
 , _navigationPolicyHandler(std::move(config.navigationPolicyHandler))
 , _navigationStartHandler(std::move(config.navigationStartHandler))
 , _navigationDoneHandler(std::move(config.navigationDoneHandler))
 , _dialogHandler(std::move(config.dialogHandler))
+, _permissionHandler(std::move(config.permissionHandler))
 , _dataRequestHandler(std::move(config.dataRequestHandler))
 , _readyHandler(std::move(readyHandler))
 , _opaqueBg(config.opaqueBg)
@@ -355,6 +415,9 @@ void Handler::setOpaqueBg(QColor opaqueBg) {
 HRESULT STDMETHODCALLTYPE Handler::Invoke(
 		HRESULT res,
 		ICoreWebView2Environment *env) {
+	if (_destroying) {
+		return S_OK;
+	}
 	_environment.copy_from(env);
 	if (!_environment) {
 		return E_FAIL;
@@ -385,7 +448,12 @@ HRESULT STDMETHODCALLTYPE Handler::Invoke(
 HRESULT STDMETHODCALLTYPE Handler::Invoke(
 		HRESULT res,
 		ICoreWebView2Controller *controller) {
-	if (!_readyHandler) {
+	if (_destroying) {
+		if (controller) {
+			controller->Close();
+		}
+		return S_OK;
+	} else if (!_readyHandler) {
 		return S_OK;
 	}
 	_controller.copy_from(controller);
@@ -540,6 +608,9 @@ HRESULT STDMETHODCALLTYPE Handler::Invoke(
 			// the user copied. The embedder is expected to expose its own
 			// method for that, gated on a real user interaction.
 			args->put_State(COREWEBVIEW2_PERMISSION_STATE_DENY);
+		} else if (kind == COREWEBVIEW2_PERMISSION_KIND_MICROPHONE
+			|| kind == COREWEBVIEW2_PERMISSION_KIND_CAMERA) {
+			requestMediaPermission(args, kind);
 		}
 	}
 	return S_OK;
@@ -885,6 +956,97 @@ void Handler::updateHistoryStates() {
 	};
 }
 
+void Handler::requestMediaPermission(
+		ICoreWebView2PermissionRequestedEventArgs *args,
+		COREWEBVIEW2_PERMISSION_KIND kind) {
+	if (_destroying) {
+		return;
+	}
+	auto owned = winrt::com_ptr<ICoreWebView2PermissionRequestedEventArgs>();
+	owned.copy_from(args);
+	const auto transient
+		= owned.try_as<ICoreWebView2PermissionRequestedEventArgs3>();
+	// WHY: the profile is shared with other web views and outlives this
+	// one, so nothing may be saved there; DENY holds until the user allows.
+	if (!transient
+		|| transient->put_SavesInProfile(FALSE) != S_OK
+		|| transient->put_State(COREWEBVIEW2_PERMISSION_STATE_DENY) != S_OK) {
+		return;
+	}
+	auto uri = base::CoTaskMemString();
+	if (!_permissionHandler
+		|| transient->get_Uri(uri.put()) != S_OK
+		|| !uri) {
+		return;
+	}
+	const auto url = QUrl(
+		QString::fromStdString(FromWide(uri)),
+		QUrl::StrictMode);
+	const auto scheme = url.scheme();
+	const auto secure = (scheme == u"https"_q);
+	if (!url.isValid()
+		|| (!secure && scheme != u"http"_q)
+		|| url.host().isEmpty()) {
+		return;
+	}
+	const auto origin = scheme.toStdString()
+		+ "://"
+		+ url.host().toStdString()
+		+ ':'
+		+ std::to_string(url.port(secure ? 443 : 80));
+	if (_allowedPermissions.contains(std::pair(origin, kind))) {
+		transient->put_State(COREWEBVIEW2_PERMISSION_STATE_ALLOW);
+		return;
+	}
+	auto deferral = winrt::com_ptr<ICoreWebView2Deferral>();
+	if (transient->GetDeferral(deferral.put()) != S_OK || !deferral) {
+		return;
+	}
+	_permissionRequests.push_back({
+		.args = transient,
+		.deferral = std::move(deferral),
+		.origin = origin,
+		.kind = kind,
+	});
+	crl::on_main(this, [=] {
+		processPermissionRequests();
+	});
+}
+
+void Handler::processPermissionRequests() {
+	if (_destroying || _permissionAsking || _permissionRequests.empty()) {
+		return;
+	}
+	auto request = std::move(_permissionRequests.front());
+	_permissionRequests.erase(_permissionRequests.begin());
+	const auto key = std::pair(request.origin, request.kind);
+	const auto type = (request.kind == COREWEBVIEW2_PERMISSION_KIND_CAMERA)
+		? PermissionType::Camera
+		: PermissionType::Microphone;
+	const auto done = crl::guard(this, [=](bool allowed) {
+		if (_destroying) {
+			return;
+		} else if (allowed) {
+			_allowedPermissions.emplace(key);
+		}
+		_permissionAsking = false;
+		request.args->put_State(allowed
+			? COREWEBVIEW2_PERMISSION_STATE_ALLOW
+			: COREWEBVIEW2_PERMISSION_STATE_DENY);
+		// The answering popup is still finishing while this callback runs.
+		crl::on_main(this, [=] {
+			processPermissionRequests();
+		});
+		request.deferral->Complete();
+	});
+	_permissionAsking = true;
+	if (_allowedPermissions.contains(key)) {
+		done(true);
+	} else {
+		_permissionHandler(type, done);
+	}
+}
+
 class Instance final : public Interface, public base::has_weak_ptr {
 public:
 	explicit Instance(Config &&config);
@@ -1015,6 +1177,16 @@ void Instance::start(Config &&config) {
 		_keepActiveTimer.callEach(kKeepActiveInterval);
 	}
 
+	const auto wpath = ToWide(config.userDataPath);
+	auto pin = winrt::file_handle();
+	if (!config.restrictedOrigin.empty() && !wpath.empty()) {
+		if (CreateEngineFolder(wpath)) {
+			pin = PinDirectory(wpath);
+		}
+		if (!pin) {
+			return;
+		}
+	}
 	auto handler = (Handler*)nullptr;
 	const auto ready = [=] {
 		_readyFlag = true;
@@ -1025,9 +1197,9 @@ void Instance::start(Config &&config) {
 	auto owned = winrt::make<Handler>(
 		config,
 		_handle,
+		std::move(pin),
 		[&](not_null<Handler*> that) { handler = that; },
 		crl::guard(this, ready));
-	const auto wpath = ToWide(config.userDataPath);
 	const auto result = CreateCoreWebView2EnvironmentWithOptions(
 		nullptr,
 		wpath.empty() ? nullptr : wpath.c_str(),

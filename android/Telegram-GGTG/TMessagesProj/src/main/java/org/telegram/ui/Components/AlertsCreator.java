@@ -2518,7 +2518,7 @@ public class AlertsCreator {
         final AlertDialog.Builder builder = new AlertDialog.Builder(context, resourcesProvider);
 
         final CheckBoxCell[] cell = new CheckBoxCell[1];
-        final boolean[] value = new boolean[1];
+        final boolean[] value = new boolean[] { false };
 
         final TextView messageTextView = new TextView(context) {
             @Override
@@ -5251,6 +5251,128 @@ public class AlertsCreator {
         return builder;
     }
 
+
+    // ggtg: the birthday wheels without the day - month and year only (registration date of an account)
+    public static BottomSheet.Builder createMonthYearPickerDialog(
+        Context context,
+        String title, String button, String neutralButton,
+        int month, int year,
+        final Utilities.Callback2<Integer, Integer> whenSelected,
+        Runnable onNeutral,
+        Theme.ResourcesProvider resourcesProvider
+    ) {
+        if (context == null) {
+            return null;
+        }
+        BottomSheet.Builder builder = new BottomSheet.Builder(context, false, resourcesProvider);
+        builder.setApplyBottomPadding(false);
+
+        final NumberPicker monthPicker = new NumberPicker(context, resourcesProvider);
+        monthPicker.setItemCount(5);
+        monthPicker.setTextOffset(-dp(10));
+        final NumberPicker yearPicker = new NumberPicker(context, resourcesProvider);
+        yearPicker.setItemCount(5);
+        yearPicker.setTextOffset(-dp(24));
+
+        LinearLayout container = new LinearLayout(context);
+        container.setOrientation(LinearLayout.VERTICAL);
+
+        TextView titleView = new TextView(context);
+        titleView.setText(title);
+        titleView.setTextColor(Theme.getColor(Theme.key_dialogTextBlack, resourcesProvider));
+        titleView.setTextSize(TypedValue.COMPLEX_UNIT_DIP, 20);
+        titleView.setTypeface(AndroidUtilities.bold());
+        titleView.setOnTouchListener((v, event) -> true);
+        container.addView(titleView, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT, Gravity.LEFT | Gravity.TOP, 22, 12, 22, 4));
+
+        LinearLayout row = new LinearLayout(context);
+        row.setGravity(Gravity.CENTER);
+        row.setOrientation(LinearLayout.HORIZONTAL);
+        row.setWeightSum(1.0f);
+        container.addView(row, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT, 1f, 0, 0, 12, 0, 12));
+
+        Calendar calendar = Calendar.getInstance();
+        final int thisMonth = calendar.get(Calendar.MONTH);
+        final int thisYear = calendar.get(Calendar.YEAR);
+        final int minYear = 2013;
+
+        Runnable check = () -> {
+            monthPicker.setMinValue(0);
+            monthPicker.setMaxValue(yearPicker.getValue() == thisYear ? thisMonth : 11);
+        };
+        final NumberPicker.OnScrollListener onScrollListener = (view, state) -> {
+            if (state == NumberPicker.OnScrollListener.SCROLL_STATE_IDLE) check.run();
+        };
+
+        monthPicker.setMinValue(0);
+        monthPicker.setMaxValue(11);
+        monthPicker.setWrapSelectorWheel(false);
+        monthPicker.setFormatter(value -> {
+            switch (value) {
+                case 0: return LocaleController.getString(R.string.January);
+                case 1: return LocaleController.getString(R.string.February);
+                case 2: return LocaleController.getString(R.string.March);
+                case 3: return LocaleController.getString(R.string.April);
+                case 4: return LocaleController.getString(R.string.May);
+                case 5: return LocaleController.getString(R.string.June);
+                case 6: return LocaleController.getString(R.string.July);
+                case 7: return LocaleController.getString(R.string.August);
+                case 8: return LocaleController.getString(R.string.September);
+                case 9: return LocaleController.getString(R.string.October);
+                case 10: return LocaleController.getString(R.string.November);
+                default: return LocaleController.getString(R.string.December);
+            }
+        });
+        monthPicker.setOnScrollListener(onScrollListener);
+        row.addView(monthPicker, LayoutHelper.createLinear(0, 54 * 5, 0.6f));
+
+        yearPicker.setMinValue(minYear);
+        yearPicker.setMaxValue(thisYear);
+        yearPicker.setWrapSelectorWheel(false);
+        yearPicker.setFormatter(value -> String.valueOf(value));
+        yearPicker.setOnScrollListener(onScrollListener);
+        row.addView(yearPicker, LayoutHelper.createLinear(0, 54 * 5, 0.4f));
+
+        yearPicker.setValue(Math.max(minYear, Math.min(thisYear, year > 0 ? year : thisYear)));
+        check.run();
+        monthPicker.setValue(Math.max(0, Math.min(monthPicker.getMaxValue(), month > 0 ? month - 1 : thisMonth)));
+
+        TextView buttonTextView = new TextView(context) {
+            @Override
+            public CharSequence getAccessibilityClassName() {
+                return Button.class.getName();
+            }
+        };
+        buttonTextView.setPadding(dp(34), 0, dp(34), 0);
+        buttonTextView.setGravity(Gravity.CENTER);
+        buttonTextView.setTextColor(Theme.getColor(Theme.key_featuredStickers_buttonText, resourcesProvider));
+        buttonTextView.setTextSize(TypedValue.COMPLEX_UNIT_DIP, 14);
+        buttonTextView.setTypeface(AndroidUtilities.bold());
+        buttonTextView.setText(button);
+        buttonTextView.setBackground(Theme.createSimpleSelectorRoundRectDrawable(dp(24), Theme.getColor(Theme.key_featuredStickers_addButton, resourcesProvider), Theme.getColor(Theme.key_featuredStickers_addButtonPressed, resourcesProvider)));
+        ScaleStateListAnimator.apply(buttonTextView, .02f, 1.2f);
+        container.addView(buttonTextView, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, 48, Gravity.LEFT | Gravity.BOTTOM, 16, 15, 16, onNeutral != null ? 0 : 16));
+        buttonTextView.setOnClickListener(v -> {
+            int m = 1 + monthPicker.getValue();
+            int y = yearPicker.getValue();
+            builder.getDismissRunnable().run();
+            whenSelected.run(m, y);
+        });
+
+        if (onNeutral != null && neutralButton != null) {
+            final ButtonWithCounterView button2 = new ButtonWithCounterView(context, false, resourcesProvider);
+            button2.setText(neutralButton, false);
+            button2.setRound();
+            button2.setOnClickListener(v -> {
+                builder.getDismissRunnable().run();
+                onNeutral.run();
+            });
+            container.addView(button2, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, 48, Gravity.LEFT | Gravity.BOTTOM, 16, 4, 16, 16));
+        }
+
+        builder.setCustomView(container);
+        return builder;
+    }
 
     public interface StatusUntilDatePickerDelegate {
         void didSelectDate(int date);

@@ -110,9 +110,11 @@ void RequestEnableAutomation() {
 			u"Just to be sure — confirm once more to enable local "
 			u"automation."_q,
 			[=] {
-				Core::App().settings().writePref<bool>(
-					kAutomationKey,
-					true);
+				if (!Core::App().passcodeLocked()) {
+					Core::App().settings().writePref<bool>(
+						kAutomationKey,
+						true);
+				}
 				box->closeBox();
 			});
 	};
@@ -128,7 +130,9 @@ void RequestEnableAutomation() {
 			u"user account can control the app."_q,
 			[=] {
 				box->closeBox();
-				show->showBox(Box(second));
+				if (!Core::App().passcodeLocked()) {
+					show->showBox(Box(second));
+				}
 			});
 	};
 	show->show(Box(first));
@@ -593,6 +597,9 @@ QByteArray HandleExternalControl(const QString &command) {
 	if (!IsAppLaunched()) {
 		return Error(u"application is not launched"_q);
 	} else if (!AutomationEnabled()) {
+		if (App().passcodeLocked()) {
+			return Error(u"application is locked"_q);
+		}
 		RequestEnableAutomation();
 		return Error(u"local automation is disabled — confirm in the "
 			u"Telegram window to enable"_q);

@@ -15,26 +15,29 @@
  */
 package androidx.media3.transformer;
 
-import static androidx.media3.common.util.Assertions.checkNotNull;
 import static androidx.media3.test.utils.TestUtil.extractAllSamplesFromFilePath;
+import static androidx.test.core.app.ApplicationProvider.getApplicationContext;
+import static com.google.common.base.Preconditions.checkNotNull;
 
-import androidx.annotation.Nullable;
 import androidx.media3.common.C;
-import androidx.media3.common.MimeTypes;
 import androidx.media3.common.audio.AudioProcessor;
 import androidx.media3.common.audio.ChannelMixingAudioProcessor;
 import androidx.media3.common.audio.ChannelMixingMatrix;
 import androidx.media3.common.audio.SonicAudioProcessor;
 import androidx.media3.common.util.UnstableApi;
-import androidx.media3.extractor.ExtractorOutput;
 import androidx.media3.extractor.mp4.Mp4Extractor;
 import androidx.media3.extractor.text.DefaultSubtitleParserFactory;
+import androidx.media3.test.utils.FakeClock;
 import androidx.media3.test.utils.FakeExtractorOutput;
 import androidx.media3.test.utils.FakeTrackOutput;
+import androidx.media3.test.utils.PassthroughAudioProcessor;
+import androidx.test.core.app.ApplicationProvider;
 import com.google.common.collect.ImmutableList;
+import com.google.common.collect.Iterables;
 import java.io.IOException;
 import java.util.List;
 import java.util.StringJoiner;
+import java.util.concurrent.atomic.AtomicReference;
 
 /** Utility class for {@link Transformer} unit tests */
 @UnstableApi
@@ -42,7 +45,7 @@ public final class TestUtil {
 
   public static final String ASSET_URI_PREFIX = "asset:///media/";
   public static final String FILE_VIDEO_ONLY = "mp4/sample_18byte_nclx_colr.mp4";
-  public static final String FILE_AUDIO_ONLY = "mp3/test-cbr-info-header.mp3";
+  public static final String FILE_AUDIO_ONLY = "mp4/sample_audio_only.mp4";
   public static final String FILE_AUDIO_VIDEO = "mp4/sample.mp4";
   public static final String FILE_AUDIO_VIDEO_STEREO = "mp4/testvid_1022ms.mp4";
   public static final String FILE_AUDIO_RAW_VIDEO = "mp4/sowt-with-video.mov";
@@ -69,6 +72,7 @@ public final class TestUtil {
       "mp4/internal_emulator_transformer_output_270_rotated.mp4";
   public static final String FILE_MP4_TRIM_OPTIMIZATION_180 =
       "mp4/internal_emulator_transformer_output_180_rotated.mp4";
+  public static final String FILE_PNG = "png/media3test.png";
   private static final String DUMP_FILE_OUTPUT_DIRECTORY = "transformerdumps";
   private static final String DUMP_FILE_EXTENSION = "dump";
 
@@ -128,6 +132,10 @@ public final class TestUtil {
     return fileName + '.' + DUMP_FILE_EXTENSION;
   }
 
+  public static String getSubstitutedPath(String originalAssetPath, String newSubDir) {
+    return originalAssetPath.replaceFirst("[^/]+/", newSubDir + "/");
+  }
+
   /**
    * Returns the file path of the sequence export dump file, based on the item summaries provided.
    *
@@ -163,11 +171,12 @@ public final class TestUtil {
    * @param filePath The {@link String filepath} to get video timestamps for.
    * @return The {@link List} of video timestamps.
    */
-  public static List<Long> getVideoSampleTimesUs(String filePath) throws IOException {
+  public static ImmutableList<Long> getVideoSampleTimesUs(String filePath) throws IOException {
     Mp4Extractor mp4Extractor = new Mp4Extractor(new DefaultSubtitleParserFactory());
     FakeExtractorOutput fakeExtractorOutput =
         extractAllSamplesFromFilePath(mp4Extractor, checkNotNull(filePath));
-    return checkNotNull(getTrackOutput(fakeExtractorOutput, C.TRACK_TYPE_VIDEO)).getSampleTimesUs();
+    return Iterables.getOnlyElement(fakeExtractorOutput.getTrackOutputsForType(C.TRACK_TYPE_VIDEO))
+        .getSampleTimesUs();
   }
 
   /**
@@ -176,32 +185,41 @@ public final class TestUtil {
    * @param filePath The {@link String filepath} to get audio timestamps for.
    * @return The {@link List} of audio timestamps.
    */
-  public static List<Long> getAudioSampleTimesUs(String filePath) throws IOException {
+  public static ImmutableList<Long> getAudioSampleTimesUs(String filePath) throws IOException {
     Mp4Extractor mp4Extractor = new Mp4Extractor(new DefaultSubtitleParserFactory());
     FakeExtractorOutput fakeExtractorOutput =
         extractAllSamplesFromFilePath(mp4Extractor, checkNotNull(filePath));
-    return checkNotNull(getTrackOutput(fakeExtractorOutput, C.TRACK_TYPE_AUDIO)).getSampleTimesUs();
+    return Iterables.getOnlyElement(fakeExtractorOutput.getTrackOutputsForType(C.TRACK_TYPE_AUDIO))
+        .getSampleTimesUs();
   }
 
   /**
-   * Returns a {@link FakeTrackOutput} of given {@link C.TrackType} from the {@link
-   * FakeExtractorOutput}.
-   *
-   * @param extractorOutput The {@link ExtractorOutput} to get the {@link FakeTrackOutput} from.
-   * @param trackType The {@link C.TrackType}.
-   * @return The {@link FakeTrackOutput} or {@code null} if a track is not found.
+   * Returns a new {@link CompositionPlayer} built using {@link
+   * #createTestCompositionPlayerBuilder()}.
    */
-  @Nullable
-  public static FakeTrackOutput getTrackOutput(
-      FakeExtractorOutput extractorOutput, @C.TrackType int trackType) {
-    for (int i = 0; i < extractorOutput.numberOfTracks; i++) {
-      FakeTrackOutput trackOutput = extractorOutput.trackOutputs.get(i);
-      String sampleMimeType = checkNotNull(trackOutput.lastFormat).sampleMimeType;
-      if ((trackType == C.TRACK_TYPE_AUDIO && MimeTypes.isAudio(sampleMimeType))
-          || (trackType == C.TRACK_TYPE_VIDEO && MimeTypes.isVideo(sampleMimeType))) {
-        return trackOutput;
-      }
+  public static CompositionPlayer createTestCompositionPlayer() {
+    return createTestCompositionPlayerBuilder().build();
+  }
+
+  /**
+   * Returns a new {@link CompositionPlayer.Builder} configured for unit tests.
+   *
+   * <p>This method sets an auto advancing {@link FakeClock} and {@link
+   * ApplicationProvider#getApplicationContext()} as context.
+   */
+  public static CompositionPlayer.Builder createTestCompositionPlayerBuilder() {
+    return new CompositionPlayer.Builder(getApplicationContext())
+        .setClock(new FakeClock(/* isAutoAdvancing= */ true));
+  }
+
+  public static final class FormatCapturingAudioProcessor extends PassthroughAudioProcessor {
+    public final AtomicReference<AudioFormat> inputFormat = new AtomicReference<>();
+
+    @Override
+    protected AudioFormat onConfigure(AudioFormat inputAudioFormat)
+        throws UnhandledAudioFormatException {
+      inputFormat.set(inputAudioFormat);
+      return super.onConfigure(inputAudioFormat);
     }
-    return null;
   }
 }

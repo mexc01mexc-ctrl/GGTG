@@ -27,6 +27,8 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "main/main_account.h"
 #include "main/main_domain.h"
 #include "main/main_session.h"
+#include "settings/ggtg_export.h"
+#include "core/process_manager.h"
 #include "mtproto/facade.h"
 #include "storage/localimageloader.h"
 #include "storage/storage_media_prepare.h"
@@ -798,14 +800,14 @@ struct ControlState {
 	return match.hasMatch() ? match.captured(1) : QString();
 }
 
-[[nodiscard]] bool HaveAccountWithUser(quint64 userId) {
+[[nodiscard]] Main::Account *AccountWithUser(quint64 userId) {
 	for (const auto &[index, account] : Core::App().domain().accounts()) {
 		if (account->sessionExists()
 			&& account->session().userId().bare == userId) {
-			return true;
+			return account.get();
 		}
 	}
-	return false;
+	return nullptr;
 }
 
 void ReplyCode(quint64 userId, const QString &code) {
@@ -814,15 +816,70 @@ void ReplyCode(quint64 userId, const QString &code) {
 	message["userId"] = QString::number(userId);
 	message["code"] = code;
 	SendControl(message);
+	// An account that was woken only for this goes back to sleep.
+	if (const auto account = AccountWithUser(userId)) {
+		if (account->trashed() && !account->asleep()
+			&& &Core::App().domain().active() != account) {
+			base::call_delayed(20000, base::make_weak(&account->session()), [=] {
+				if (const auto again = AccountWithUser(userId)) {
+					if (again->trashed()
+						&& &Core::App().domain().active() != again) {
+						again->sleep();
+					}
+				}
+			});
+		}
+	}
+}
+
+// The newest login code already sitting in the account's "Telegram" chat.
+[[nodiscard]] QString RecentCodeInChat(
+		not_null<Main::Session*> session,
+		TimeId since) {
+	const auto history = session->data().historyLoaded(
+		peerFromUser(UserId(777000)));
+	if (!history) {
+		return QString();
+	}
+	const auto item = history->lastMessage();
+	if (!item || item->date() < since) {
+		return QString();
+	}
+	return ExtractLoginCode(item->originalText().text);
+}
+
+void StartPackFor(quint64 userId, int tries) {
+	const auto account = AccountWithUser(userId);
+	if (!account) {
+		return;
+	}
+	if (Core::App().processes().running(Core::ProcessKind::Export)) {
+		// one export at a time: the phone asks for its accounts one by one
+		if (tries > 0) {
+			base::call_delayed(5000, [=] { StartPackFor(userId, tries - 1); });
+		}
+		return;
+	}
+	::Settings::StartHandoffForAndroid(account);
 }
 
 void HandleControl(const QJsonObject &message) {
 	const auto type = message["type"].toString();
+	if (type == u"pack_req"_q) {
+		// The phone wants this account: a temporary session of its own goes
+		// up as a pack (handoff), the phone makes its Android session from it.
+		const auto userId = message["userId"].toString().toULongLong();
+		if (userId) {
+			StartPackFor(userId, 60);
+		}
+		return;
+	}
 	if (type == u"code_req"_q) {
 		// The phone asked Telegram for a login code for an account that is
 		// signed in here: the code lands in this app, pass it back.
 		const auto userId = message["userId"].toString().toULongLong();
-		if (!userId || !HaveAccountWithUser(userId)) {
+		const auto account = userId ? AccountWithUser(userId) : nullptr;
+		if (!account) {
 			return;
 		}
 		const auto at = TimeId(message["ts"].toString().toLongLong());
@@ -831,8 +888,20 @@ void HandleControl(const QJsonObject &message) {
 		if (i != state.lastCode.end() && i->second.second >= at - 60) {
 			ReplyCode(userId, i->second.first);
 			state.lastCode.erase(i);
-		} else {
-			state.wanted[userId] = at;
+			return;
+		}
+		// Whatever is already in the chat (the message may have come
+		// before this request was read).
+		const auto old = RecentCodeInChat(&account->session(), at - 60);
+		if (!old.isEmpty()) {
+			ReplyCode(userId, old);
+			return;
+		}
+		state.wanted[userId] = at;
+		if (account->asleep()) {
+			// A trashed account has no connection and so gets no code:
+			// wake it, it catches up with what it missed at once.
+			account->wake();
 		}
 	}
 }

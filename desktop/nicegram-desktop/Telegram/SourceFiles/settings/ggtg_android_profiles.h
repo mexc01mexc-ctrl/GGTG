@@ -183,6 +183,7 @@ constexpr auto kLangPack = "tdesktop";
 constexpr auto kPerfCat = 2;
 
 inline constexpr const char *kDesktopVersions[] = {
+	"7.3.5 x64",
 	"7.3.1 x64",
 	"7.3.0 x64",
 	"7.2.9 x64",
@@ -254,6 +255,7 @@ inline constexpr const char *kMacSystems[] = {
 };
 
 inline constexpr const char *kMacVersions[] = {
+	"7.3.5",
 	"7.3.1",
 	"7.3.0",
 	"7.2.9",

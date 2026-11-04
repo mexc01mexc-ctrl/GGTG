@@ -106,7 +106,9 @@ object GgtgPackImporter {
         file: File,
         proxySource: GgtgProxySource?,
         progressDialog: app.ggtg.ui.TdataImportProgressDialog,
-        createBackup: Boolean = false
+        createBackup: Boolean = false,
+        // a failed handoff is a failure, not a reason to run the Mac's temporary session as it is
+        noDirectFallback: Boolean = false
     ): GgtgImportSupport.ImportResult = GgtgWakeLock.withLock("pack_import") {
         val accounts = withContext(Dispatchers.IO) { readPack(file) }
         if (accounts.isEmpty()) {
@@ -195,7 +197,7 @@ object GgtgPackImporter {
             } catch (t: Throwable) {
                 Result.failure(t)
             }
-            if (result.isFailure && account.handoff && tempSlot != null && account.keys.isNotEmpty()
+            if (result.isFailure && !noDirectFallback && account.handoff && tempSlot != null && account.keys.isNotEmpty()
                 && result.exceptionOrNull() !is TdataImportHelper.PasswordSkippedException) {
                 // If handoff failed, fall back to direct install so the account isn't lost
                 FileLog.e("ggtg pack: handoff failed for userId=${account.userId}, falling back to direct install", result.exceptionOrNull())

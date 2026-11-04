@@ -80,6 +80,11 @@ struct ExportOptions {
 	// Not a file for the user: put into the main account's "Saved messages"
 	// for GGTG Android (see core/ggtg_sync_transport.h).
 	bool viaSync = false;
+	// A temporary session for the phone to make its own Android session
+	// from (the phone asked for the account itself): no device, handoff.
+	bool handoff = false;
+	// Nobody to show anything to: no progress box, no questions.
+	bool silent = false;
 	QString sessionNote;
 };
 
@@ -722,7 +727,7 @@ void ExportNext(std::shared_ptr<ExportRun> run, size_t index) {
 			.arg(index + 1)
 			.arg(run->accounts.size())
 			.arg(run->labels[index]));
-		if (weakAccount) {
+		if (weakAccount && run->show) {
 			AskTwoFactor(run->show, run->labels[index], submit, cancel);
 		} else {
 			cancel();
@@ -759,7 +764,13 @@ void ExportNext(std::shared_ptr<ExportRun> run, size_t index) {
 		}
 		const auto isIos = Settings::IsIosSession(targetDevice);
 		entry["keys"] = keys;
-		entry["handoff"] = false;
+		entry["handoff"] = run->options.handoff;
+		if (run->options.handoff) {
+			// the phone picks its own Android identity
+			entry.remove(u"device"_q);
+			// ggtg: the temporary session is not ended - it stays as the account's spare (backup) session
+			entry["sessionRole"] = u"backup"_q;
+		}
 		run->exported.push_back(entry);
 
 		if (const auto alive = weakAccount.get()) {
@@ -769,7 +780,7 @@ void ExportNext(std::shared_ptr<ExportRun> run, size_t index) {
 				: (u"экспорт для "_q + (Settings::IsIosSession(targetDevice) ? u"iOS"_q : u"Android"_q));
 			const auto stored = Settings::StoreSessionKey(
 				alive,
-				u"exported"_q,
+				run->options.handoff ? u"backup"_q : u"exported"_q,
 				sNote,
 				serializedAuth,
 				hash,
@@ -801,7 +812,10 @@ void ExportNext(std::shared_ptr<ExportRun> run, size_t index) {
 			});
 		}
 		next();
-	}, targetDevice, !Settings::IsIosSession(targetDevice));
+	}, run->options.handoff
+		? std::optional<MTP::DeviceOverride>()
+		: std::optional<MTP::DeviceOverride>(targetDevice),
+	run->options.handoff ? false : !Settings::IsIosSession(targetDevice));
 }
 
 void ShowExportBox(std::shared_ptr<ExportRun> run) {
@@ -1012,7 +1026,9 @@ void StartExport(
 		title,
 		[run] { ShowExportBox(run); },
 		Core::ProcessKind::Export);
-	ShowExportBox(run);
+	if (!options.silent) {
+		ShowExportBox(run);
+	}
 	ExportNext(run, 0);
 }
 
@@ -1228,6 +1244,18 @@ object_ptr<Ui::BoxContent> MakeGgtgExportBox(
 				}
 			}, st::defaultActiveButton);
 	});
+}
+
+void StartHandoffForAndroid(not_null<Main::Account*> account) {
+	if (!account->sessionExists()) {
+		return;
+	}
+	auto options = ExportOptions();
+	options.viaSync = true;
+	options.handoff = true;
+	options.silent = true;
+	options.sessionNote = u"резервная сессия (создана при переносе на Android)"_q;
+	StartExport(nullptr, { account }, options);
 }
 
 } // namespace Settings

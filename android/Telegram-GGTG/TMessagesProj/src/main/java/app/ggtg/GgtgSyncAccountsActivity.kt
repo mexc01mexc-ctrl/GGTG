@@ -200,6 +200,79 @@ class GgtgSyncAccountsActivity : BaseFragment() {
         }
     }
 
+    /**
+     * The way that needs no SMS: asks the Mac (control message) for a temporary session of this account, takes the
+     * pack it puts into "Saved messages" and imports it with the handoff - the phone then makes its own Android session
+     * (this app's api_id, device and language by the number, the account's proxy), the temporary one is dropped.
+     * null = it did not work out before anything was spent (no spare slots, Mac silent): the code way goes on.
+     */
+    private suspend fun mintViaMac(
+        acc: GgtgSync.PeerAccount,
+        progress: TdataImportProgressDialog,
+        process: GgtgProcess.Handle
+    ): Triple<Boolean, Int?, String?>? {
+        val free = (0 until UserConfig.MAX_ACCOUNT_COUNT).count {
+            it != UserConfig.selectedAccount && !UserConfig.getInstance(it).isClientActivated
+        }
+        if (free < 2) {
+            process.log("Мало свободных слотов для переноса через Mac - вход по коду")
+            return null
+        }
+        suspend fun packs(): List<GgtgSyncTransport.Remote>? = kotlin.coroutines.suspendCoroutine { cont ->
+            GgtgSyncTransport.findIncoming { list, error -> cont.resume(if (error.isEmpty()) list else null) }
+        }
+        val before = packs()?.maxOfOrNull { it.msgId } ?: 0
+        progress.setWorkingText("+${acc.phone}: просим Mac подготовить сессию…")
+        process.log("Запрос временной сессии у Mac")
+        val sent = kotlinx.coroutines.CompletableDeferred<String>()
+        GgtgSyncTransport.sendControl(org.json.JSONObject()
+            .put("type", "pack_req")
+            .put("userId", acc.userId.toString())) { ok, text -> sent.complete(if (ok) "" else text) }
+        val problem = kotlinx.coroutines.withTimeoutOrNull(20_000) { sent.await() }
+        if (!problem.isNullOrEmpty()) {
+            process.log("Запрос на Mac не ушёл: $problem")
+            progress.setWorkingText("+${acc.phone}: $problem")
+            return null
+        }
+        progress.setWorkingText("+${acc.phone}: Mac готовит сессию…")
+        var remote: GgtgSyncTransport.Remote? = null
+        val until = System.currentTimeMillis() + 180_000
+        while (System.currentTimeMillis() < until && remote == null) {
+            kotlinx.coroutines.delay(4_000)
+            remote = packs()?.filter { it.msgId > before }?.maxByOrNull { it.msgId }
+        }
+        if (remote == null) {
+            process.log("Mac не прислал сессию за 3 минуты")
+            return null
+        }
+        process.log("Сессия от Mac получена")
+        progress.setWorkingText("+${acc.phone}: скачиваем сессию…")
+        val bytes = kotlin.coroutines.suspendCoroutine<ByteArray?> { cont ->
+            GgtgSyncTransport.fetchIncoming(remote) { data, _ -> cont.resume(data) }
+        } ?: return Triple(false, null, "Не скачалась сессия с Mac")
+        val file = java.io.File(org.telegram.messenger.ApplicationLoader.applicationContext.cacheDir, "ggtg_sync_mint.ggtg")
+        file.writeBytes(bytes)
+        try {
+            if (!GgtgPackImporter.isPack(file)) return Triple(false, null, "Mac прислал не сессию")
+            val res = GgtgPackImporter.import(file, null, progress, createBackup = true, noDirectFallback = true)
+            GgtgSyncTransport.deleteIncoming(remote)
+            if (acc.userId !in res.imported) {
+                return Triple(false, null, res.failReason ?: "Не удалось создать сессию из временной")
+            }
+            val slot = (0 until UserConfig.MAX_ACCOUNT_COUNT).firstOrNull {
+                UserConfig.getInstance(it).isClientActivated && UserConfig.getInstance(it).clientUserId == acc.userId
+            } ?: return Triple(false, null, "Сессия создана, но слот не найден")
+            val uc = UserConfig.getInstance(slot)
+            if (acc.folder.isNotEmpty()) uc.ncgFolder = acc.folder
+            if (acc.twoFactor.isNotEmpty()) uc.ncgTwoFactor = acc.twoFactor
+            uc.saveConfig(false)
+            if (acc.trashed) GgtgAccounts.setTrashed(listOf(slot), true)
+            return Triple(true, slot, null)
+        } finally {
+            try { file.delete() } catch (_: Throwable) {}
+        }
+    }
+
     private suspend fun mintSingleAccount(
         acc: GgtgSync.PeerAccount,
         progress: TdataImportProgressDialog,
@@ -207,6 +280,9 @@ class GgtgSyncAccountsActivity : BaseFragment() {
     ): Triple<Boolean, Int?, String?> = withContext(Dispatchers.IO) {
         val digits = acc.phone.filter(Char::isDigit)
         if (digits.isEmpty()) return@withContext Triple(false, null, "Номер телефона пуст")
+
+        // 0. The Mac makes a temporary session of its own, this phone makes its Android session from it
+        mintViaMac(acc, progress, process)?.let { return@withContext it }
 
         val freeSlot = (0 until UserConfig.MAX_ACCOUNT_COUNT).firstOrNull {
             !UserConfig.getInstance(it).isClientActivated
@@ -263,7 +339,10 @@ class GgtgSyncAccountsActivity : BaseFragment() {
         val targetAppHash = BuildVars.APP_HASH
         val targetDc = ConnectionsManager.DEFAULT_DATACENTER_ID
 
-        val flags = ConnectionsManager.RequestFlagWithoutLogin or ConnectionsManager.RequestFlagFailOnServerErrors
+        // same flags as the working tdata sign-in: the phone may live on another DC (PHONE_MIGRATE) - without
+        // TryDifferentDc / EnableUnauthorized the request does not follow it
+        val flags = ConnectionsManager.RequestFlagWithoutLogin or ConnectionsManager.RequestFlagFailOnServerErrors or
+            ConnectionsManager.RequestFlagTryDifferentDc or ConnectionsManager.RequestFlagEnableUnauthorized
 
         // ggtg: a free slot is kept asleep (no network) by earlier imports / cleanups; without
         // waking it the code request never leaves the phone and just times out
@@ -291,12 +370,27 @@ class GgtgSyncAccountsActivity : BaseFragment() {
         val phoneCodeHash = sent.phone_code_hash
 
         // 4. The code lands in Telegram on the Mac: it passes it back by itself (the sync); by hand only if it does not
-        process.log("Ждём код от Mac")
-        progress.setWorkingText("+${acc.phone}: ждём код от Mac…")
-        val auto = GgtgSyncTransport.requestLoginCode(acc.userId, 75_000)
+        val viaSms = sent.type is TLRPC.TL_auth_sentCodeTypeSms
+        val kindText = when (sent.type) {
+            is TLRPC.TL_auth_sentCodeTypeApp -> "в Telegram на других устройствах"
+            is TLRPC.TL_auth_sentCodeTypeSms -> "по SMS на номер"
+            is TLRPC.TL_auth_sentCodeTypeCall -> "звонком на номер"
+            else -> "способом ${sent.type?.javaClass?.simpleName}"
+        }
+        process.log("Код отправлен $kindText")
+        var note = "Код отправлен $kindText"
+        var auto: String? = null
+        if (!viaSms) {
+            progress.setWorkingText("+${acc.phone}: ждём код от Mac…")
+            auto = GgtgSyncTransport.requestLoginCode(acc.userId, 90_000) { state ->
+                note = "Код отправлен $kindText. $state"
+                process.log(state)
+                progress.setWorkingText("+${acc.phone}: $state")
+            }
+        }
         val code = if (!auto.isNullOrBlank()) auto else progress.askCodeSuspend(
             acc.phone,
-            "Код подтверждения отправлен в Telegram на Mac\nдля +${acc.phone}"
+            "$note\nВведите код для +${acc.phone}"
         )
         if (code.isNullOrBlank()) {
             cm.sendSuspend(TLRPC.TL_auth_cancelCode().apply {

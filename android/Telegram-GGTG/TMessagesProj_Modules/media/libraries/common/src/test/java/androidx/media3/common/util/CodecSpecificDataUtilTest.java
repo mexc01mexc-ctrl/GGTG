@@ -25,6 +25,7 @@ import androidx.media3.common.C;
 import androidx.media3.common.ColorInfo;
 import androidx.media3.common.Format;
 import androidx.media3.common.MimeTypes;
+import androidx.media3.test.utils.TestUtil;
 import androidx.test.ext.junit.runners.AndroidJUnit4;
 import org.junit.Test;
 import org.junit.runner.RunWith;
@@ -47,10 +48,10 @@ public class CodecSpecificDataUtilTest {
           0, 46, -32, 0, // avgBitRate
           0, 1, 119, 0, // sampleRate = 96000
         };
-    Pair<Integer, Integer> sampleRateAndChannelCount =
-        CodecSpecificDataUtil.parseAlacAudioSpecificConfig(alacSpecificConfig);
-    assertThat(sampleRateAndChannelCount.first).isEqualTo(96000);
-    assertThat(sampleRateAndChannelCount.second).isEqualTo(2);
+    int[] parsedAlacConfig = CodecSpecificDataUtil.parseAlacAudioSpecificConfig(alacSpecificConfig);
+    assertThat(parsedAlacConfig[0]).isEqualTo(96000);
+    assertThat(parsedAlacConfig[1]).isEqualTo(2);
+    assertThat(parsedAlacConfig[2]).isEqualTo(16);
   }
 
   @Test
@@ -190,6 +191,56 @@ public class CodecSpecificDataUtilTest {
   }
 
   @Test
+  public void buildApvCodecString_withValidApvSpecificConfig_returnsCorrectCodecString() {
+    byte[] apvSpecificConfig =
+        TestUtil.createByteArray(
+            1, // configurationVersion
+            1, // number_of_configuration_entry
+            1, // pbu_type
+            1, // number_of_frame_info
+            0, // reserved_zero_6bits, color_description_present_flag(1 bit),
+            // capture_time_distance_ignored(1 bit)
+            33, // profile_idc
+            150, // level_idc
+            0, // band_idc
+            0, // frame_width (4 bytes)
+            0,
+            2,
+            255,
+            0, // frame_height (4 bytes)
+            0,
+            1,
+            224,
+            34, // chroma_format_idc (4 bit) + bit_depth_minus8(4 bit)
+            0 // capture_time_distance
+            );
+
+    String codecString = CodecSpecificDataUtil.buildApvCodecString(apvSpecificConfig);
+
+    assertThat(codecString).isEqualTo("apv1.apvf33.apvl150.apvb0");
+  }
+
+  @Test
+  public void
+      getCodecProfileAndLevel_withApvProfile422_10CodecString_returnsCorrectProfileAndLevel() {
+    assertCodecProfileAndLevelForCodecsString(
+        MimeTypes.VIDEO_APV,
+        "apv1.apvf33.apvl30.apvb1",
+        MediaCodecInfo.CodecProfileLevel.APVProfile422_10,
+        MediaCodecInfo.CodecProfileLevel.APVLevel1Band1);
+  }
+
+  @Test
+  public void
+      getCodecProfileAndLevel_withApvProfile422_10HDR10PlusCodecString_returnsCorrectProfileAndLevel() {
+    assertCodecProfileAndLevelForCodecsString(
+        MimeTypes.VIDEO_APV,
+        "apv1.apvf44.apvl60.apvb2",
+        MediaCodecInfo.CodecProfileLevel.APVProfile422_10HDR10Plus,
+        MediaCodecInfo.CodecProfileLevel.APVLevel2Band2);
+  }
+
+  @Test
   public void getCodecProfileAndLevel_handlesMvHevcCodecString() {
     assertCodecProfileAndLevelForCodecsString(
         MimeTypes.VIDEO_MV_HEVC,
@@ -200,66 +251,108 @@ public class CodecSpecificDataUtilTest {
 
   @Test
   public void getCodecProfileAndLevel_handlesIamfCodecString_forSimpleProfileOpus() {
-    // TODO(b/426125651): Replace iamf simple profile value with
-    // MediaCodecInfo.CodecProfileLevel.IAMFProfileSimpleOpus
     assertCodecProfileAndLevelForCodecsString(
-        MimeTypes.AUDIO_IAMF, "iamf.000.000.Opus", /* Simple profile= */ 0x1010001, 0);
+        MimeTypes.AUDIO_IAMF,
+        "iamf.000.000.Opus",
+        MediaCodecInfo.CodecProfileLevel.IAMFProfileSimpleOpus,
+        0);
   }
 
   @Test
   public void getCodecProfileAndLevel_handlesIamfCodecString_forSimpleProfileAac() {
-    // TODO(b/426125651): Replace iamf simple profile value with
-    // MediaCodecInfo.CodecProfileLevel.IAMFProfileSimpleAac
     assertCodecProfileAndLevelForCodecsString(
-        MimeTypes.AUDIO_IAMF, "iamf.000.000.mp4a.40.2", /* Simple profile= */ 0x1010002, 0);
+        MimeTypes.AUDIO_IAMF,
+        "iamf.000.000.mp4a.40.2",
+        MediaCodecInfo.CodecProfileLevel.IAMFProfileSimpleAac,
+        0);
   }
 
   @Test
   public void getCodecProfileAndLevel_handlesIamfCodecString_forSimpleProfileFlac() {
-    // TODO(b/426125651): Replace iamf simple profile value with
-    // MediaCodecInfo.CodecProfileLevel.IAMFProfileSimpleFlac
     assertCodecProfileAndLevelForCodecsString(
-        MimeTypes.AUDIO_IAMF, "iamf.000.000.fLaC", /* Simple profile= */ 0x1010004, 0);
+        MimeTypes.AUDIO_IAMF,
+        "iamf.000.000.fLaC",
+        MediaCodecInfo.CodecProfileLevel.IAMFProfileSimpleFlac,
+        0);
   }
 
   @Test
-  public void getCodecProfileAndLevel_handlesIamfCodecString_forSimpleProfileIpcm() {
-    // TODO(b/426125651): Replace iamf simple profile value with
-    // MediaCodecInfo.CodecProfileLevel.IAMFProfileSimpleIpcm
+  public void getCodecProfileAndLevel_handlesIamfCodecString_forSimpleProfilePcm() {
     assertCodecProfileAndLevelForCodecsString(
-        MimeTypes.AUDIO_IAMF, "iamf.000.000.ipcm", /* Simple profile= */ 0x1010008, 0);
+        MimeTypes.AUDIO_IAMF,
+        "iamf.000.000.ipcm",
+        MediaCodecInfo.CodecProfileLevel.IAMFProfileSimplePcm,
+        0);
   }
 
   @Test
   public void getCodecProfileAndLevel_handlesIamfCodecString_forBaseProfileOpus() {
-    // TODO(b/426125651): Replace iamf base profile value with
-    // MediaCodecInfo.CodecProfileLevel.IAMFProfileBaseOpus
     assertCodecProfileAndLevelForCodecsString(
-        MimeTypes.AUDIO_IAMF, "iamf.001.000.Opus", /* Base profile= */ 0x1020001, 0);
+        MimeTypes.AUDIO_IAMF,
+        "iamf.001.000.Opus",
+        MediaCodecInfo.CodecProfileLevel.IAMFProfileBaseOpus,
+        0);
   }
 
   @Test
   public void getCodecProfileAndLevel_handlesIamfCodecString_forBaseProfileAac() {
-    // TODO(b/426125651): Replace iamf base profile value with
-    // MediaCodecInfo.CodecProfileLevel.IAMFProfileBaseAac
     assertCodecProfileAndLevelForCodecsString(
-        MimeTypes.AUDIO_IAMF, "iamf.001.000.mp4a.40.2", /* Base profile= */ 0x1020002, 0);
+        MimeTypes.AUDIO_IAMF,
+        "iamf.001.000.mp4a.40.2",
+        MediaCodecInfo.CodecProfileLevel.IAMFProfileBaseAac,
+        0);
   }
 
   @Test
   public void getCodecProfileAndLevel_handlesIamfCodecString_forBaseProfileFlac() {
-    // TODO(b/426125651): Replace iamf base profile value with
-    // MediaCodecInfo.CodecProfileLevel.IAMFProfileBaseFlac
     assertCodecProfileAndLevelForCodecsString(
-        MimeTypes.AUDIO_IAMF, "iamf.001.000.fLaC", /* Base profile= */ 0x1020004, 0);
+        MimeTypes.AUDIO_IAMF,
+        "iamf.001.000.fLaC",
+        MediaCodecInfo.CodecProfileLevel.IAMFProfileBaseFlac,
+        0);
   }
 
   @Test
-  public void getCodecProfileAndLevel_handlesIamfCodecString_forBaseProfileIpcm() {
-    // TODO(b/426125651): Replace iamf base profile value with
-    // MediaCodecInfo.CodecProfileLevel.IAMFProfileBaseIpcm
+  public void getCodecProfileAndLevel_handlesIamfCodecString_forBaseProfilePcm() {
     assertCodecProfileAndLevelForCodecsString(
-        MimeTypes.AUDIO_IAMF, "iamf.001.000.ipcm", /* Base profile= */ 0x1020008, 0);
+        MimeTypes.AUDIO_IAMF,
+        "iamf.001.000.ipcm",
+        MediaCodecInfo.CodecProfileLevel.IAMFProfileBasePcm,
+        0);
+  }
+
+  @Test
+  public void
+      getDolbyVisionBaseLayerMimeType_withNonFallbackCompatibleFormat_returnsBaseEncoding() {
+    // Profile 10.0 (Full Range PQ) which does NOT allow fallback.
+    Format formatDav1NoFallbackPossible =
+        new Format.Builder()
+            .setSampleMimeType(MimeTypes.VIDEO_DOLBY_VISION)
+            .setCodecs("dav1.10.01")
+            .setColorInfo(
+                new ColorInfo.Builder()
+                    .setColorSpace(C.COLOR_SPACE_BT2020)
+                    .setColorTransfer(C.COLOR_TRANSFER_ST2084)
+                    .setColorRange(C.COLOR_RANGE_FULL)
+                    .build())
+            .build();
+    // Profile 10.1 (Limited Range PQ) which allows fallback to AV1.
+    Format formatDav1FallbackToAv1 =
+        new Format.Builder()
+            .setSampleMimeType(MimeTypes.VIDEO_DOLBY_VISION)
+            .setCodecs("dav1.10.01")
+            .setColorInfo(
+                new ColorInfo.Builder()
+                    .setColorSpace(C.COLOR_SPACE_BT2020)
+                    .setColorTransfer(C.COLOR_TRANSFER_ST2084)
+                    .setColorRange(C.COLOR_RANGE_LIMITED)
+                    .build())
+            .build();
+
+    assertThat(CodecSpecificDataUtil.getDolbyVisionBaseLayerMimeType(formatDav1NoFallbackPossible))
+        .isEqualTo(MimeTypes.VIDEO_AV1);
+    assertThat(CodecSpecificDataUtil.getDolbyVisionBaseLayerMimeType(formatDav1FallbackToAv1))
+        .isEqualTo(MimeTypes.VIDEO_AV1);
   }
 
   private static void assertCodecProfileAndLevelForCodecsString(

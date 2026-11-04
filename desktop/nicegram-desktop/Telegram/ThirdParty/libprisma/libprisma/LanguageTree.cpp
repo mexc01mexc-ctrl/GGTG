@@ -1,6 +1,7 @@
 #include "LanguageTree.h"
 
 #include "TokenList.h"
+#include "UnicodeEscapes.h"
 #include <boost/regex.hpp>
 
 void LanguageTree::load(const std::string& content)
@@ -60,7 +61,11 @@ void LanguageTree::parseLanguages(Buffer &buffer)
         std::string name = freadString(buffer);
         std::string displayName = freadString(buffer);
         size_t index = freadUint16(buffer);
-        m_languages.emplace(name, std::pair<std::string, size_t>(displayName, index));
+
+        if (m_languages.emplace(name, std::pair<std::string, size_t>(displayName, index)).second)
+        {
+            m_order.push_back(name);
+        }
     }
 }
 
@@ -95,6 +100,9 @@ void LanguageTree::parseGrammars(Buffer &buffer)
 void LanguageTree::parsePatterns(Buffer &buffer)
 {
     uint16_t count = freadUint16(buffer);
+
+    m_patterns.resize(count);
+    m_resolved = std::vector<std::atomic<const Pattern*>>(count);
 
     for (int i = 0; i < count; ++i)
     {
@@ -163,11 +171,11 @@ void LanguageTree::parsePatterns(Buffer &buffer)
 
             if (inside != std::string::npos)
             {
-                m_patterns.push_back(std::make_shared<Pattern>(pattern, flags, lookbehind, greedy, std::string{ alias }, std::make_shared<GrammarPtr>(shared_from_this(), inside)));
+                m_patternsRaw.push_back(std::make_shared<PatternRaw>(libprisma::widenUnicodeClasses(pattern), flags, lookbehind, greedy, std::string{ alias }, std::make_shared<GrammarPtr>(shared_from_this(), inside)));
             }
             else
             {
-                m_patterns.push_back(std::make_shared<Pattern>(pattern, flags, lookbehind, greedy, std::string{ alias }));
+                m_patternsRaw.push_back(std::make_shared<PatternRaw>(libprisma::widenUnicodeClasses(pattern), flags, lookbehind, greedy, std::string{ alias }, nullptr));
             }
         }
     }
@@ -175,6 +183,23 @@ void LanguageTree::parsePatterns(Buffer &buffer)
 
 const Pattern* LanguageTree::resolvePattern(size_t path)
 {
+    if (const Pattern* resolved = m_resolved[path].load(std::memory_order_acquire))
+    {
+        return resolved;
+    }
+
+    std::lock_guard guard(m_resolveLock);
+
+    // Another thread may have compiled it while this one waited.
+    if (const Pattern* resolved = m_resolved[path].load(std::memory_order_relaxed))
+    {
+        return resolved;
+    }
+
+    m_patterns[path] = m_patternsRaw[path]->realize();
+    m_patternsRaw[path] = nullptr;
+
+    m_resolved[path].store(m_patterns[path].get(), std::memory_order_release);
     return m_patterns[path].get();
 }
 

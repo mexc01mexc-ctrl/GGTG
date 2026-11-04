@@ -9133,14 +9133,14 @@ void ShowEditDeviceBox(
 		if (state->mode == PlatformMode::Windows) {
 			state->deviceModel = u"PC 64bit"_q;
 			state->systemVersion = u"Windows 11 x64"_q;
-			state->appVersion = u"7.3.1 x64"_q;
+			state->appVersion = u"7.3.5 x64"_q;
 			state->langPack = u"tdesktop"_q;
 			state->apiId = Ggtg::DesktopProfiles::kAppId;
 			state->apiHash = QString::fromLatin1(Ggtg::DesktopProfiles::kAppHash);
 		} else if (state->mode == PlatformMode::Mac) {
 			state->deviceModel = u"MacBook Pro 14\""_q;
 			state->systemVersion = u"macOS 15.1"_q;
-			state->appVersion = u"7.3.1"_q;
+			state->appVersion = u"7.3.5"_q;
 			state->langPack = u"tdesktop"_q;
 			state->apiId = Ggtg::DesktopProfiles::kAppId;
 			state->apiHash = QString::fromLatin1(Ggtg::DesktopProfiles::kAppHash);
@@ -9187,14 +9187,14 @@ void ShowEditDeviceBox(
 			if (newMode == PlatformMode::Windows) {
 				state->deviceModel = u"PC 64bit"_q;
 				state->systemVersion = u"Windows 11 x64"_q;
-				state->appVersion = u"7.3.1 x64"_q;
+				state->appVersion = u"7.3.5 x64"_q;
 				state->langPack = u"tdesktop"_q;
 				state->apiId = Ggtg::DesktopProfiles::kAppId;
 				state->apiHash = QString::fromLatin1(Ggtg::DesktopProfiles::kAppHash);
 			} else if (newMode == PlatformMode::Mac) {
 				state->deviceModel = u"MacBook Pro 14\""_q;
 				state->systemVersion = u"macOS 15.1"_q;
-				state->appVersion = u"7.3.1"_q;
+				state->appVersion = u"7.3.5"_q;
 				state->langPack = u"tdesktop"_q;
 				state->apiId = Ggtg::DesktopProfiles::kAppId;
 				state->apiHash = QString::fromLatin1(Ggtg::DesktopProfiles::kAppHash);

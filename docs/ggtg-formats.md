@@ -174,3 +174,11 @@ Android: `filesDir/ggtg_bulk_db/id_calibration.json`.
 - Android → Mac (аккаунт есть на телефоне, на Mac создаётся новая сессия по QR): Mac показывает QR-вход и на каждый
   токен шлёт `{"type":"qr","userId":"…","link":"tg://login?token=…"}`; телефон принимает его `auth.acceptLoginToken`
   аккаунтом с этим `userId`. Прокси, язык и время Mac берёт с аккаунта на телефоне (список синхронизации и номер).
+
+### Control message `pack_req` (phone asks the Mac for an account)
+
+`{"type":"pack_req","userId":"<id>"}` in a `ctl` file. The Mac makes a separate temporary session of that
+account (`Main::DuplicateSessionTracked`), puts a `pack` file with `"handoff": true` and no `device` into the main
+account's "Saved messages". The phone imports it with the handoff (`GgtgPackImporter`, no direct fallback): its
+own Android session is created with this app's api_id, a device by the number and the account's proxy; the
+temporary session is dropped. If the Mac stays silent for 3 minutes, the phone falls back to the login code.

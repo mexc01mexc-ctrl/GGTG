@@ -15,10 +15,10 @@
  */
 package androidx.media3.effect;
 
-import static androidx.media3.common.util.Assertions.checkNotNull;
 import static androidx.media3.common.util.GlUtil.createTexture;
 import static androidx.test.core.app.ApplicationProvider.getApplicationContext;
 import static androidx.test.platform.app.InstrumentationRegistry.getInstrumentation;
+import static com.google.common.base.Preconditions.checkNotNull;
 import static com.google.common.truth.Truth.assertThat;
 import static com.google.common.util.concurrent.MoreExecutors.directExecutor;
 import static com.google.common.util.concurrent.MoreExecutors.newDirectExecutorService;
@@ -141,6 +141,11 @@ public final class FinalShaderProgramWrapperTest {
           public void onOutputFrameAvailableForRendering(
               long presentationTimeUs, boolean isRedrawnFrame) {
             presentationTimesUsAvailableForRendering.add(presentationTimeUs);
+          }
+
+          @Override
+          public void onError(VideoFrameProcessingException exception) {
+            videoFrameProcessingException = exception;
           }
         };
     inputListener =
@@ -284,6 +289,20 @@ public final class FinalShaderProgramWrapperTest {
     finalShaderProgramWrapper.renderOutputFrame(glObjectsProvider, 10003000);
 
     assertThat(endOfCurrentStreamPresentationTimesUs).containsExactly(3000L);
+  }
+
+  @Test
+  public void removeOutputSurface_afterRelease_doesNotThrow() throws Exception {
+    buildFinalShaderProgramWrapper(/* renderFramesAutomatically= */ false);
+
+    finalShaderProgramWrapper.queueInputFrame(glObjectsProvider, inputTextureInfos.get(0), 1000);
+    finalShaderProgramWrapper.renderOutputFrame(glObjectsProvider, 10001000);
+    assertThat(processedTextures).containsExactly(inputTextureInfos.get(0));
+
+    finalShaderProgramWrapper.release();
+    finalShaderProgramWrapper.setOutputSurfaceInfo(null);
+
+    assertThat(videoFrameProcessingException).isNull();
   }
 
   private void buildFinalShaderProgramWrapper(boolean renderFramesAutomatically) throws Exception {

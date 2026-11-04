@@ -26,7 +26,7 @@ constexpr auto AppFile = "GGTG"_cs;
 // Support). Deliberately not renamed with the app: a new name would make
 // it look for its accounts in an empty folder.
 constexpr auto AppDataDirName = "NiceGram Desktop"_cs;
-constexpr auto AppVersion = 7003001;
-constexpr auto AppVersionStr = "7.3.1";
+constexpr auto AppVersion = 7003005;
+constexpr auto AppVersionStr = "7.3.5";
 constexpr auto AppBetaVersion = false;
 constexpr auto AppAlphaVersion = TDESKTOP_ALPHA_VERSION;

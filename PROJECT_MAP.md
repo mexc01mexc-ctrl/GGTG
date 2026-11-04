@@ -11,9 +11,9 @@ GGTG — это Telegram-клиент для работы со множеств�
 
 | Платформа | Что это | Язык | Исходники |
 |---|---|---|---|
-| macOS | форк Telegram Desktop 7.3.1 (через Nicegram) | C++20, Qt 6 | `desktop/nicegram-desktop` |
+| macOS | форк Telegram Desktop 7.3.5 (через Nicegram) | C++20, Qt 6 | `desktop/nicegram-desktop` |
 | Windows | **тот же исходник**, что и macOS, собирается в облаке GitHub Actions (Qt 5) | C++ | `desktop/nicegram-desktop` → `.exe` в Actions Artifacts |
-| Android | форк Telegram Android 12.10.6 | Java (Telegram) + Kotlin (GGTG) | `android/Telegram-GGTG` |
+| Android | форк Telegram Android 13.1.1 | Java (Telegram) + Kotlin (GGTG) | `android/Telegram-GGTG` |
 
 Mac и Android повторяют друг друга по функциям и форматам данных (паритет). Новую
 функцию, как правило, делают на обеих платформах; общие форматы описаны в

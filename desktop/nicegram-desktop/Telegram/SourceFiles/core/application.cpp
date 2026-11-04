@@ -37,6 +37,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "base/platform/base_platform_url_scheme.h"
 #include "base/platform/base_platform_last_input.h"
 #include "base/platform/base_platform_info.h"
+#include "base/platform/base_platform_process.h"
 #include "platform/platform_specific.h"
 #include "platform/platform_integration.h"
 #include "history/history.h"
@@ -90,12 +91,14 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "core/process_manager.h"
 #include "wallet/wallet_panel.h"
 #include "webrtc/webrtc_environment.h"
+#include "webview/webview_interface.h"
 #include "window/window_main_menu.h"
 #include "window/window_saved_windows.h"
 #include "window/window_separate_id.h"
 #include "window/window_session_controller.h"
 #include "window/window_controller.h"
 #include "boxes/abstract_box.h"
+#include "boxes/keys_legend.h"
 #include "base/qthelp_regex.h"
 #include "base/qthelp_url.h"
 #include "boxes/premium_limits_box.h"
@@ -356,6 +359,7 @@ void Application::run() {
 	Media::Player::start(_audio.get());
 	Media::Encode::ClearStaleTempFiles();
 	Storage::ClearStaleArchiveFiles();
+	Webview::ClearStaleTemporaryStorage();
 
 	if (MediaControlsManager::Supported()) {
 		_mediaControlsManager = std::make_unique<MediaControlsManager>();
@@ -735,6 +739,8 @@ bool Application::eventFilter(QObject *object, QEvent *e) {
 			return true;
 		} else if (Shortcuts::HandlePossibleChatSwitch(event)) {
 			return true;
+		} else if (HandleKeysLegendHotkey(this, object, event)) {
+			return true;
 		}
 	} break;
 	case QEvent::MouseButtonPress:
@@ -787,8 +793,13 @@ bool Application::eventFilter(QObject *object, QEvent *e) {
 						}),
 						StartUrlRequiresActivate);
 					cRefStartUrls() << base::take(_urlsToOpen);
-					checkStartUrls();
-					if (_lastActivePrimaryWindow && activateRequired) {
+					const auto activated = checkStartUrlsActivating();
+					if (!activateRequired) {
+						return;
+					} else if (activated) {
+						base::Platform::ActivateThisProcessWindow(
+							activated->winId());
+					} else if (_lastActivePrimaryWindow) {
 						_lastActivePrimaryWindow->activate();
 					}
 				});
@@ -909,6 +920,12 @@ void Application::setCurrentProxy(
 	my.setSelected(proxy);
 	my.setSettings(settings);
 	const auto now = current();
+	if (_badProxyConfiguration && *_badProxyConfiguration != now) {
+		_badProxyConfiguration.reset();
+		if (const auto box = base::take(_badProxyDisableBox)) {
+			box->closeBox();
+		}
+	}
 	refreshGlobalProxy();
 	_proxyChanges.fire({ was, now });
 	my.connectionTypeChangesNotify();
@@ -929,19 +946,31 @@ auto Application::proxyChanges() const -> rpl::producer<ProxyChange> {
 	return _proxyChanges.events();
 }
 
-void Application::badMtprotoConfigurationError() {
-	if (settings().proxy().isEnabled() && !_badProxyDisableBox) {
-		const auto disableCallback = [=] {
-			setCurrentProxy(
-				settings().proxy().selected(),
-				MTP::ProxyData::Settings::System);
-		};
-		_badProxyDisableBox = Ui::show(
-			Ui::MakeInformBox(Lang::Hard::ProxyConfigError()));
-		_badProxyDisableBox->boxClosing(
-		) | rpl::on_next(
-			disableCallback,
-			_badProxyDisableBox->lifetime());
+void Application::badMtprotoConfigurationError(const MTP::ProxyData &proxy) {
+	const auto &current = settings().proxy();
+	if (_badProxyDisableBox
+		|| _badProxyConfiguration == proxy
+		|| !current.isEnabled()
+		|| current.selected() != proxy) {
+		return;
+	}
+	_badProxyConfiguration = proxy;
+	_badProxyDisableBox = Ui::show(Ui::MakeConfirmBox({
+		.text = Lang::Hard::ProxyConfigError(),
+		.confirmed = [=](Fn<void()> close) {
+			close();
+			const auto &current = settings().proxy();
+			if (current.isEnabled() && current.selected() == proxy) {
+				setCurrentProxy(
+					current.selected(),
+					MTP::ProxyData::Settings::System);
+			}
+		},
+		.confirmText = tr::lng_proxy_disable(),
+		.cancelText = tr::lng_cancel(),
+	}), Ui::LayerOption::KeepOther);
+	if (!_badProxyDisableBox) {
+		_badProxyConfiguration.reset();
 	}
 }
 
@@ -1252,7 +1281,9 @@ void Application::checkStartUrls() {
 				return false;
 			} else if (_lastActivePrimaryWindow) {
 				const auto local = TryConvertUrlToLocal(url.toString());
-				return !openLocalUrl(local, {});
+				return IsGetPremiumLocalUrl(local)
+					? !openInternalUrl(local, {})
+					: !openLocalUrl(local, {});
 			}
 			return true;
 		}) | ranges::to<QList<QUrl>>;
@@ -1276,6 +1307,22 @@ void Application::checkStartUrls() {
 			_lastActivePrimaryWindow->widget()->handleStartFiles(
 				std::move(paths));
 		}
+	}
+}
+
+QPointer<QWidget> Application::checkStartUrlsActivating() {
+	if (_startUrlActivated) {
+		checkStartUrls();
+		return nullptr;
+	}
+	_startUrlActivated.emplace();
+	checkStartUrls();
+	return *base::take(_startUrlActivated);
+}
+
+void Application::registerWindowActivation(not_null<QWidget*> window) {
+	if (_startUrlActivated) {
+		*_startUrlActivated = window.get();
 	}
 }
 
@@ -1316,12 +1363,15 @@ bool Application::openCustomUrl(
 		|| passcodeLocked()) {
 		return false;
 	}
-	static const auto kTagExp = QRegularExpression(
-		u"^\\~[a-zA-Z0-9_\\-]+\\~:"_q);
 	auto skip = protocol.size();
-	const auto match = kTagExp.match(base::StringViewMid(urlTrimmed, skip));
-	if (match.hasMatch()) {
-		skip += match.capturedLength();
+	if (protocol == u"internal:"_q) {
+		static const auto kTagExp = QRegularExpression(
+			u"^\\~[a-zA-Z0-9_\\-]+\\~:"_q);
+		const auto match = kTagExp.match(
+			base::StringViewMid(urlTrimmed, skip));
+		if (match.hasMatch()) {
+			skip += match.capturedLength();
+		}
 	}
 	const auto command = base::StringViewMid(urlTrimmed, skip, 8192);
 	const auto my = context.value<ClickHandlerContext>();

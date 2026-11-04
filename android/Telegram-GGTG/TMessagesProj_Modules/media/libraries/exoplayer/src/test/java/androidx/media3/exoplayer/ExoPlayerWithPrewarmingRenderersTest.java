@@ -38,6 +38,7 @@ import androidx.media3.common.Player;
 import androidx.media3.common.Timeline;
 import androidx.media3.common.util.Clock;
 import androidx.media3.common.util.HandlerWrapper;
+import androidx.media3.common.util.SystemClock;
 import androidx.media3.datasource.TransferListener;
 import androidx.media3.decoder.DecoderInputBuffer;
 import androidx.media3.exoplayer.audio.AudioRendererEventListener;
@@ -200,15 +201,94 @@ public class ExoPlayerWithPrewarmingRenderersTest {
             .build();
     Renderer secondaryVideoRenderer = player.getSecondaryRenderer(/* index= */ 0);
     // Set a playlist that allows a new renderer to be enabled early.
+    FakeTimeline fakeTimeline =
+        new FakeTimeline(
+            new FakeTimeline.TimelineWindowDefinition.Builder()
+                .setDurationUs(2 * C.MICROS_PER_SECOND)
+                .build());
     player.setMediaSources(
         ImmutableList.of(
-            new FakeMediaSource(new FakeTimeline(), ExoPlayerTestRunner.VIDEO_FORMAT),
-            new FakeMediaSource(new FakeTimeline(), ExoPlayerTestRunner.AUDIO_FORMAT),
+            new FakeMediaSource(fakeTimeline, ExoPlayerTestRunner.VIDEO_FORMAT),
+            new FakeMediaSource(fakeTimeline, ExoPlayerTestRunner.AUDIO_FORMAT),
             new FakeMediaSource(
-                new FakeTimeline(),
-                ExoPlayerTestRunner.VIDEO_FORMAT,
-                ExoPlayerTestRunner.AUDIO_FORMAT)));
+                fakeTimeline, ExoPlayerTestRunner.VIDEO_FORMAT, ExoPlayerTestRunner.AUDIO_FORMAT)));
     player.prepare();
+
+    // Advance media periods until secondary renderer is being pre-warmed.
+    advance(player)
+        .untilBackgroundThreadCondition(
+            () -> secondaryVideoRenderer.getState() == Renderer.STATE_ENABLED);
+    @Renderer.State int secondaryVideoState = secondaryVideoRenderer.getState();
+    player.release();
+
+    assertThat(secondaryVideoState).isEqualTo(Renderer.STATE_ENABLED);
+  }
+
+  @Test
+  public void
+      prepare_withPeriodBetweenPlayingAndPrewarmingWithDurationsGreaterThanAdvancementThreshold_playerDoesNotPrewarm()
+          throws Exception {
+    Clock fakeClock = new FakeClock(/* isAutoAdvancing= */ true);
+    ExoPlayer player =
+        new TestExoPlayerBuilder(context)
+            .setClock(fakeClock)
+            .setRenderersFactory(
+                new FakeRenderersFactorySupportingSecondaryVideoRenderer(fakeClock))
+            .build();
+    Renderer secondaryVideoRenderer = player.getSecondaryRenderer(/* index= */ 0);
+    // Set a playlist that would prevent pre-warming at normal speed with duration limit for reading
+    // period advancement.
+    FakeTimeline fakeTimeline =
+        new FakeTimeline(
+            new FakeTimeline.TimelineWindowDefinition.Builder()
+                .setDurationUs(10 * C.MICROS_PER_SECOND)
+                .build());
+    player.setMediaSources(
+        ImmutableList.of(
+            new FakeMediaSource(fakeTimeline, ExoPlayerTestRunner.VIDEO_FORMAT),
+            new FakeMediaSource(fakeTimeline, ExoPlayerTestRunner.AUDIO_FORMAT),
+            new FakeMediaSource(
+                fakeTimeline, ExoPlayerTestRunner.VIDEO_FORMAT, ExoPlayerTestRunner.AUDIO_FORMAT)));
+    player.prepare();
+
+    // Run player for a short time and the secondary renderer will not be enabled for pre-warming.
+    long initialTime = SystemClock.DEFAULT.currentTimeMillis();
+    advance(player)
+        .untilBackgroundThreadCondition(
+            () -> SystemClock.DEFAULT.currentTimeMillis() - initialTime > 500);
+    @Renderer.State int secondaryVideoState = secondaryVideoRenderer.getState();
+    player.release();
+
+    assertThat(secondaryVideoState).isEqualTo(Renderer.STATE_DISABLED);
+  }
+
+  @Test
+  public void
+      prepare_withPeriodBetweenPlayingAndPrewarmingWithDoubleSpeed_playerSuccessfullyPrewarms()
+          throws Exception {
+    Clock fakeClock = new FakeClock(/* isAutoAdvancing= */ true);
+    ExoPlayer player =
+        new TestExoPlayerBuilder(context)
+            .setClock(fakeClock)
+            .setRenderersFactory(
+                new FakeRenderersFactorySupportingSecondaryVideoRenderer(fakeClock))
+            .build();
+    Renderer secondaryVideoRenderer = player.getSecondaryRenderer(/* index= */ 0);
+    // Set a playlist that would prevent pre-warming at normal speed with duration limit for reading
+    // period advancement.
+    FakeTimeline fakeTimeline =
+        new FakeTimeline(
+            new FakeTimeline.TimelineWindowDefinition.Builder()
+                .setDurationUs(10 * C.MICROS_PER_SECOND)
+                .build());
+    player.setMediaSources(
+        ImmutableList.of(
+            new FakeMediaSource(fakeTimeline, ExoPlayerTestRunner.VIDEO_FORMAT),
+            new FakeMediaSource(fakeTimeline, ExoPlayerTestRunner.AUDIO_FORMAT),
+            new FakeMediaSource(
+                fakeTimeline, ExoPlayerTestRunner.VIDEO_FORMAT, ExoPlayerTestRunner.AUDIO_FORMAT)));
+    player.prepare();
+    player.setPlaybackSpeed(2.0f);
 
     // Advance media periods until secondary renderer is being pre-warmed.
     advance(player)
@@ -387,7 +467,7 @@ public class ExoPlayerWithPrewarmingRenderersTest {
         ExoPlayerTestRunner.VIDEO_FORMAT.buildUpon().setAverageBitrate(500_000).build();
     Clock fakeClock = new FakeClock(/* isAutoAdvancing= */ true);
     DefaultTrackSelector.Parameters defaultTrackSelectorParameters =
-        new DefaultTrackSelector.Parameters.Builder(context)
+        new DefaultTrackSelector.Parameters.Builder()
             .setMaxVideoBitrate(videoFormat2.averageBitrate)
             .setExceedVideoConstraintsIfNecessary(false)
             .build();
@@ -552,7 +632,7 @@ public class ExoPlayerWithPrewarmingRenderersTest {
     AtomicReference<Pair<ExoTrackSelection.Definition, Integer>> selectedAudioTrack =
         new AtomicReference<>();
     DefaultTrackSelector.Parameters trackSelectionParameters =
-        new DefaultTrackSelector.Parameters.Builder(context)
+        new DefaultTrackSelector.Parameters.Builder()
             .setExceedAudioConstraintsIfNecessary(false)
             .build();
     DefaultTrackSelector trackSelector =
@@ -1126,7 +1206,7 @@ public class ExoPlayerWithPrewarmingRenderersTest {
         new TestExoPlayerBuilder(context)
             .setClock(fakeClock)
             .setRenderersFactory(
-                new FakeRenderersFactorySupportingSecondaryVideoRendererThatThrows(
+                new FakeRenderersFactorySupportingSecondaryVideoRendererThatThrowsOnRender(
                     fakeClock, attemptedRenderWithSecondaryRenderer, shouldSecondaryRendererThrow))
             .build();
     player.addListener(listener);
@@ -1166,7 +1246,7 @@ public class ExoPlayerWithPrewarmingRenderersTest {
         new TestExoPlayerBuilder(context)
             .setClock(fakeClock)
             .setRenderersFactory(
-                new FakeRenderersFactorySupportingSecondaryVideoRendererThatThrows(
+                new FakeRenderersFactorySupportingSecondaryVideoRendererThatThrowsOnRender(
                     fakeClock, attemptedRenderWithSecondaryRenderer, shouldSecondaryRendererThrow))
             .build();
     player.addListener(listener);
@@ -1215,7 +1295,7 @@ public class ExoPlayerWithPrewarmingRenderersTest {
         new TestExoPlayerBuilder(context)
             .setClock(fakeClock)
             .setRenderersFactory(
-                new FakeRenderersFactorySupportingSecondaryVideoRendererThatThrows(
+                new FakeRenderersFactorySupportingSecondaryVideoRendererThatThrowsOnRender(
                     fakeClock, attemptedRenderWithSecondaryRenderer, shouldSecondaryRendererThrow))
             .build();
     player.addListener(listener);
@@ -1263,34 +1343,39 @@ public class ExoPlayerWithPrewarmingRenderersTest {
         new TestExoPlayerBuilder(context)
             .setClock(fakeClock)
             .setRenderersFactory(
-                new FakeRenderersFactorySupportingSecondaryVideoRendererThatThrows(
+                new FakeRenderersFactorySupportingSecondaryVideoRendererThatThrowsOnRender(
                     fakeClock, attemptedRenderWithSecondaryRenderer, shouldSecondaryRendererThrow))
             .build();
     player.addListener(listener);
     Renderer videoRenderer = player.getRenderer(/* index= */ 0);
     Renderer secondaryVideoRenderer = player.getSecondaryRenderer(/* index= */ 0);
     // Set a playlist that allows a new renderer to be enabled early.
+    FakeTimeline fakeTimeline =
+        new FakeTimeline(
+            new FakeTimeline.TimelineWindowDefinition.Builder()
+                .setDurationUs(4 * C.MICROS_PER_SECOND)
+                .build());
     player.setMediaSources(
         ImmutableList.of(
-            new FakeMediaSource(new FakeTimeline(), ExoPlayerTestRunner.VIDEO_FORMAT),
-            new FakeMediaSource(new FakeTimeline(), ExoPlayerTestRunner.VIDEO_FORMAT),
-            new FakeMediaSource(new FakeTimeline(), ExoPlayerTestRunner.VIDEO_FORMAT),
-            new FakeMediaSource(new FakeTimeline(), ExoPlayerTestRunner.VIDEO_FORMAT)));
+            new FakeMediaSource(fakeTimeline, ExoPlayerTestRunner.VIDEO_FORMAT),
+            new FakeMediaSource(fakeTimeline, ExoPlayerTestRunner.VIDEO_FORMAT),
+            new FakeMediaSource(fakeTimeline, ExoPlayerTestRunner.VIDEO_FORMAT),
+            new FakeMediaSource(fakeTimeline, ExoPlayerTestRunner.VIDEO_FORMAT)));
     player.prepare();
 
-    // Play a bit until the second renderer is started.
+    // Play a bit until pre-warming with second renderer is attempted.
     advance(player).untilState(Player.STATE_READY);
     player.play();
     advance(player).untilPendingCommandsAreFullyHandled();
     @Renderer.State int videoState1 = videoRenderer.getState();
     @Renderer.State int secondaryVideoState1 = secondaryVideoRenderer.getState();
     assertThat(attemptedRenderWithSecondaryRenderer.get()).isTrue();
-    advance(player).untilPosition(/* mediaItemIndex= */ 0, /* positionMs= */ 500);
+    advance(player).untilPosition(/* mediaItemIndex= */ 0, /* positionMs= */ 200);
     advance(player).untilPendingCommandsAreFullyHandled();
     @Renderer.State int videoState2 = videoRenderer.getState();
     @Renderer.State int secondaryVideoState2 = secondaryVideoRenderer.getState();
     shouldSecondaryRendererThrow.set(false);
-    advance(player).untilPosition(/* mediaItemIndex= */ 1, /* positionMs= */ 500);
+    advance(player).untilPosition(/* mediaItemIndex= */ 1, /* positionMs= */ 200);
     advance(player).untilPendingCommandsAreFullyHandled();
     @Renderer.State int videoState3 = videoRenderer.getState();
     @Renderer.State int secondaryVideoState3 = secondaryVideoRenderer.getState();
@@ -1484,7 +1569,7 @@ public class ExoPlayerWithPrewarmingRenderersTest {
         new TestExoPlayerBuilder(context)
             .setClock(fakeClock)
             .setRenderersFactory(
-                new FakeRenderersFactorySupportingSecondaryVideoRendererThatThrows(
+                new FakeRenderersFactorySupportingSecondaryVideoRendererThatThrowsOnRender(
                     fakeClock, attemptedRenderWithSecondaryRenderer, shouldSecondaryRendererThrow))
             .build();
     player.addListener(listener);
@@ -1608,6 +1693,46 @@ public class ExoPlayerWithPrewarmingRenderersTest {
     assertThat(secondaryVideoState2).isEqualTo(Renderer.STATE_STARTED);
     assertThat(videoState3).isEqualTo(Renderer.STATE_DISABLED);
     assertThat(secondaryVideoState3).isEqualTo(Renderer.STATE_STARTED);
+  }
+
+  @Test
+  public void
+      play_errorInDisablingPrewarmingSecondaryRendererDuringErrorRecovery_doesNotResetPrimaryRenderer()
+          throws Exception {
+    Clock fakeClock = new FakeClock(/* isAutoAdvancing= */ true);
+    Player.Listener listener = mock(Player.Listener.class);
+    AtomicBoolean attemptedRenderWithSecondaryRenderer = new AtomicBoolean(false);
+    AtomicBoolean shouldSecondaryRendererThrow = new AtomicBoolean(true);
+    ExoPlayer player =
+        new TestExoPlayerBuilder(context)
+            .setClock(fakeClock)
+            .setRenderersFactory(
+                new FakeRenderersFactorySupportingSecondaryVideoRendererThatThrowsOnRenderDisableAndReset(
+                    fakeClock, attemptedRenderWithSecondaryRenderer, shouldSecondaryRendererThrow))
+            .build();
+    player.addListener(listener);
+    Renderer videoRenderer = player.getRenderer(/* index= */ 0);
+    Renderer secondaryVideoRenderer = player.getSecondaryRenderer(/* index= */ 0);
+    // Set a playlist that allows a new renderer to be enabled early.
+    player.setMediaSources(
+        ImmutableList.of(
+            // Use FakeBlockingMediaSource so that reading period is not advanced when pre-warming.
+            new FakeBlockingMediaSource(new FakeTimeline(), ExoPlayerTestRunner.VIDEO_FORMAT),
+            new FakeMediaSource(new FakeTimeline(), ExoPlayerTestRunner.VIDEO_FORMAT)));
+    player.prepare();
+
+    // Play a bit until the second renderer is enabled and throws errors.
+    advance(player).untilState(Player.STATE_READY);
+    player.play();
+    advance(player).untilPendingCommandsAreFullyHandled();
+    @Renderer.State int videoState = videoRenderer.getState();
+    @Renderer.State int secondaryVideoState = secondaryVideoRenderer.getState();
+    player.release();
+
+    assertThat(attemptedRenderWithSecondaryRenderer.get()).isTrue();
+    verify(listener, never()).onPositionDiscontinuity(any(), any(), anyInt());
+    assertThat(videoState).isEqualTo(Renderer.STATE_STARTED);
+    assertThat(secondaryVideoState).isEqualTo(Renderer.STATE_DISABLED);
   }
 
   @Test
@@ -1780,12 +1905,12 @@ public class ExoPlayerWithPrewarmingRenderersTest {
     }
   }
 
-  private static final class FakeRenderersFactorySupportingSecondaryVideoRendererThatThrows
+  private static final class FakeRenderersFactorySupportingSecondaryVideoRendererThatThrowsOnRender
       extends FakeRenderersFactorySupportingSecondaryVideoRenderer {
     private final AtomicBoolean attemptedRenderWithSecondaryRenderer;
     private final AtomicBoolean shouldSecondaryRendererThrow;
 
-    public FakeRenderersFactorySupportingSecondaryVideoRendererThatThrows(
+    FakeRenderersFactorySupportingSecondaryVideoRendererThatThrowsOnRender(
         Clock clock,
         AtomicBoolean attemptedRenderWithSecondaryRenderer,
         AtomicBoolean shouldSecondaryRendererThrow) {
@@ -1818,6 +1943,67 @@ public class ExoPlayerWithPrewarmingRenderersTest {
                   this.getFormatHolder().format,
                   PlaybackException.ERROR_CODE_DECODER_INIT_FAILED);
             }
+          }
+        };
+      }
+      return null;
+    }
+  }
+
+  private static final
+  class FakeRenderersFactorySupportingSecondaryVideoRendererThatThrowsOnRenderDisableAndReset
+      extends FakeRenderersFactorySupportingSecondaryVideoRenderer {
+    private final AtomicBoolean attemptedRenderWithSecondaryRenderer;
+    private final AtomicBoolean shouldSecondaryRendererThrow;
+
+    FakeRenderersFactorySupportingSecondaryVideoRendererThatThrowsOnRenderDisableAndReset(
+        Clock clock,
+        AtomicBoolean attemptedRenderWithSecondaryRenderer,
+        AtomicBoolean shouldSecondaryRendererThrow) {
+      super(clock);
+      this.attemptedRenderWithSecondaryRenderer = attemptedRenderWithSecondaryRenderer;
+      this.shouldSecondaryRendererThrow = shouldSecondaryRendererThrow;
+    }
+
+    @Override
+    public Renderer createSecondaryRenderer(
+        Renderer renderer,
+        Handler eventHandler,
+        VideoRendererEventListener videoRendererEventListener,
+        AudioRendererEventListener audioRendererEventListener,
+        TextOutput textRendererOutput,
+        MetadataOutput metadataRendererOutput) {
+      if (renderer instanceof FakeVideoRenderer) {
+        return new FakeVideoRenderer(
+            clock.createHandler(eventHandler.getLooper(), /* callback= */ null),
+            videoRendererEventListener) {
+          @Override
+          public void render(long positionUs, long elapsedRealtimeUs) throws ExoPlaybackException {
+            attemptedRenderWithSecondaryRenderer.set(true);
+            if (shouldSecondaryRendererThrow.get()) {
+              throw createRendererException(
+                  new MediaCodecRenderer.DecoderInitializationException(
+                      new Format.Builder().build(), new IllegalArgumentException(), false, 0),
+                  this.getFormatHolder().format,
+                  PlaybackException.ERROR_CODE_DECODER_INIT_FAILED);
+            }
+            super.render(positionUs, elapsedRealtimeUs);
+          }
+
+          @Override
+          public void onDisabled() {
+            if (shouldSecondaryRendererThrow.get()) {
+              throw new IllegalStateException();
+            }
+            super.onDisabled();
+          }
+
+          @Override
+          public void onReset() {
+            if (shouldSecondaryRendererThrow.get()) {
+              throw new IllegalStateException();
+            }
+            super.onReset();
           }
         };
       }

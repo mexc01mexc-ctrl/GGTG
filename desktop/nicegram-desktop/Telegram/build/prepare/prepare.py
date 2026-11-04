@@ -949,7 +949,7 @@ if customRunCommand:
 stage('patches', """
     git clone https://github.com/desktop-app/patches.git
     cd patches
-    git checkout aec474953ff7ee9b6e4cd9b8658288ea86d124f3
+    git checkout a59fc82462fb2987e9f0ee1498e2db694410ae81
 mac:
     sed -i '' "s/10.13/$MACOSX_DEPLOYMENT_TARGET/g" macos_meson_*.txt
     git clone https://github.com/desktop-app/qt6_highsierra_patches.git qt6_highsierra
@@ -1464,8 +1464,13 @@ mac:
 """)
 
 stage('libjxl', """
-    git clone -b v0.12.0 --recursive --shallow-submodules https://github.com/libjxl/libjxl.git
+    git clone -b v0.12.0 --recursive https://github.com/libjxl/libjxl.git
     cd libjxl
+    cd third_party
+    cd brotli
+    git checkout v1.2.1
+    cd ..
+    cd ..
 """ + setVar("cmake_defines", """
     -DBUILD_SHARED_LIBS=OFF
     -DBUILD_TESTING=OFF
@@ -1624,6 +1629,13 @@ stage('regex', """
 stage('ffmpeg', """
     git clone -b n8.1.3 https://github.com/FFmpeg/FFmpeg.git ffmpeg
     cd ffmpeg
+depends:patches/ffmpeg/*.patch
+win:
+    for %%i in (..\\patches\\ffmpeg\\*.patch) do (
+        git apply "%%i" || exit /b 1
+    )
+mac:
+    find ../patches/ffmpeg -type f -name '*.patch' -print0 | sort -z | xargs -0 git apply
 win:
 depends:patches/ffmpeg.patch
     git apply --ignore-space-change --ignore-whitespace ../patches/ffmpeg.patch
@@ -1880,7 +1892,7 @@ stage('openal-soft', """
     git clone https://github.com/telegramdesktop/openal-soft.git
     cd openal-soft
 win:
-    git checkout 291c0fdbbd
+    git checkout 00cb9b649c
     cmake -B build . ^
         -D LIBTYPE:STRING=STATIC ^
         -D FORCE_STATIC_VCRT=ON ^
@@ -2063,9 +2075,12 @@ release:
     cd qt_""" + qt + """
     git submodule update --init --recursive --progress qtbase qtimageformats qtsvg
 depends:patches/qtbase_""" + qt + """/*.patch
+depends:patches/qtsvg_""" + qt + """/*.patch
 win:
     cd qtbase
     python "%PREPARE_DIR%/apply_qt_patches.py" """ + qt + """
+    cd ..\\qtsvg
+    python "%PREPARE_DIR%/apply_qt_patches.py" """ + qt + """ qtsvg
     cd ..
 
     SET CONFIGURATIONS=-debug
@@ -2125,11 +2140,13 @@ else: # qt > '6'
     cd qt_$QT
     git submodule update --init --recursive --progress qtbase qtimageformats qtshadertools qtsvg
 depends:patches/qtbase_""" + qt + """/*.patch
+depends:patches/qtsvg_""" + qt + """/*.patch
 mac:
     if [ -d "../patches/qt6_highsierra" ]; then
         find "$PWD/../patches/qt6_highsierra" -maxdepth 1 -name "*.patch" -print0 | sort -z | xargs -0 git -C qtbase apply -v
     fi
     find $PWD/../patches/qtbase_$QT -type f -print0 | sort -z | xargs -0 git -C qtbase apply -v
+    find $PWD/../patches/qtsvg_$QT -type f -print0 | sort -z | xargs -0 git -C qtsvg apply -v
     sed -i.bak 's/tqtc-//' {qtimageformats,qtsvg}/dependencies.yaml
 
     CONFIGURATIONS=-debug
@@ -2169,6 +2186,14 @@ win:
     cd qtbase
     setlocal enabledelayedexpansion
     for /r %%i in (..\\..\\patches\\qtbase_%QT%\\*) do (
+        git apply --ignore-space-change --ignore-whitespace %%i -v
+        if errorlevel 1 (
+            echo ERROR: Applying patch %%~nxi failed!
+            exit /b 1
+        )
+    )
+    cd ..\\qtsvg
+    for /r %%i in (..\\..\\patches\\qtsvg_%QT%\\*) do (
         git apply --ignore-space-change --ignore-whitespace %%i -v
         if errorlevel 1 (
             echo ERROR: Applying patch %%~nxi failed!

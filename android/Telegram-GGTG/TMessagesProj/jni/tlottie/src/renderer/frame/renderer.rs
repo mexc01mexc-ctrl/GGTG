@@ -129,7 +129,7 @@ impl<'a> Geometry<'a> {
     }
   }
 
-  pub(crate) fn translated(contours: &'a [Contour], cache_key: u128, x: f32, y: f32) -> Self {
+  pub(super) fn translated(contours: &'a [Contour], cache_key: u128, x: f32, y: f32) -> Self {
     Self {
       contours,
       cache_key,

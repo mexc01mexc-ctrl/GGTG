@@ -2285,6 +2285,11 @@ void PeerMenuDeleteTopicWithConfirmation(
 	};
 	const auto controller = navigation->parentController();
 	controller->show(Box([=](not_null<Ui::GenericBox*> box) {
+		topic->destroyed(
+		) | rpl::on_next([=] {
+			box->closeBox();
+		}, box->lifetime());
+
 		Ui::AddSkip(box->verticalLayout());
 		Ui::IconWithTitle(
 			box->verticalLayout(),
@@ -2696,7 +2701,11 @@ void PeerMenuEditTodoList(
 			result.options,
 			crl::guard(weak, [=] { weak->closeBox(); }),
 			crl::guard(weak, [=](const QString &error) {
-				weak->submitFailed(error);
+				if (error == u"MESSAGE_NOT_MODIFIED"_q) {
+					weak->closeBox();
+				} else {
+					weak->submitFailed(error);
+				}
 			}));
 	}, box->lifetime());
 	controller->show(std::move(box), Ui::LayerOption::CloseOther);
@@ -4346,8 +4355,9 @@ Fn<void()> DeleteAndLeaveHandler(
 	}();
 	if (isCreator) {
 		const auto requestId = std::make_shared<mtpRequestId>(0);
-		return [=] {
-			if (controller->showFrozenError() || (*requestId > 0)) {
+		const auto show = controller->uiShow();
+		const auto leaveAsCreator = [=](Fn<void()> leave) {
+			if (*requestId > 0) {
 				return;
 			}
 			*requestId = peer->session().api().request(
@@ -4355,17 +4365,27 @@ Fn<void()> DeleteAndLeaveHandler(
 					peer->input()
 			)).done([=](const MTPUser &result) {
 				*requestId = 0;
-				const auto user = peer->owner().processUser(result);
-				controller->show(Box(SelectFutureOwnerbox, peer, user));
+				if (result.type() == mtpc_userEmpty) {
+					leave();
+				} else {
+					const auto user = peer->owner().processUser(result);
+					show->show(Box(SelectFutureOwnerbox, peer, user, leave));
+				}
 			}).fail([=](const MTP::Error &error) {
 				*requestId = 0;
-				controller->show(Box(DeleteChatBox, peer));
+				leave();
 			}).send();
+		};
+		return [=] {
+			if (controller->showFrozenError() || (*requestId > 0)) {
+				return;
+			}
+			controller->show(Box(DeleteChatBox, peer, leaveAsCreator));
 		};
 	}
 	return [=] {
 		if (!controller->showFrozenError()) {
-			controller->show(Box(DeleteChatBox, peer));
+			controller->show(Box(DeleteChatBox, peer, nullptr));
 		}
 	};
 }

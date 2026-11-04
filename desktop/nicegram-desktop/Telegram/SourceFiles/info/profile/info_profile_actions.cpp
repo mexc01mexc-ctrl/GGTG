@@ -59,6 +59,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "history/history_item.h"
 #include "history/history_item_components.h"
 #include "history/history_item_helpers.h"
+#include "history/history_location_manager.h"
 #include "history/view/history_view_item_preview.h"
 #include "history/view/reactions/history_view_reactions_list.h"
 #include "info/bot/earn/info_bot_earn_widget.h"
@@ -99,6 +100,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "ui/widgets/labels.h"
 #include "ui/widgets/fields/input_field.h"
 #include "ui/layers/generic_box.h"
+#include "ui/boxes/edit_birthday_box.h"
 #include "ui/widgets/menu/menu_add_action_callback.h"
 #include "ui/widgets/menu/menu_add_action_callback_factory.h"
 #include "ui/widgets/popup_menu.h"
@@ -1687,13 +1689,14 @@ Section DetailsFiller::makeInfo() {
 				user->session().supportHelper().infoTextValue(user));
 		}
 
+		const auto phoneLine = addInfoOneLine(
+			tr::lng_info_mobile_label(),
+			PhoneWithSpoilerValue(user, PhoneOrHiddenValue(user)),
+			tr::lng_profile_copy_phone(tr::now),
+			st::infoProfileLabeledPadding,
+			st::popupMenuWithIcons);
 		{
-			const auto phoneLabel = addInfoOneLine(
-				tr::lng_info_mobile_label(),
-				PhoneWithSpoilerValue(user, PhoneOrHiddenValue(user)),
-				tr::lng_profile_copy_phone(tr::now),
-				st::infoProfileLabeledPadding,
-				st::popupMenuWithIcons).text;
+			const auto phoneLabel = phoneLine.text;
 			const auto hook = [=](Ui::FlatLabel::ContextMenuRequest request) {
 				if (request.selection.empty()) {
 					const auto callback = [=] {
@@ -1755,16 +1758,33 @@ Section DetailsFiller::makeInfo() {
 			usernameLine.text->parentWidget(),
 			st::infoProfileLabeledButtonQr);
 		qrButton->setAccessibleName(tr::lng_group_invite_context_qr(tr::now));
-		UsernamesValue(_peer) | rpl::on_next([=](const auto &u) {
-			qrButton->setVisible(!u.empty());
-		}, qrButton->lifetime());
 		const auto rightSkip = st::infoProfileLabeledButtonQrRightSkip;
-		fitLabelToButton(qrButton, usernameLine.text, rightSkip);
-		fitLabelToButton(qrButton, usernameLine.subtext, rightSkip);
-		qrButton->setClickedCallback([=, show = controller->uiShow()] {
+		const auto showQr = [=, show = controller->uiShow()] {
 			Ui::DefaultShowFillPeerQrBoxCallback(show, user);
 			return false;
-		});
+		};
+		if (user->isSelf()) {
+			const auto phoneQr = Ui::CreateChild<Ui::IconButton>(
+				phoneLine.text->parentWidget(),
+				st::infoProfileLabeledButtonQr);
+			phoneQr->setAccessibleName(tr::lng_group_invite_context_qr(tr::now));
+			fitLabelToButton(phoneQr, phoneLine.text, rightSkip);
+			fitLabelToButton(phoneQr, phoneLine.subtext, rightSkip);
+			phoneQr->setClickedCallback(showQr);
+			UsernameValue(user, true) | rpl::on_next([=](
+					const TextWithEntities &username) {
+				const auto hasUsername = !username.text.isEmpty();
+				phoneQr->setVisible(!hasUsername);
+				qrButton->setVisible(hasUsername);
+			}, qrButton->lifetime());
+		} else {
+			UsernamesValue(_peer) | rpl::on_next([=](const auto &u) {
+				qrButton->setVisible(!u.empty());
+			}, qrButton->lifetime());
+		}
+		fitLabelToButton(qrButton, usernameLine.text, rightSkip);
+		fitLabelToButton(qrButton, usernameLine.subtext, rightSkip);
+		qrButton->setClickedCallback(showQr);
 
 		{
 			const auto rawUserId = user->id.value;
@@ -1825,37 +1845,19 @@ Section DetailsFiller::makeInfo() {
 					const auto showRefineBox = [=] {
 						controller->uiShow()->showBox(Box([=](not_null<Ui::GenericBox*> box) {
 							box->setTitle(rpl::single(u"Дата регистрации"_q));
-							box->addRow(
-								object_ptr<Ui::FlatLabel>(
-									box,
-									u"Введите месяц и год регистрации так, как их показывает Telegram "
-										"(например: 03.2025 или март 2025). Программа запомнит дату "
-										"для этого ID и будет точнее оценивать другие аккаунты."_q,
-									st::boxLabel),
-								st::boxRowPadding);
-							const auto field = box->addRow(
-								object_ptr<Ui::InputField>(
-									box,
-									st::defaultInputField,
-									rpl::single(u"Месяц и год"_q)),
-								st::boxRowPadding);
-							const auto save = [=] {
-								const auto when = Ggtg::ParseRegistrationMonth(field->getLastText());
+							Ui::EditMonthYearBox(box, 0, 0, [=](int month, int year) {
+								const auto when = Ggtg::ParseRegistrationMonth(
+									QString::number(month) + u"."_q + QString::number(year));
 								if (when <= 0) {
-									field->showError();
+									controller->showToast(u"Не удалось сохранить дату"_q);
 									return;
 								}
 								Ggtg::AddIdCalibration(rawUserId, when);
 								controller->showToast(u"Дата уточнена. Откройте профиль заново."_q);
-								box->closeBox();
-							};
-							field->submits() | rpl::on_next(save, field->lifetime());
-							box->setFocusCallback([=] { field->setFocusFast(); });
-							box->addButton(tr::lng_settings_save(), save);
+							});
 							box->addLeftButton(rpl::single(u"Спросить у Telegram"_q), [=] {
 								askTelegram([=] { box->closeBox(); });
 							});
-							box->addButton(tr::lng_cancel(), [=] { box->closeBox(); });
 						}));
 					};
 
@@ -2657,12 +2659,16 @@ void DetailsFiller::addMainApp(not_null<UserData*> user) {
 		}
 		return text;
 	});
-	auto setup = [url](not_null<Ui::FlatLabel*> label) {
+	auto setup = [url, controller](not_null<Ui::FlatLabel*> label) {
 		label->setClickHandlerFilter([=](
 				const ClickHandlerPtr &link,
 				Qt::MouseButton) {
 			if (link && link->url() == url) {
-				UrlClickHandler::Open(url);
+				HiddenUrlClickHandler::OpenTranslated(
+					tr::lng_mini_apps_tos_url,
+					QVariant::fromValue(ClickHandlerContext{
+						.sessionWindow = controller,
+					}));
 				return false;
 			}
 			return true;
@@ -3446,7 +3452,10 @@ void ActionsFiller::addBotCommandActions(not_null<UserData*> user) {
 			}
 		}
 		if (!sendBotCommand(u"privacy"_q)) {
-			openUrl(tr::lng_profile_bot_privacy_url(tr::now));
+			HiddenUrlClickHandler::OpenTranslatedWithIv(
+				&user->session(),
+				tr::lng_profile_bot_privacy_url,
+				makeOtherContext());
 		}
 	};
 	AddActionButton(
@@ -3866,26 +3875,6 @@ void BuildProfileDetailsSections(
 		DetailsFiller filler(controller, &stack, peer, origin);
 		filler.buildSections();
 	}
-}
-
-void AddDetails(
-		not_null<Ui::VerticalLayout*> container,
-		not_null<Controller*> controller,
-		not_null<PeerData*> peer,
-		Data::ForumTopic *topic,
-		Data::SavedSublist *sublist,
-		Origin origin) {
-	auto layout = object_ptr<Ui::VerticalLayout>(container);
-	auto stack = SectionStack(layout.data());
-	BuildProfileDetailsSections(
-		stack,
-		controller,
-		peer,
-		topic,
-		sublist,
-		origin);
-	stack.finalize();
-	container->add(std::move(layout));
 }
 
 } // namespace Profile

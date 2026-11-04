@@ -12,7 +12,6 @@
 #include "ui/rp_widget.h"
 #include "ui/effects/animations.h"
 #include "ui/text/text_entity.h"
-#include "ui/text/text_custom_emoji.h"
 
 #include <rpl/variable.h>
 
@@ -28,6 +27,7 @@ class QContextMenuEvent;
 class Painter;
 
 namespace Ui::Text {
+struct MarkedContext;
 struct QuotePaintCache;
 } // namespace Ui::Text
 
@@ -290,6 +290,7 @@ public:
 	using ContextMenuHook = Fn<void(ContextMenuRequest)>;
 
 	void setPlaceholderColorOverride(const style::color &color);
+	void updatePalette();
 
 	void setDocumentMargin(float64 margin);
 	void setAdditionalMargin(int margin);
@@ -469,7 +470,6 @@ private:
 	void updateRootFrameFormat();
 	bool viewportEventInner(QEvent *e);
 
-	void updatePalette();
 	void applyPaletteColors(bool onlyIfChanged);
 	void refreshPlaceholder(const QString &text);
 	int placeholderSkipWidth() const;

@@ -27,4 +27,11 @@ void EditBirthdayBox(
 	Fn<void(Data::Birthday)> save,
 	EditBirthdayType type = EditBirthdayType::Edit);
 
+// ggtg: the same wheels without the day - month and year only (registration date of an account).
+void EditMonthYearBox(
+	not_null<Ui::GenericBox*> box,
+	int month,
+	int year,
+	Fn<void(int month, int year)> save);
+
 } // namespace Ui

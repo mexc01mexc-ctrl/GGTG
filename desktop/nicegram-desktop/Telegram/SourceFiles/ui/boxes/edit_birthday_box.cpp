@@ -218,4 +218,123 @@ void EditBirthdayBox(
 	}
 }
 
+// ggtg: month and year wheels (see EditBirthdayBox); the year goes up to the current one, and in the current
+// year the months stop at the current month.
+void EditMonthYearBox(
+		not_null<Ui::GenericBox*> box,
+		int month,
+		int year,
+		Fn<void(int month, int year)> save) {
+	box->setWidth(st::boxWideWidth);
+	const auto content = box->addRow(object_ptr<Ui::FixedHeightWidget>(
+		box,
+		st::settingsWorkingHoursPicker));
+
+	const auto font = st::boxTextFont;
+	const auto itemHeight = st::settingsWorkingHoursPickerItemHeight;
+	const auto picker = [=](
+			int count,
+			int startIndex,
+			Fn<void(QPainter &p, QRectF rect, int index)> paint) {
+		return Ui::CreateChild<Ui::VerticalDrumPicker>(
+			content,
+			Ui::VerticalDrumPicker::DefaultPaintCallback(
+				font,
+				itemHeight,
+				paint),
+			count,
+			itemHeight,
+			startIndex);
+	};
+
+	const auto nowDate = QDate::currentDate();
+	const auto maxYear = nowDate.year();
+	const auto maxMonth = nowDate.month();
+	const auto minYear = 2013;
+	const auto yearsCount = maxYear - minYear + 1;
+	const auto startYear = std::clamp(year ? year : maxYear, minYear, maxYear);
+	const auto startMonth = month ? month : maxMonth;
+	const auto yearsPaint = [=](QPainter &p, QRectF rect, int index) {
+		p.drawText(rect, QString::number(minYear + index), style::al_center);
+	};
+	const auto years = picker(yearsCount, startYear - minYear, yearsPaint);
+
+	struct State {
+		rpl::variable<Ui::VerticalDrumPicker*> months;
+	};
+	const auto state = content->lifetime().make_state<State>();
+
+	rpl::combine(
+		content->sizeValue(),
+		state->months.value()
+	) | rpl::on_next([=](QSize s, Ui::VerticalDrumPicker *months) {
+		const auto width = s.width();
+		years->setGeometry(width * 6 / 10, 0, width / 4, s.height());
+		if (months) {
+			months->setGeometry(width * 15 / 100, 0, width * 4 / 10, s.height());
+		}
+	}, content->lifetime());
+
+	Ui::SendPendingMoveResizeEvents(years);
+
+	years->value() | rpl::on_next([=](int yearsIndex) {
+		const auto monthsCount = (minYear + yearsIndex == maxYear)
+			? maxMonth
+			: 12;
+		const auto monthsStartIndex = std::clamp(
+			(state->months.current()
+				? state->months.current()->index()
+				: (startMonth - 1)),
+			0,
+			monthsCount - 1);
+		const auto monthsPaint = [=](QPainter &p, QRectF rect, int index) {
+			p.drawText(
+				rect,
+				Lang::Month(index + 1)(tr::now),
+				style::al_center);
+		};
+		const auto updated = picker(
+			monthsCount,
+			monthsStartIndex,
+			monthsPaint);
+		delete state->months.current();
+		state->months = updated;
+		state->months.current()->show();
+	}, years->lifetime());
+
+	Ui::SendPendingMoveResizeEvents(state->months.current());
+
+	content->paintRequest(
+	) | rpl::on_next([=](const QRect &r) {
+		auto p = QPainter(content);
+
+		p.fillRect(r, Qt::transparent);
+
+		const auto lineRect = QRect(
+			0,
+			content->height() / 2,
+			content->width(),
+			st::defaultInputField.borderActive);
+		p.fillRect(lineRect.translated(0, itemHeight / 2), st::activeLineFg);
+		p.fillRect(lineRect.translated(0, -itemHeight / 2), st::activeLineFg);
+	}, content->lifetime());
+
+	base::install_event_filter(box, [=](not_null<QEvent*> e) {
+		if (e->type() == QEvent::KeyPress) {
+			years->handleKeyEvent(static_cast<QKeyEvent*>(e.get()));
+		}
+		return base::EventFilterResult::Continue;
+	});
+
+	box->addButton(tr::lng_settings_save(), [=] {
+		const auto chosenMonth = state->months.current()->index() + 1;
+		const auto chosenYear = minYear + years->index();
+		box->closeBox();
+		save(chosenMonth, chosenYear);
+	});
+	box->addButton(tr::lng_cancel(), [=] {
+		box->closeBox();
+	});
+}
+
 } // namespace Ui

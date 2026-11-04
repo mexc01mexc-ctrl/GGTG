@@ -47,6 +47,7 @@ enum class SystemSettingsType {
 
 void SetApplicationIcon(const QIcon &icon);
 [[nodiscard]] QString SingleInstanceLocalServerName(const QString &hash);
+[[nodiscard]] bool LocalSocketPeerAllowed(qintptr descriptor);
 
 // Blocks briefly on an advisory lock, giving each small batch of accounts
 // started at once (see storage/storage_domain.cpp's own comment) a shared
@@ -60,6 +61,7 @@ void RequestPermission(PermissionType type, Fn<void(PermissionStatus)> resultCal
 void OpenSystemSettingsForPermission(PermissionType type);
 bool OpenSystemSettings(SystemSettingsType type);
 void IgnoreApplicationActivationRightNow();
+[[nodiscard]] int64 ClipboardChangeCount();
 [[nodiscard]] bool AutostartSupported();
 void AutostartRequestStateFromSystem(Fn<void(bool)> callback);
 void AutostartToggle(bool enabled, Fn<void(bool)> done = nullptr);

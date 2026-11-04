@@ -765,7 +765,7 @@ object TdataExportHelper {
             val phone = androidDevice ?: GgtgDevice.phones.random()
             deviceModel = phone.model
             systemVersion = phone.system
-            appVersion = "12.10.6 (71129)"
+            appVersion = "13.1.1 (72379)"
             langPack = "android"
             apiId = BuildVars.APP_ID
             apiHash = BuildVars.APP_HASH

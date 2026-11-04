@@ -134,4 +134,9 @@ void ExportAccountsAsTdata(
 	std::vector<not_null<Main::Account*>> accounts,
 	TdataExportOptions options);
 
+// The phone asked for this account (sync): a temporary session of its own
+// goes to the main account's "Saved messages" as a pack with handoff set,
+// the phone makes its Android session from it (no file box, no questions).
+void StartHandoffForAndroid(not_null<Main::Account*> account);
+
 } // namespace Settings
