@@ -7466,8 +7466,8 @@ public class ProfileActivity extends BaseFragment implements NotificationCenter.
                 "Сохранить",
                 "Спросить у Telegram",
                 0, 0,
-                (m, y) -> {
-                    if (app.ggtg.GgtgIdDate.calibrateFromText(userId, String.format(java.util.Locale.US, "%02d.%04d", m, y))) {
+                (pickedMonth, pickedYear) -> {
+                    if (app.ggtg.GgtgIdDate.calibrateFromText(userId, String.format(java.util.Locale.US, "%02d.%04d", pickedMonth, pickedYear))) {
                         BulletinFactory.of(this).createSimpleBulletin(R.drawable.msg_info, "Дата уточнена").show();
                         if (listAdapter != null && userIdRow >= 0) {
                             listAdapter.notifyItemChanged(userIdRow);
