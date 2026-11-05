@@ -122,7 +122,9 @@ base::options::toggle OptionUseNewChatView({
 	.id = kOptionUseNewChatView,
 	.name = "New chat view",
 	.description = "Open chats through the new section.",
-	.defaultValue = true,
+	// ggtg: upstream 7.3.5 turned this on. The new section has its own composer (ComposeControls) without
+	// the GGTG buttons (message templates...), which live in the classic HistoryWidget - so it stays off.
+	.defaultValue = false,
 });
 
 } // namespace

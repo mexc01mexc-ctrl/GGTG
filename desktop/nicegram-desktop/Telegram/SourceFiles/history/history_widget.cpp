@@ -7,6 +7,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
 #include "history/history_widget.h"
 #include "history/ggtg_sms_templates_panel.h"
+#include "core/ggtg_log.h"
 #include "data/scraped_members_db.h"
 
 #include "api/api_compose_with_ai.h"
@@ -7748,6 +7749,31 @@ void HistoryWidget::updateSmsTemplatesVisibility() {
 	const auto shown = _canSendTexts
 		&& !_tabbedSelectorToggle->isHidden()
 		&& !_voiceRecordBar->isActive();
+	// ggtg: diagnostics for the "templates button is missing" report - one line per change of the inputs
+	{
+		static auto lastState = -1;
+		const auto state = (_canSendTexts ? 1 : 0)
+			| (_tabbedSelectorToggle->isHidden() ? 2 : 0)
+			| (_voiceRecordBar->isActive() ? 4 : 0)
+			| (_smsTemplates->isHidden() ? 8 : 0)
+			| (_peer ? 16 : 0);
+		if (state != lastState) {
+			lastState = state;
+			Core::GgtgLog::Info(
+				u"Шаблоны"_q,
+				u"кнопка: canSendTexts=%1 смайлы скрыты=%2 запись=%3 кнопка скрыта=%4 чат=%5 -> показать=%6 (поле %7x%8, кнопка %9,%10)"_q
+					.arg(_canSendTexts)
+					.arg(_tabbedSelectorToggle->isHidden())
+					.arg(_voiceRecordBar->isActive())
+					.arg(_smsTemplates->isHidden())
+					.arg(_peer ? 1 : 0)
+					.arg(shown)
+					.arg(_field->width())
+					.arg(_field->height())
+					.arg(_smsTemplates->x())
+					.arg(_smsTemplates->y()));
+		}
+	}
 	if (_smsTemplates->isHidden() == shown) {
 		_smsTemplates->setVisible(shown);
 	}
@@ -7961,6 +7987,17 @@ void HistoryWidget::moveFieldControls() {
 	if (!_smsTemplates->isHidden()) {
 		_smsTemplates->moveToRight(right, buttonsBottom);
 		right += _smsTemplates->width();
+		static auto lastGeometry = QRect();
+		if (_smsTemplates->geometry() != lastGeometry) {
+			lastGeometry = _smsTemplates->geometry();
+			Core::GgtgLog::Info(
+				u"Шаблоны"_q,
+				u"кнопка размещена: x=%1 y=%2 %3x%4, окно %5x%6, смайлы x=%7"_q
+					.arg(lastGeometry.x()).arg(lastGeometry.y())
+					.arg(lastGeometry.width()).arg(lastGeometry.height())
+					.arg(width()).arg(height())
+					.arg(_tabbedSelectorToggle->x()));
+		}
 	}
 	if (_smsTemplatesPanel) {
 		const auto panelWidth = _smsTemplatesPanel->width();
