@@ -104,6 +104,13 @@ public class GgtgProxyPoolStore {
         return Entry.parse(first);
     }
 
+    // ggtg: a popped proxy that no account ended up using
+    public static void pushFirst(String name, Entry entry) {
+        List<String> lines = rawLines(name);
+        lines.add(0, entry.serialize());
+        saveLines(name, lines);
+    }
+
     // ng: list management for the GGTG "Прокси" section (GGTG Desktop's proxy list editor)
     public static String getListText(String name) {
         return android.text.TextUtils.join("\n", rawLines(name));

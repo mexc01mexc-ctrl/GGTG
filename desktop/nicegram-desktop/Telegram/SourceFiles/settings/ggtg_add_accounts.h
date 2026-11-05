@@ -318,6 +318,10 @@ inline void AddAccountByPhone(
 				MTP::GlobalProxyPool().removeMatching(proxy);
 			}
 			domain.active().setProxyOverride(proxy);
+			// language / time zone follow the proxy list's country, else the proxy's own address
+			if (!AddAccounts::ApplyPickedListGeo(&domain.active())) {
+				AutoDeviceGeo(&domain.active());
+			}
 			AddAccounts::Inform(
 				show,
 				u"Прокси задан. Войдите по номеру телефона или QR-коду "
@@ -340,16 +344,32 @@ inline void AddAccountByPhone(
 		if (proxy.type != MTP::ProxyData::Type::None) {
 			MTP::GlobalProxyPool().removeMatching(proxy);
 		}
+		// the list's country is read now (the picker is still the last one used)
+		const auto listGeo = LastPickedProxyListGeo();
+		const auto fitDevice = [=](not_null<::Main::Account*> account) {
+			if (listGeo) {
+				auto value = account->deviceOverride();
+				value.systemLangCode = listGeo->systemLang;
+				value.cloudLangCode = listGeo->cloudLang;
+				value.tzOffset = listGeo->tzOffset;
+				account->setDeviceOverride(value);
+			} else {
+				AutoDeviceGeo(account);
+			}
+		};
 		if (newWindow) {
 			domain.addActivated(Environment::Production, proxy, true);
+			fitDevice(&Core::App().domain().active());
 		} else if (const auto window = Core::App().activePrimaryWindow()) {
 			window->preventOrInvoke([=] {
 				Core::App().domain().addActivated(
 					Environment::Production,
 					proxy);
+				fitDevice(&Core::App().domain().active());
 			});
 		} else {
 			domain.addActivated(Environment::Production, proxy);
+			fitDevice(&domain.active());
 		}
 	}));
 }

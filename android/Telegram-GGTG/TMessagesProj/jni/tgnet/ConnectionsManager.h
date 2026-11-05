@@ -107,6 +107,9 @@ private:
     void clearRequestsForDatacenter(Datacenter *datacenter, HandshakeType type);
     void registerForInternalPushUpdates();
     void processRequestQueue(uint32_t connectionType, uint32_t datacenterId, Connection *connectedDownload = nullptr);
+    void processRequestQueueImpl(uint32_t connectionType, uint32_t datacenterId, Connection *connectedDownload);
+    bool processingRequestQueue = false; // ggtg
+    bool requestQueueRerun = false; // ggtg
     void authorizeOnMovingDatacenter();
     void authorizedOnMovingDatacenter();
     Datacenter *getDatacenterWithId(uint32_t datacenterId);
@@ -197,6 +200,7 @@ private:
     std::vector<std::unique_ptr<ProxyCheckInfo>> proxyActiveChecks;
 
     pthread_t networkThread;
+    bool networkThreadStarted = false; // ggtg: init() may run again (reinit) - never start a second network thread for the instance
     pthread_mutex_t mutex;
     std::queue<std::function<void()>> pendingTasks;
     struct epoll_event *epollEvents;

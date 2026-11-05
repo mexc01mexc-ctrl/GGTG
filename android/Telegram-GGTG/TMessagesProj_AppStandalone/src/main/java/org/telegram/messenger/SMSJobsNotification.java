@@ -39,6 +39,11 @@ public class SMSJobsNotification extends Service {
 
     public static boolean check(int currentAccount) {
         boolean showNotification = ApplicationLoader.mainInterfacePaused;
+        // ggtg: MAX_ACCOUNT_COUNT is 200 - never build a MessagesController for a slot nobody is logged into
+        // (this runs on the main thread in onPause and froze the app for seconds, e.g. when a file picker opened)
+        if (showNotification && !UserConfig.getInstance(currentAccount).isClientActivated()) {
+            showNotification = false;
+        }
         if (showNotification) {
             showNotification = MessagesController.getInstance(currentAccount).smsjobsStickyNotificationEnabled;
         }

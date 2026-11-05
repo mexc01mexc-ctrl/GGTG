@@ -11,6 +11,10 @@ namespace Main {
 class Account;
 } // namespace Main
 
+namespace MTP {
+struct ProxyData;
+} // namespace MTP
+
 namespace Storage {
 
 // Writes a standalone, passcode-less tdata folder containing just this one
@@ -31,6 +35,17 @@ namespace Storage {
 [[nodiscard]] bool ExportRawAuthorizationAsTdata(
 	const QByteArray &serializedAuth,
 	const QString &folderPath,
+	QString *error = nullptr);
+
+// Writes tdata's own "settings" file (tdata/settingss) next to an exported
+// folder's key and data files, holding just the account's proxy - the file a
+// real Telegram Desktop keeps its settings (proxy list included) in, so an
+// ordinary Telegram opening this tdata shows and uses the same proxy.
+// `tdataFolder` is the "tdata" folder itself. Does nothing (returns true)
+// for an empty proxy.
+[[nodiscard]] bool WriteTdataProxySettings(
+	const QString &tdataFolder,
+	const MTP::ProxyData &proxy,
 	QString *error = nullptr);
 
 } // namespace Storage

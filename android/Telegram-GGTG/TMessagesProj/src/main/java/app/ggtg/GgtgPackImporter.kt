@@ -14,12 +14,9 @@ import java.io.File
 import java.util.zip.ZipFile
 
 // ng: imports a .ggtg pack written by GGTG Desktop's "Экспорт" section (settings/ggtg_export.cpp).
-// Every account in it carries a brand-new session minted on the Mac for this transfer. With
-// "handoff": true (current Macs) that session is an ordinary Desktop one: this phone makes its own
-// Android session from it the way the tdata import does (QR handoff: this app asks for a login token
-// as the genuine Android client, the Mac's session approves it), then ends the Mac's session. A Mac
-// minting a session as Android itself gets API_ID_PUBLISHED_FLOOD from Telegram. When the handoff
-// fails, or for older packs, the keys are installed as-is. Format: docs/ggtg-formats.md in ggtg-macos.
+// Every account in it carries a brand-new session minted on the Mac for this transfer. Sessions are never
+// re-minted as Android here (Telegram asks for a login e-mail on every new Android login): the keys are
+// installed as they are and the phone keeps running that Desktop-born session. Format: docs/ggtg-formats.md.
 object GgtgPackImporter {
 
     private const val MANIFEST = "manifest.json"
@@ -106,10 +103,8 @@ object GgtgPackImporter {
         file: File,
         proxySource: GgtgProxySource?,
         progressDialog: app.ggtg.ui.TdataImportProgressDialog,
-        createBackup: Boolean = false,
-        // a failed handoff is a failure, not a reason to run the Mac's temporary session as it is
-        noDirectFallback: Boolean = false
-    ): GgtgImportSupport.ImportResult = GgtgWakeLock.withLock("pack_import") {
+        createBackup: Boolean = false
+    ): GgtgImportSupport.ImportResult = GgtgImportSupport.exclusive { GgtgWakeLock.withLock("pack_import") {
         val accounts = withContext(Dispatchers.IO) { readPack(file) }
         if (accounts.isEmpty()) {
             return GgtgImportSupport.ImportResult(emptyList(), 0, 0, 0, "В файле .ggtg нет аккаунтов")
@@ -154,10 +149,6 @@ object GgtgPackImporter {
             .filter { it != UserConfig.selectedAccount && !UserConfig.getInstance(it).isClientActivated }
             .toMutableList()
 
-        // one never-activated slot that holds the Mac's session while it approves this phone's login,
-        // reused across accounts (as in the tdata import); without a spare one the keys go in as-is
-        val tempSlot = if (toImport.any { it.handoff } && freeSlots.size > 1) freeSlots.removeAt(freeSlots.size - 1) else null
-
         val imported = mutableListOf<Long>()
         var firstImportedSlot: Int? = null
         var noFreeSlot = 0
@@ -184,36 +175,11 @@ object GgtgPackImporter {
                 continue
             }
             progressDialog.setWorking(account.phone.takeIf { it.isNotEmpty() }?.let { "+$it" }, i + 1, total)
-            // If handoff is requested (export from Desktop for Android), execute handoff to mint authentic Android session.
-            // Otherwise, install auth keys directly into slot.
-            var result = try {
-                if (account.keys.isNotEmpty() && !account.handoff) {
-                    install(account, slot, proxy)
-                } else if (account.handoff && tempSlot != null) {
-                    handoff(account, slot, tempSlot, proxy, i + 1, total, progressDialog, keepTransitSession = createBackup)
-                } else {
-                    install(account, slot, proxy)
-                }
+            // keys go in as they are: the session stays the Desktop-born one the Mac minted for this transfer
+            val result = try {
+                install(account, slot, proxy)
             } catch (t: Throwable) {
                 Result.failure(t)
-            }
-            if (result.isFailure && !noDirectFallback && account.handoff && tempSlot != null && account.keys.isNotEmpty()
-                && result.exceptionOrNull() !is TdataImportHelper.PasswordSkippedException) {
-                // If handoff failed, fall back to direct install so the account isn't lost
-                FileLog.e("ggtg pack: handoff failed for userId=${account.userId}, falling back to direct install", result.exceptionOrNull())
-                try {
-                    ConnectionsManager.getInstance(tempSlot).cleanup(true)
-                    UserConfig.getInstance(tempSlot).clearConfig()
-                } catch (_: Throwable) {}
-                try {
-                    ConnectionsManager.getInstance(slot).cleanup(true)
-                    UserConfig.getInstance(slot).clearConfig()
-                } catch (_: Throwable) {}
-                result = try {
-                    install(account, slot, proxy)
-                } catch (t: Throwable) {
-                    Result.failure(t)
-                }
             }
             result.onSuccess { userId ->
                 imported += userId
@@ -233,13 +199,7 @@ object GgtgPackImporter {
                         }
                     } ?: JSONObject()
                     val uc = UserConfig.getInstance(slot)
-                    val transitDeviceJson = if (account.handoff) {
-                        JSONObject().apply {
-                            put("deviceModel", "GGTG Transfer")
-                            put("systemVersion", "Telegram Desktop")
-                            put("appVersion", "GGTG")
-                        }
-                    } else account.device
+                    val transitDeviceJson = account.device
                     val sNote = if (account.sessionNote.isNotEmpty()) account.sessionNote
                         else ("Резервная сессия (импорт .ggtg) от " + java.text.SimpleDateFormat("dd.MM.yyyy HH:mm", java.util.Locale.getDefault()).format(java.util.Date()))
                     val backup = GgtgSessions.StoredSession(
@@ -278,50 +238,11 @@ object GgtgPackImporter {
             }
         }
 
-        if (tempSlot != null) {
-            ConnectionsManager.getInstance(tempSlot).setAsleep(true)
-            UserConfig.getInstance(tempSlot).clearConfig()
-            ConnectionsManager.setProxySettingsForAccount(tempSlot, false, "", 0, "", "", "")
-        }
         if (imported.isNotEmpty()) {
             GgtgImportSupport.selectImportedSlotIfIdle(firstImportedSlot)
         }
         GgtgImportSupport.ImportResult(imported, alreadyLoggedIn, noFreeSlot, failed, lastFailReason, noFreeProxy)
-    }
-
-    /** This phone makes its own session from the Mac's (see the top of the file), then ends the Mac's one. */
-    private suspend fun handoff(
-        account: PackAccount,
-        slot: Int,
-        tempSlot: Int,
-        proxy: PackProxy?,
-        index: Int,
-        total: Int,
-        progressDialog: app.ggtg.ui.TdataImportProgressDialog,
-        keepTransitSession: Boolean
-    ): Result<Long> {
-        // the 2FA password from the Mac is what the handoff tries first
-        if (account.twoFactor.isNotEmpty()) GgtgTwoFaStore.save(account.userId, account.twoFactor)
-        // both slots go through the account's own proxy (if any): the Mac's session was made from that address too
-        val bits = if (proxy != null && proxy.host.isNotEmpty()) {
-            GgtgProxyBits(proxy.host, proxy.port, proxy.user, proxy.password, proxy.secret)
-        } else {
-            GgtgProxyBits("", 0, "", "", "")
-        }
-        val result = TdataImportHelper.duplicateAccountViaHandoff(
-            app.ggtg.tdata.TdataAccount(account.userId, account.mainDcId, account.keys),
-            tempSlot, slot, bits, bits, index, total, progressDialog, account.device,
-            knownPhone = account.phone
-        )
-        if (result.isSuccess) {
-            applyMeta(account, slot)
-        }
-        try {
-            ConnectionsManager.getInstance(tempSlot).setAsleep(true)
-            UserConfig.getInstance(tempSlot).clearConfig()
-        } catch (_: Throwable) {}
-        return result
-    }
+    } }
 
     private fun applyMeta(account: PackAccount, slot: Int) {
         val uc = UserConfig.getInstance(slot)
@@ -365,6 +286,7 @@ object GgtgPackImporter {
             account.device == null
         GgtgDevice.assignNew(slot, account.device, isDesktop = isDesktop)
         val cm = ConnectionsManager.getInstance(slot)
+        cm.setAsleep(false) // ggtg: earlier imports leave free slots asleep
         if (account.mainDcId != 0 && account.mainDcId != ConnectionsManager.DEFAULT_DATACENTER_ID) {
             cm.setDefaultDatacenterId(account.mainDcId)
         }

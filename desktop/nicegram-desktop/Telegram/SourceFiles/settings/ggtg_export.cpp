@@ -82,7 +82,7 @@ struct ExportOptions {
 	bool viaSync = false;
 	// A temporary session for the phone to make its own Android session
 	// from (the phone asked for the account itself): no device, handoff.
-	bool handoff = false;
+	bool handoff = true; // ggtg: sessions are Desktop ones everywhere - Android sessions are not made any more
 	// Nobody to show anything to: no progress box, no questions.
 	bool silent = false;
 	QString sessionNote;
@@ -636,7 +636,8 @@ void ExportNext(std::shared_ptr<ExportRun> run, size_t index) {
 	const auto userId = QString::number(account->session().userId().bare);
 	const auto vault = Sessions::StoredForUser(Sessions::LoadVault(), userId);
 	const auto existingAndroid = [&]() -> const Sessions::StoredSession* {
-		if (run->options.viaSync) {
+		// ggtg: never hand a stored spare to a phone - one key runs in one place only; a new session is minted
+		if (run->options.viaSync || run->options.handoff) {
 			return nullptr;
 		}
 		for (const auto &item : vault) {
@@ -720,6 +721,31 @@ void ExportNext(std::shared_ptr<ExportRun> run, size_t index) {
 		.arg(run->labels[index]));
 	const auto weakAccount = run->accounts[index];
 	const auto targetDevice = Settings::DeviceOverrideFromJson(run->metas[index].value(u"device"_q).toObject());
+	// ggtg: a handoff export is a Desktop session (the phone keeps running it as it is), so the phone must
+	// get the very device that session was born with: pick it here, mint with it and write it into the pack.
+	auto desktopDevice = std::optional<MTP::DeviceOverride>();
+	if (run->options.handoff) {
+		if (const auto alive = weakAccount.get()) {
+			auto picked = Settings::RandomDeviceOverrideForAccount(alive);
+			// language / time zone: what the account already runs with (they were fitted to its proxy list /
+			// proxy), else the country of its number
+			const auto own = EffectiveDeviceOverride(alive);
+			const auto phone = (alive->sessionExists() && alive->session().user())
+				? alive->session().user()->phone()
+				: QString();
+			if (!own.systemLangCode.isEmpty()) {
+				picked.systemLangCode = own.systemLangCode;
+				picked.cloudLangCode = own.cloudLangCode;
+				picked.tzOffset = own.tzOffset;
+			} else if (!phone.isEmpty()) {
+				const auto geo = Core::GgtgGeo::MatchForPhone(phone);
+				picked.systemLangCode = geo.systemLang;
+				picked.cloudLangCode = geo.cloudLang;
+				picked.tzOffset = geo.tzOffset;
+			}
+			desktopDevice = picked;
+		}
+	}
 	Main::DuplicateSessionTracked(account, [=](
 			Fn<void(QString password)> submit,
 			Fn<void()> cancel) {
@@ -766,10 +792,14 @@ void ExportNext(std::shared_ptr<ExportRun> run, size_t index) {
 		entry["keys"] = keys;
 		entry["handoff"] = run->options.handoff;
 		if (run->options.handoff) {
-			// the phone picks its own Android identity
-			entry.remove(u"device"_q);
+			// the phone runs this very Desktop session: same device it was born with
+			if (desktopDevice) {
+				entry["device"] = Settings::DeviceOverrideToJson(*desktopDevice);
+			} else {
+				entry.remove(u"device"_q);
+			}
 			// ggtg: the temporary session is not ended - it stays as the account's spare (backup) session
-			entry["sessionRole"] = u"backup"_q;
+			entry["sessionRole"] = u"exported"_q;
 		}
 		run->exported.push_back(entry);
 
@@ -780,7 +810,7 @@ void ExportNext(std::shared_ptr<ExportRun> run, size_t index) {
 				: (u"экспорт для "_q + (Settings::IsIosSession(targetDevice) ? u"iOS"_q : u"Android"_q));
 			const auto stored = Settings::StoreSessionKey(
 				alive,
-				run->options.handoff ? u"backup"_q : u"exported"_q,
+				u"exported"_q, // ggtg: the key now runs on the phone - only a note stays here, never a swappable spare
 				sNote,
 				serializedAuth,
 				hash,
@@ -813,7 +843,7 @@ void ExportNext(std::shared_ptr<ExportRun> run, size_t index) {
 		}
 		next();
 	}, run->options.handoff
-		? std::optional<MTP::DeviceOverride>()
+		? desktopDevice
 		: std::optional<MTP::DeviceOverride>(targetDevice),
 	run->options.handoff ? false : !Settings::IsIosSession(targetDevice));
 }

@@ -2494,7 +2494,24 @@ static uint32_t getDownloadSize(Request *request) {
     return apiRequest != nullptr ? apiRequest->downloadSize : 0;
 }
 
+// ggtg: processRequestQueue is not re-entrant (closing/opening sockets inside it calls it again, which clears the
+// members it is walking and, on a bad proxy, recurses until the stack is gone). A nested call only asks for one more pass.
 void ConnectionsManager::processRequestQueue(uint32_t connectionTypes, uint32_t dc, Connection *connectedDownload) {
+    if (processingRequestQueue) {
+        requestQueueRerun = true;
+        return;
+    }
+    processingRequestQueue = true;
+    processRequestQueueImpl(connectionTypes, dc, connectedDownload);
+    for (int pass = 0; requestQueueRerun && pass < 8; pass++) {
+        requestQueueRerun = false;
+        processRequestQueueImpl(0, 0, nullptr);
+    }
+    requestQueueRerun = false;
+    processingRequestQueue = false;
+}
+
+void ConnectionsManager::processRequestQueueImpl(uint32_t connectionTypes, uint32_t dc, Connection *connectedDownload) {
     genericMessagesToDatacenters.clear();
     genericMediaMessagesToDatacenters.clear();
     tempMessagesToDatacenters.clear();
@@ -3766,6 +3783,39 @@ void ConnectionsManager::applyDnsConfig(NativeByteBuffer *buffer, std::string ph
 }
 
 void ConnectionsManager::init(uint32_t version, int32_t layer, int32_t apiId, std::string deviceModel, std::string systemVersion, std::string appVersion, std::string langCode, std::string systemLangCode, std::string configPath, std::string logPath, std::string regId, std::string cFingerpting, std::string installerId, std::string packageId, int32_t timezoneOffset, int64_t userId, bool userPremium, bool isPaused, bool enablePushConnection, bool hasNetwork, int32_t networkType, int32_t performanceClass) {
+    // ggtg: init() is reached again for a live instance (ConnectionsManager.reinit after a device change / login).
+    // A second pthread_create here gave the instance two network threads sharing one epoll, one maps state and
+    // one jniEnv[instanceNum] slot (the later AttachCurrentThread overwrote the earlier thread's JNIEnv) - every
+    // Java upcall of the first thread then ran with a foreign JNIEnv and corrupted ART state. Re-init only
+    // refreshes the identity fields, and does it on the network thread that owns them.
+    if (networkThreadStarted) {
+        scheduleTask([this, version, layer, apiId, deviceModel, systemVersion, appVersion, langCode, systemLangCode, regId, timezoneOffset, userId, userPremium] {
+            bool identityChanged = currentVersion != version || currentLayer != layer || currentApiId != apiId ||
+                    currentDeviceModel != deviceModel || currentSystemVersion != systemVersion ||
+                    currentAppVersion != appVersion || currentLangCode != langCode ||
+                    currentSystemLangCode != systemLangCode || currentDeviceTimezone != timezoneOffset;
+            currentVersion = version;
+            currentLayer = layer;
+            currentApiId = apiId;
+            currentDeviceModel = deviceModel;
+            currentSystemVersion = systemVersion;
+            currentAppVersion = appVersion;
+            currentLangCode = langCode;
+            currentRegId = regId;
+            currentDeviceTimezone = timezoneOffset;
+            currentSystemLangCode = systemLangCode;
+            currentUserId = userId;
+            currentUserPremium = userPremium;
+            if (identityChanged) {
+                lastInitSystemLangcode = systemLangCode;
+                for (auto &datacenter : datacenters) {
+                    datacenter.second->resetInitVersion();
+                }
+                saveConfig();
+            }
+        });
+        return;
+    }
     currentVersion = version;
     currentLayer = layer;
     currentApiId = apiId;
@@ -3818,6 +3868,7 @@ void ConnectionsManager::init(uint32_t version, int32_t layer, int32_t apiId, st
         }
     }
 
+    networkThreadStarted = true; // ggtg
     pthread_create(&networkThread, nullptr, (ConnectionsManager::ThreadProc), this);
 
     if (needLoadConfig) {

@@ -14,6 +14,9 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "base/random.h"
 #include "config.h"
 #include "core/ggtg_log.h"
+#include "core/core_settings.h"
+#include "mtproto/mtproto_proxy_data.h"
+#include "storage/details/storage_settings_scheme.h"
 
 #include <QtCore/QDir>
 #include <QtCore/QFileInfo>
@@ -142,6 +145,57 @@ bool ExportRawAuthorizationAsTdata(
 	}
 	if (!QFileInfo::exists(path + u"key_datas"_q)) {
 		return fail(u"файл key_datas не записался"_q);
+	}
+	return true;
+}
+
+bool WriteTdataProxySettings(
+		const QString &tdataFolder,
+		const MTP::ProxyData &proxy,
+		QString *error) {
+	using Type = MTP::ProxyData::Type;
+	if ((proxy.type != Type::Socks5
+		&& proxy.type != Type::Http
+		&& proxy.type != Type::Mtproto)
+		|| proxy.host.isEmpty()
+		|| !proxy.port) {
+		return true;
+	}
+	const auto path = tdataFolder.endsWith('/')
+		? tdataFolder
+		: (tdataFolder + '/');
+	if (!QDir().mkpath(path)) {
+		if (error) {
+			*error = u"не удалось создать папку "_q
+				+ QDir::toNativeSeparators(path);
+		}
+		return false;
+	}
+	// Only the proxy part of Telegram's application settings is filled; the
+	// rest stays at its defaults, which a fresh install has too.
+	auto application = Core::Settings();
+	application.proxy().setList({ proxy });
+	application.proxy().setSelected(proxy);
+	application.proxy().setSettings(MTP::ProxyData::Settings::Enabled);
+	const auto serialized = application.serialize();
+
+	auto salt = QByteArray(LocalEncryptSaltSize, Qt::Uninitialized);
+	base::RandomFill(salt.data(), salt.size());
+	const auto settingsKey = CreateLegacyLocalKey(QByteArray(), salt);
+	{
+		FileWriteDescriptor settings(u"settings"_q, path, true);
+		settings.writeData(salt);
+		EncryptedDescriptor data(
+			sizeof(quint32) + Serialize::bytearraySize(serialized));
+		data.stream << quint32(dbiApplicationSettings) << serialized;
+		settings.writeEncrypted(data, settingsKey);
+	}
+	if (!QFileInfo::exists(path + u"settingss"_q)) {
+		if (error) {
+			*error = u"файл settings не записался ("_q
+				+ QDir::toNativeSeparators(path) + ')';
+		}
+		return false;
 	}
 	return true;
 }

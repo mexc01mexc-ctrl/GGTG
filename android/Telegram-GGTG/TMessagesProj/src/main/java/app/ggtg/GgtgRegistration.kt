@@ -176,7 +176,8 @@ object GgtgRegistration {
             replaceTokenOnFlood = prefs.getBoolean("replaceTokenOnFlood", true),
             autoBuyEmail = prefs.getBoolean("autoBuyEmail", true),
             emailService = prefs.getString("emailService", "auto") ?: "auto",
-            emailApiKey = prefs.getString("emailApiKey", "") ?: "",
+            emailApiKey = emailApiKeyFor(resolveEmailProviderIdRaw(prefs.getString("emailService", "auto") ?: "auto", sid, prefs.getInt("tokenService", 0)))
+                .ifBlank { prefs.getString("emailApiKey", "") ?: "" },
             emailDomain = prefs.getString("emailDomain", "any") ?: "any",
             smsOperator = prefs.getString("smsOperator", "") ?: "",
             maxPrice = prefs.getString("maxPrice", "") ?: "",
@@ -248,6 +249,7 @@ object GgtgRegistration {
             .putString("manualPhone", cfg.manualPhone)
             .putInt("mode", cfg.mode)
             .apply()
+        saveEmailApiKeyFor(resolveEmailProviderId(cfg), cfg.emailApiKey)
     }
 
     /** The API key kept for [serviceId] (each SMS service has its own). */
@@ -261,6 +263,31 @@ object GgtgRegistration {
     fun saveApiKeyFor(serviceId: String, key: String) {
         val prefs = ApplicationLoader.applicationContext.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
         prefs.edit().putString("apiKey_$serviceId", key).apply()
+    }
+
+    /** "auto" resolves to whichever concrete e-mail provider the SMS-service/token settings imply;
+     * this is the stable key under which that provider's own API key is remembered. */
+    private fun resolveEmailProviderIdRaw(emailService: String, smsServiceId: String, tokenService: Int): String {
+        val isAntiSafety = (emailService == "antisafety") || (emailService == "auto" && tokenService == 2)
+        if (isAntiSafety) return "antisafety"
+        val useSmsBower = (emailService == "smsbower") || (emailService == "auto" && smsServiceId == "smsbower")
+        return if (useSmsBower) "smsbower" else "herosms"
+    }
+
+    fun resolveEmailProviderId(config: Config): String =
+        resolveEmailProviderIdRaw(config.emailService, config.serviceId, config.tokenService)
+
+    /** The API key kept for the e-mail provider [providerId] ("antisafety" / "smsbower" / "herosms") -
+     * each one has its own, like [apiKeyFor] does for SMS services. */
+    fun emailApiKeyFor(providerId: String): String {
+        val prefs = ApplicationLoader.applicationContext.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+        return prefs.getString("emailApiKey_$providerId", "") ?: ""
+    }
+
+    fun saveEmailApiKeyFor(providerId: String, key: String) {
+        if (key.isBlank()) return
+        val prefs = ApplicationLoader.applicationContext.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+        prefs.edit().putString("emailApiKey_$providerId", key).apply()
     }
 
     /** Numbers that already failed (registered, banned, invalid): kept between runs so they are never paid for twice. */
@@ -2006,6 +2033,7 @@ object GgtgRegistration {
 
                 // 5. Send code via MTProto (with flood token replacement support)
                 val cm = ConnectionsManager.getInstance(slot)
+                cm.setAsleep(false) // ggtg: earlier imports leave free slots asleep
                 val flags = ConnectionsManager.RequestFlagWithoutLogin or ConnectionsManager.RequestFlagFailOnServerErrors or
                     ConnectionsManager.RequestFlagTryDifferentDc or ConnectionsManager.RequestFlagEnableUnauthorized
 
@@ -2632,6 +2660,7 @@ object GgtgRegistration {
 
                     // 5. Send code via MTProto
                     val cm = ConnectionsManager.getInstance(slot)
+                    cm.setAsleep(false) // ggtg: earlier imports leave free slots asleep
                     val flags = ConnectionsManager.RequestFlagWithoutLogin or ConnectionsManager.RequestFlagFailOnServerErrors or
                         ConnectionsManager.RequestFlagTryDifferentDc or ConnectionsManager.RequestFlagEnableUnauthorized
 
@@ -2768,6 +2797,7 @@ object GgtgRegistration {
                     status("Авторизация в Telegram...")
                     log("Авторизация в Telegram с кодом $code...")
                     val cm = ConnectionsManager.getInstance(slot)
+                    cm.setAsleep(false) // ggtg: earlier imports leave free slots asleep
                     val flags = ConnectionsManager.RequestFlagWithoutLogin or ConnectionsManager.RequestFlagFailOnServerErrors or
                         ConnectionsManager.RequestFlagTryDifferentDc or ConnectionsManager.RequestFlagEnableUnauthorized
 

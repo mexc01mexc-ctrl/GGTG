@@ -549,7 +549,9 @@ void DuplicateSession(
 	} else {
 		fields.deviceOverride = *device;
 	}
-	if (!phone.isEmpty()) {
+	// the number's country is only the fallback: a device handed in with its own language / time zone
+	// (fitted to the proxy) keeps them, so what is minted is what the caller writes into its pack
+	if (!phone.isEmpty() && fields.deviceOverride.systemLangCode.isEmpty()) {
 		const auto geo = Core::GgtgGeo::MatchForPhone(phone);
 		fields.deviceOverride.systemLangCode = geo.systemLang;
 		fields.deviceOverride.cloudLangCode = geo.cloudLang;

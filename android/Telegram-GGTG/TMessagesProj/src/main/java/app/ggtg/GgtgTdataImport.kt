@@ -246,7 +246,7 @@ object TdataImportHelper {
     }
 
     private suspend fun importAccounts(accounts: List<TdataAccount>, proxySource: GgtgProxySource, progressDialog: TdataImportProgressDialog, createBackup: Boolean = false): GgtgImportSupport.ImportResult =
-        GgtgDevice.withListGeo(proxySource) { importAccountsInner(accounts, proxySource, progressDialog, createBackup) }
+        GgtgImportSupport.exclusive { GgtgDevice.withListGeo(proxySource) { importAccountsInner(accounts, proxySource, progressDialog, createBackup) } }
 
     private suspend fun importAccountsInner(accounts: List<TdataAccount>, proxySource: GgtgProxySource, progressDialog: TdataImportProgressDialog, createBackup: Boolean = false): GgtgImportSupport.ImportResult {
         if (accounts.isEmpty()) {
@@ -307,20 +307,30 @@ object TdataImportHelper {
                 noFreeSlot++
                 continue
             }
-            // only pop (permanently remove) a proxy once we know there's actually a slot to use it on
-            val targetEntry = proxySource.popNext()
-            if (targetEntry == null) {
+            // the account's own proxy from its "ggtg.json" if it brought one, else the next one of the chosen list;
+            // a list proxy is only popped (permanently removed) once we know there's a slot to use it on
+            val sidecar = readSidecar(account)
+            val targetEntry = if (sidecar.proxy == null) proxySource.popNext() else null
+            if (sidecar.proxy == null && targetEntry == null) {
                 noFreeProxy++
                 freeSlots.add(0, targetSlot)
                 continue
             }
-            val targetProxy = targetEntry.toProxyBits()
+            val targetProxy = sidecar.proxy ?: targetEntry!!.toProxyBits()
 
             progressDialog.setWorking(null, index, total)
             synchronized(trace) { trace.clear() }
-            val result = duplicateAccountViaHandoff(account, tempSlot, targetSlot, tempProxy, targetProxy, index, total, progressDialog)
+            // ggtg: "Да" = a NEW Desktop-type session for this phone (QR handoff: the tdata session approves a
+            // login token this phone asks for with Desktop's api_id; no code, no e-mail). "Нет" = the tdata key
+            // is installed as it is (the very session of the Desktop, nothing new is created).
+            val result = if (createBackup) {
+                duplicateAccountViaHandoff(account, tempSlot, targetSlot, tempProxy, targetProxy, index, total, progressDialog, sidecar.device)
+            } else {
+                installDesktopKey(account, targetSlot, targetProxy, sidecar.device)
+            }
             result.onSuccess { userId ->
                 imported += userId
+                applySidecar(sidecar, userId, targetSlot)
                 if (firstImportedSlot == null) firstImportedSlot = targetSlot
                 FileLog.d("tdata duplicate: activated slot=$targetSlot userId=$userId mainDc=${account.mainDcId}")
                 if (createBackup) {
@@ -375,6 +385,7 @@ object TdataImportHelper {
                 ConnectionsManager.getInstance(targetSlot).setAsleep(true)
                 UserConfig.getInstance(targetSlot).clearConfig()
                 freeSlots.add(0, targetSlot)
+                targetEntry?.let { proxySource.giveBack(it) } // ggtg: no account got this list proxy
             }
         }
 
@@ -387,6 +398,84 @@ object TdataImportHelper {
             GgtgImportSupport.selectImportedSlotIfIdle(firstImportedSlot)
         }
         return GgtgImportSupport.ImportResult(imported, alreadyLoggedIn, noFreeSlot, failed, lastFailReason, noFreeProxy, passwordSkipped)
+    }
+
+    /** What travels beside a tdata folder ("ggtg.json" written by this app's export): the account's own proxy,
+     * device, folder and 2FA. Everything is optional - a plain purchased tdata has none of it. */
+    internal class Sidecar(
+        val proxy: GgtgProxyBits?,
+        val device: org.json.JSONObject?,
+        val folder: String?,
+        val twoFactor: String?
+    )
+
+    internal fun readSidecar(account: TdataAccount): Sidecar {
+        val src = account.sourceFolder
+        var info: org.json.JSONObject? = null
+        for (dir in listOfNotNull(src.parentFile, src)) {
+            val f = java.io.File(dir, "ggtg.json")
+            if (f.isFile) {
+                info = try { org.json.JSONObject(f.readText()) } catch (_: Throwable) { null }
+                if (info != null) break
+            }
+        }
+        val proxyObj = info?.optJSONObject("proxy")
+        val type = proxyObj?.optString("type").orEmpty()
+        val proxy = if (proxyObj != null && (type == "socks5" || type == "mtproto") &&
+            proxyObj.optString("host").isNotEmpty() && proxyObj.optInt("port") > 0) {
+            GgtgProxyBits(proxyObj.optString("host"), proxyObj.optInt("port"), proxyObj.optString("user"),
+                proxyObj.optString("password"), proxyObj.optString("secret"))
+        } else null
+        val two = info?.optString("twoFactor")?.takeIf { it.isNotEmpty() }
+            ?: try {
+                app.ggtg.tdata.TdataPasswordFinder.findCandidates(src, account.userId, null, null).firstOrNull()
+            } catch (_: Throwable) { null }
+        return Sidecar(
+            proxy = proxy,
+            device = info?.optJSONObject("device"),
+            folder = if (info?.has("folder") == true) info.optString("folder") else null,
+            twoFactor = two
+        )
+    }
+
+    /** The folder and 2FA password that came with the account go onto the slot (and the shared 2FA store). */
+    private fun applySidecar(sidecar: Sidecar, userId: Long, slot: Int) {
+        val uc = UserConfig.getInstance(slot)
+        sidecar.folder?.let { uc.ncgFolder = it }
+        sidecar.twoFactor?.let {
+            uc.ncgTwoFactor = it
+            GgtgTwoFaStore.save(userId, it)
+        }
+        if (sidecar.proxy != null) {
+            uc.ncgProxyEnabled = true
+            uc.ncgProxyAddress = sidecar.proxy.address
+            uc.ncgProxyPort = sidecar.proxy.port
+            uc.ncgProxyUsername = sidecar.proxy.username
+            uc.ncgProxyPassword = sidecar.proxy.password
+            uc.ncgProxySecret = sidecar.proxy.secret
+        }
+        uc.saveConfig(false)
+    }
+
+    /** Installs the tdata auth keys straight into [targetSlot] - no new login, no code, no e-mail. */
+    private suspend fun installDesktopKey(account: TdataAccount, targetSlot: Int, proxy: GgtgProxyBits, device: org.json.JSONObject? = null): Result<Long> = runCatching {
+        if (proxy.address.isNotEmpty()) {
+            ConnectionsManager.setProxySettingsForAccount(targetSlot, true, proxy.address, proxy.port, proxy.username, proxy.password, proxy.secret)
+        } else {
+            ConnectionsManager.setProxySettingsForAccount(targetSlot, false, "", 0, "", "", "")
+        }
+        GgtgDevice.assignNew(targetSlot, device, isDesktop = true)
+        val cm = ConnectionsManager.getInstance(targetSlot)
+        cm.setAsleep(false)
+        if (account.mainDcId != 0 && account.mainDcId != ConnectionsManager.DEFAULT_DATACENTER_ID) {
+            cm.setDefaultDatacenterId(account.mainDcId)
+        }
+        for ((dcId, keyBytes) in account.keys) {
+            cm.importAuthKey(dcId, keyBytes, GgtgImportSupport.authKeyIdFor(keyBytes), dcId == account.mainDcId)
+        }
+        cm.setUserId(account.userId)
+        kotlinx.coroutines.delay(300)
+        GgtgImportSupport.activateSlot(targetSlot, null, account.mainDcId).getOrThrow()
     }
 
     /** Thrown to signal "user chose to skip this account rather than provide its 2FA password" -
@@ -425,10 +514,12 @@ object TdataImportHelper {
             ConnectionsManager.setProxySettingsForAccount(targetSlot, false, "", 0, "", "", "")
         }
         GgtgDevice.assignNew(tempSlot, isDesktop = true)
-        GgtgDevice.assignNew(targetSlot, device, isDesktop = false)
+        GgtgDevice.assignNew(targetSlot, device, isDesktop = true) // ggtg: the new session is a Desktop-type one (QR login uses Desktop's api_id)
 
         FileLog.d("tdata handoff: installing temp key on slot=$tempSlot userId=${account.userId}")
         val tempCm = ConnectionsManager.getInstance(tempSlot)
+        // ggtg: earlier imports leave free slots asleep (no network): requests would only hang to the timeout
+        tempCm.setAsleep(false)
         if (account.mainDcId != 0 && account.mainDcId != ConnectionsManager.DEFAULT_DATACENTER_ID) {
             tempCm.setDefaultDatacenterId(account.mainDcId)
         }
@@ -438,6 +529,7 @@ object TdataImportHelper {
         tempCm.setUserId(account.userId)
 
         val targetCm = ConnectionsManager.getInstance(targetSlot)
+        targetCm.setAsleep(false)
         if (account.mainDcId != 0 && account.mainDcId != ConnectionsManager.DEFAULT_DATACENTER_ID) {
             targetCm.setDefaultDatacenterId(account.mainDcId)
         }
@@ -457,7 +549,7 @@ object TdataImportHelper {
         // then Telegram Android's own (this app's api_id, the phone shown by its real name); a login token can't
         // be had with that id any more (API_ID_PUBLISHED_FLOOD), only with Telegram Desktop's. Null = the code
         // didn't come to the app (an SMS is never used up for this): the login token below is the way then.
-        signInByCode(tempCm, targetCm, targetSlot, phone, account, progressDialog)?.let { return it }
+        // ggtg: no login-by-code step - Telegram asks for a login e-mail on it; the QR handoff below needs none
 
         // 1) target (unauthenticated, fresh) asks for a login token. Use the default DC, not the
         // account's home DC directly - a virgin ConnectionsManager only proactively handshakes its
@@ -509,11 +601,9 @@ object TdataImportHelper {
                 }
             }
             is TLRPC.TL_auth_loginToken -> {
-                // no migration - the token is scoped to whichever concrete DC the sentinel just
-                // resolved to for this (fresh, default-DC-2) account; pin it explicitly from here
-                // on, since tempSlot's own "current DC" is a different concrete value (its real
-                // home DC) and the sentinel would silently resolve differently there.
-                dcId = 2
+                // ggtg: no migration - the token lives on the DC it was just exported from (dcId), so
+                // the polls below stay there. It used to be pinned to DC 2 even when exported on the
+                // account's home DC, and the poll then went to a DC that knew nothing of the token.
                 token = response.token
             }
             is TLRPC.TL_auth_loginTokenSuccess -> return finalizeTargetAccount(targetSlot, dcId, response.authorization)
@@ -694,7 +784,7 @@ object TdataImportHelper {
     }
 
     private const val SERVICE_USER_ID = 777000L
-    private const val CODE_WAIT_MS = 60_000L
+    private const val CODE_WAIT_MS = 180_000L // ggtg: was 60 s
 
     private suspend fun signInByCode(
         tempCm: ConnectionsManager,
@@ -733,9 +823,20 @@ object TdataImportHelper {
                 phone_code_hash = sentCode.phone_code_hash
             }, flags, targetDc, "cancelCode")
         }
-        if (sentCode.type !is TLRPC.TL_auth_sentCodeTypeApp) {
-            tr("code: not to the app (${sentCode.type?.javaClass?.simpleName})")
-            FileLog.d("tdata handoff: sentCode type is ${sentCode.type?.javaClass?.simpleName}, not App")
+        var activeSentCode = sentCode
+        if (activeSentCode.type is TLRPC.TL_auth_sentCodeTypeSetUpEmailRequired) {
+            tr("code: SetUpEmailRequired, buying mailbox")
+            val resolved = resolveSetUpEmail(targetCm, digits, activeSentCode.phone_code_hash, flags, targetDc, progressDialog)
+            if (resolved == null) {
+                FileLog.d("tdata handoff: SetUpEmailRequired flow failed")
+                cancel()
+                return null
+            }
+            activeSentCode = resolved
+        }
+        if (activeSentCode.type !is TLRPC.TL_auth_sentCodeTypeApp) {
+            tr("code: not to the app (${activeSentCode.type?.javaClass?.simpleName})")
+            FileLog.d("tdata handoff: sentCode type is ${activeSentCode.type?.javaClass?.simpleName}, not App")
             cancel()
             return null
         }
@@ -750,7 +851,7 @@ object TdataImportHelper {
         val (signed, signError) = targetCm.sendSuspend(TLRPC.TL_auth_signIn().apply {
             this.flags = this.flags or 1
             phone_number = digits
-            phone_code_hash = sentCode.phone_code_hash
+            phone_code_hash = activeSentCode.phone_code_hash
             phone_code = code
         }, flags, targetDc, "signIn") ?: return null
         // tgnet moved its own datacenter on PHONE_MIGRATE_X: the login lives there
@@ -771,6 +872,84 @@ object TdataImportHelper {
         }
         val authorization = signed as? TLRPC.auth_Authorization ?: return null
         return finalizeTargetAccount(targetSlot, dcId, authorization)
+    }
+
+    /** Telegram demands a login e-mail be set up before it issues a code. Buys a mailbox through the
+     * configured SMS/mail service (GgtgRegistration settings - same API keys as auto-registration,
+     * each service's key remembered separately), waits for Telegram's code there, verifies it and
+     * returns the follow-up sentCode (usually TL_auth_sentCodeTypeApp - the login code itself, read
+     * the normal way by [waitForLoginCode]). Null on any failure along the way. */
+    private suspend fun resolveSetUpEmail(
+        targetCm: ConnectionsManager,
+        digits: String,
+        phoneCodeHash: String,
+        flags: Int,
+        targetDc: Int,
+        progressDialog: TdataImportProgressDialog
+    ): TLRPC.TL_auth_sentCode? {
+        val config = GgtgRegistration.loadConfig()
+        if (!config.autoBuyEmail) {
+            FileLog.d("tdata handoff: SetUpEmailRequired but auto-buy email is disabled in settings")
+            return null
+        }
+        progressDialog.setWorkingText("Telegram требует почту - покупаем и ждём код…")
+        val (mailId, email) = GgtgRegistration.orderEmail(config).getOrElse {
+            FileLog.e("tdata handoff: orderEmail failed", it)
+            return null
+        }
+        tr("email: bought $email")
+        val sendVerifyReq = TL_account.sendVerifyEmailCode().apply {
+            purpose = TLRPC.TL_emailVerifyPurposeLoginSetup().apply {
+                phone_number = digits
+                phone_code_hash = phoneCodeHash
+            }
+            this.email = email
+        }
+        val (_, sendErr) = targetCm.sendSuspend(sendVerifyReq, flags, targetDc, "sendVerifyEmailCode") ?: run {
+            GgtgRegistration.cancelEmail(config, mailId)
+            return null
+        }
+        if (sendErr != null) {
+            tr("email: sendVerifyEmailCode failed ${sendErr.text}")
+            GgtgRegistration.cancelEmail(config, mailId)
+            return null
+        }
+        var emailCode: String? = null
+        val deadline = System.currentTimeMillis() + 120_000L
+        while (System.currentTimeMillis() < deadline) {
+            kotlinx.coroutines.delay(3000)
+            val (st, code, _) = GgtgRegistration.pollEmailCode(config, mailId)
+            if (st == "ok" && !code.isNullOrEmpty()) { emailCode = code; break }
+        }
+        if (emailCode == null) {
+            tr("email: code didn't come")
+            GgtgRegistration.cancelEmail(config, mailId)
+            return null
+        }
+        tr("email: verifying")
+        val verifyReq = TL_account.verifyEmail().apply {
+            purpose = TLRPC.TL_emailVerifyPurposeLoginSetup().apply {
+                phone_number = digits
+                phone_code_hash = phoneCodeHash
+            }
+            verification = TLRPC.TL_emailVerificationCode().apply { code = emailCode }
+        }
+        val (verifyResp, verifyErr) = targetCm.sendSuspend(verifyReq, flags, targetDc, "verifyEmail") ?: run {
+            GgtgRegistration.cancelEmail(config, mailId)
+            return null
+        }
+        if (verifyErr != null) {
+            tr("email: verifyEmail failed ${verifyErr.text}")
+            GgtgRegistration.cancelEmail(config, mailId)
+            return null
+        }
+        val loginSentCode = (verifyResp as? TL_account.TL_emailVerifiedLogin)?.sent_code as? TLRPC.TL_auth_sentCode
+        if (loginSentCode == null) {
+            tr("email: verified but no follow-up sentCode")
+            return null
+        }
+        FileLog.d("tdata handoff: email $email verified, follow-up sentCode=${loginSentCode.type?.javaClass?.simpleName}")
+        return loginSentCode
     }
 
     /** The login code from Telegram's service notifications, as the temp session (the same account) sees them. */
@@ -847,7 +1026,7 @@ object TdataImportHelper {
         flags: Int,
         dcId: Int,
         label: String
-    ): Pair<TLObject?, TLRPC.TL_error?>? = withTimeoutOrNull(60_000) {
+    ): Pair<TLObject?, TLRPC.TL_error?>? = withTimeoutOrNull(180_000) { // ggtg: a slow proxy answered sendCode/exportLoginToken after the old 60 s
         suspendCancellableCoroutine { cont ->
             FileLog.d("tdata handoff: sending $label (flags=$flags dc=$dcId)")
             val token = sendRequest(request, { resp, err ->

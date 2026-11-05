@@ -4555,6 +4555,18 @@ void HistoryWidget::updateControlsVisibility() {
 		if (_sendAs) {
 			_sendAs->show();
 		}
+		// ggtg: the templates button follows the emoji toggle shown above;
+		// upstream 7.3.5 no longer re-lays the row out right after it, so
+		// refresh its visibility (and the row) here instead of waiting for
+		// an unrelated geometry update.
+		{
+			const auto smsWasHidden = _smsTemplates->isHidden();
+			updateSmsTemplatesVisibility();
+			if (smsWasHidden != _smsTemplates->isHidden()) {
+				updateFieldSize();
+				updateControlsGeometry();
+			}
+		}
 		updateFieldPlaceholder();
 
 		if (_editMsgId
@@ -4617,6 +4629,7 @@ void HistoryWidget::updateControlsVisibility() {
 			_fieldBarCancel->hide();
 		}
 		_tabbedSelectorToggle->hide();
+		updateSmsTemplatesVisibility(); // ggtg: hides with the emoji toggle
 		_botKeyboardShow->hide();
 		_botKeyboardHide->hide();
 		_botCommandStart->hide();

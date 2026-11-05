@@ -30,15 +30,13 @@
 
 - `userId` — строка (64-битный id не влезает в double JSON без потерь).
 - `keys` — ключи **новой** сессии, созданной при экспорте (`Main::DuplicateSession`). Сессия Mac не передаётся.
-- `handoff: true` (текущий Mac): это обычная Desktop-сессия (api_id 2040, устройство аккаунта), только для
-  переноса. Android делает из неё **свою** сессию как настоящий клиент Android (QR-передача, как при импорте
-  tdata: `TdataImportHelper.duplicateAccountViaHandoff`, устройство из `device`), затем закрывает сессию Mac
-  (`auth.logOut`). Если передача не удалась (кроме отказа от ввода 2FA), ключи ставятся напрямую.
-  Причина: `auth.exportLoginToken` с api_id 4 (Android) Telegram отклоняет с `API_ID_PUBLISHED_FLOOD` — с 14.10.2026
-  даже от настоящего клиента Android. Поэтому Android запрашивает токен с api_id Telegram Desktop (2040), если не
-  задан свой (`GgtgApiOverride`); новая сессия записывается как Telegram Desktop.
-- Без `handoff` (старые файлы) Android ставит ключи напрямую, без повторного дублирования.
-- `device` — профиль клиента Android: `deviceModel` (бренд+модель без пробела, `XiaomiRedmi 9C`), `systemVersion`
+- `handoff: true` (текущий Mac): это обычная Desktop-сессия (api_id 2040), созданная только для переноса. Android
+  ставит её ключи **как есть** и дальше работает на ней (устройство берёт из `device` — то самое, с которым сессия
+  родилась). Никаких «Android-сессий»: Telegram требует почту при каждом новом входе Android в существующий аккаунт,
+  а `auth.exportLoginToken` с api_id Android отклоняется (`API_ID_PUBLISHED_FLOOD`). На Mac остаётся только заметка
+  (`exported`), не запасная сессия: один ключ работает только в одном месте.
+- Без `handoff` (старые файлы) ключи тоже ставятся напрямую.
+- `device` — профиль устройства сессии (для `handoff: true` — Desktop-устройство; в старых файлах — профиль Android): `deviceModel` (бренд+модель без пробела, `XiaomiRedmi 9C`), `systemVersion`
   (`SDK n`, строго от этой модели), `appVersion` (настоящая сборка Telegram `12.10.6 (71129)`: versionCode×10 + цифра ABI),
   `systemLangCode` (`ru-ru`, для индонезийского `in-id`), `cloudLangCode` (`ru`), `langPackName` (`android`), `tzOffset`
   (секунды от UTC). Выбор: бренд → SDK этого бренда → модель → сборка → язык, всё из каталога
@@ -177,8 +175,8 @@ Android: `filesDir/ggtg_bulk_db/id_calibration.json`.
 
 ### Control message `pack_req` (phone asks the Mac for an account)
 
-`{"type":"pack_req","userId":"<id>"}` in a `ctl` file. The Mac makes a separate temporary session of that
-account (`Main::DuplicateSessionTracked`), puts a `pack` file with `"handoff": true` and no `device` into the main
-account's "Saved messages". The phone imports it with the handoff (`GgtgPackImporter`, no direct fallback): its
-own Android session is created with this app's api_id, a device by the number and the account's proxy; the
-temporary session is dropped. If the Mac stays silent for 3 minutes, the phone falls back to the login code.
+`{"type":"pack_req","userId":"<id>"}` in a `ctl` file. The Mac makes a separate Desktop session of that
+account (`Main::DuplicateSessionTracked`, a device picked for it) and puts a `pack` file with `"handoff": true` and
+that `device` into the main account's "Saved messages". The phone installs its keys as they are
+(`GgtgPackImporter`) and runs on that session; the Mac keeps only a note. If the Mac stays silent for 3 minutes
+the phone reports it: there is no login-by-code way any more (Telegram asks a login e-mail on every new Android login).

@@ -8500,14 +8500,22 @@ void AddSessionsSection(
 						Core::GuardedAction::ChangeSessions)) {
 					return;
 				}
+				// ggtg: a swap removes the old account and adds a new one, so this box and its window are gone
+				// by the time it is done - touching them then was the crash ("выкидывает из приложения").
+				// Only a box that still lives is used.
+				const auto weakBox = QPointer<Ui::GenericBox>(box.get());
 				SwapToStoredSession(account, stored.id, [=](QString error) {
-					if (!error.isEmpty()) {
-						Ggtg::Notice(show, u"Не удалось переключить: "_q + error);
+					const auto alive = weakBox.data();
+					if (!alive) {
 						return;
 					}
-					Ggtg::Notice(show, u"Сессия переключена"_q);
+					if (!error.isEmpty()) {
+						Ggtg::Notice(alive->uiShow(), u"Не удалось переключить: "_q + error);
+						return;
+					}
+					Ggtg::Notice(alive->uiShow(), u"Сессия переключена"_q);
 					// The account is a new one in the app now.
-					box->closeBox();
+					alive->closeBox();
 				});
 			},
 			.confirmText = u"Переключить"_q,

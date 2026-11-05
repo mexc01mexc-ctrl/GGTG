@@ -2821,6 +2821,13 @@ public class ChatActivityEnterView extends FrameLayout implements
                     app.ggtg.GgtgTemplates.showPicker(getContext(), ChatActivityEnterView.this, templatesUser);
                 }
             });
+            // ggtg: the button's visibility is only evaluated in updateFieldRight, which newer upstream
+            // builds do not call again after the view is built - evaluate it once the chat is attached
+            AndroidUtilities.runOnUIThread(() -> {
+                if (templatesButton != null) {
+                    updateFieldRight(lastAttachVisible);
+                }
+            }, 300);
                 notifyButton.setOnClickListener(new OnClickListener() {
                     @Override
                     public void onClick(View v) {

@@ -23,8 +23,17 @@ object GgtgAddAccount {
                 return@show
             }
             ConnectionsManager.setProxySettingsForAccount(slot, true, entry.host, entry.port, entry.username ?: "", entry.password ?: "", "")
-            // a new account gets its own random phone before its connection exists
-            GgtgDevice.assignNew(slot)
+            // a new account gets its own random phone before its connection exists; language and time zone follow
+            // the proxy list's country (its name), else the number once it is typed, else the proxy's address
+            val listGeo = source.geo()
+            if (listGeo != null) GgtgDevice.slotListGeo[slot] = listGeo else GgtgDevice.slotListGeo.remove(slot)
+            GgtgDevice.importListGeo = listGeo
+            try {
+                GgtgDevice.assignNew(slot)
+            } finally {
+                GgtgDevice.importListGeo = null
+            }
+            ConnectionsManager.getInstance(slot).setAsleep(false) // ggtg: earlier imports leave free slots asleep
             proceed.run()
         }
     }

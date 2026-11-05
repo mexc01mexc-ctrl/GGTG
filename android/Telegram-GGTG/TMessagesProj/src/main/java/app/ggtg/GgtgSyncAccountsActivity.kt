@@ -24,8 +24,8 @@ import org.telegram.ui.ActionBar.Theme
 import org.telegram.ui.Components.LayoutHelper
 import kotlin.coroutines.resume
 
-// ng: on-demand session minting for accounts from GGTG Desktop: each account gets a new,
-// independent mobile session born directly on Android with authentic hardware parameters.
+// ng: on-demand session transfer for accounts from GGTG Desktop: the Mac mints a separate Desktop session
+// per account and this phone runs it as it is (no Android sessions - see GgtgPackImporter).
 // The catalog of available accounts is exchanged automatically through the main account's sync.
 class GgtgSyncAccountsActivity : BaseFragment() {
 
@@ -45,8 +45,8 @@ class GgtgSyncAccountsActivity : BaseFragment() {
         fragmentView = frame
         val root = GgtgUi.page(context, frame)
 
-        GgtgUi.addCard(root, GgtgUi.infoCard(context, R.drawable.msg_info, "Безопасная синхронизация без риска бана",
-            "Сессии создаются прямо на телефоне с генерацией уникальных характеристик устройства (модель, версия Android, язык, часовой пояс) и привязкой прокси. Telegram регистрирует сессию как чистое мобильное приложение. Сессии на Desktop продолжают работать параллельно."), top = 10f)
+        GgtgUi.addCard(root, GgtgUi.infoCard(context, R.drawable.msg_info, "Отдельная сессия для телефона",
+            "Mac создаёт для каждого аккаунта отдельную Desktop-сессию со своим устройством, языком и часовым поясом, телефон ставит её как есть. Сессия самого Mac продолжает работать параллельно."), top = 10f)
 
         // Section: Accounts on Desktop (Mint on Android)
         root.addView(GgtgUi.sectionLabel(context, "Доступные аккаунты с Desktop (Mac)"))
@@ -57,7 +57,7 @@ class GgtgSyncAccountsActivity : BaseFragment() {
         GgtgUi.addCard(root, peerCard)
         peerPicker = pp
 
-        val mintButton = GgtgUi.button(context, "Создать мобильные сессии на Android") { mintSelected() }
+        val mintButton = GgtgUi.button(context, "Получить сессии с Mac") { mintSelected() }
         mintButton.visibility = if (pp.selectedAccounts().isNotEmpty()) View.VISIBLE else View.GONE
         GgtgUi.addButton(root, mintButton, top = 10f)
         btnMint = mintButton
@@ -85,7 +85,7 @@ class GgtgSyncAccountsActivity : BaseFragment() {
         val selected = peerPicker?.selectedAccounts().orEmpty()
         btnMint?.let { btn ->
             if (btn is android.widget.TextView) {
-                btn.text = if (selected.isNotEmpty()) "Создать сессии на Android (${selected.size})" else "Создать сессии на Android"
+                btn.text = if (selected.isNotEmpty()) "Получить сессии с Mac (${selected.size})" else "Получить сессии с Mac"
             }
             btn.visibility = if (selected.isNotEmpty()) View.VISIBLE else View.GONE
         }
@@ -118,9 +118,9 @@ class GgtgSyncAccountsActivity : BaseFragment() {
             return
         }
 
-        val progress = TdataImportProgressDialog(activity, "Создание сессий на Android")
+        val progress = TdataImportProgressDialog(activity, "Получение сессий с Mac")
         progress.show()
-        val process = GgtgProcess.start("Создание сессий с Desktop (${selected.size})", GgtgProcess.Kind.Other)
+        val process = GgtgProcess.start("Получение сессий с Desktop (${selected.size})", GgtgProcess.Kind.Other)
         process.progress(0, selected.size)
 
         scope.launch {
@@ -161,12 +161,12 @@ class GgtgSyncAccountsActivity : BaseFragment() {
                 val act = parentActivity
                 val reportMsg = buildString {
                     if (successful.isNotEmpty()) {
-                        append("Успешно создано мобильных сессий: ${successful.size}\n")
+                        append("Получено сессий: ${successful.size}\n")
                         successful.forEach { append("• +${it.phone} (${it.firstName})\n") }
                     }
                     if (failed.isNotEmpty()) {
                         if (isNotEmpty()) append("\n")
-                        append("Не удалось создать: ${failed.size}\n")
+                        append("Не удалось получить: ${failed.size}\n")
                         failed.forEach { append("• +${it.first.phone}: ${it.second}\n") }
                     }
                 }
@@ -183,7 +183,7 @@ class GgtgSyncAccountsActivity : BaseFragment() {
                         var handled = false
                         val handleDone = { if (!handled) { handled = true; onDone() } }
                         AlertDialog.Builder(act)
-                            .setTitle("Создание сессий завершено")
+                            .setTitle("Получение сессий завершено")
                             .setMessage(reportMsg)
                             .setPositiveButton("Готово") { _, _ -> handleDone() }
                             .setOnDismissListener { handleDone() }
@@ -201,10 +201,9 @@ class GgtgSyncAccountsActivity : BaseFragment() {
     }
 
     /**
-     * The way that needs no SMS: asks the Mac (control message) for a temporary session of this account, takes the
-     * pack it puts into "Saved messages" and imports it with the handoff - the phone then makes its own Android session
-     * (this app's api_id, device and language by the number, the account's proxy), the temporary one is dropped.
-     * null = it did not work out before anything was spent (no spare slots, Mac silent): the code way goes on.
+     * Asks the Mac (control message) for a separate session of this account, takes the pack it puts into
+     * "Saved messages" and installs its keys as they are (no SMS, no e-mail, no new login).
+     * null = it did not work out (no spare slot, Mac silent).
      */
     private suspend fun mintViaMac(
         acc: GgtgSync.PeerAccount,
@@ -214,8 +213,8 @@ class GgtgSyncAccountsActivity : BaseFragment() {
         val free = (0 until UserConfig.MAX_ACCOUNT_COUNT).count {
             it != UserConfig.selectedAccount && !UserConfig.getInstance(it).isClientActivated
         }
-        if (free < 2) {
-            process.log("Мало свободных слотов для переноса через Mac - вход по коду")
+        if (free < 1) {
+            process.log("Нет свободных слотов для переноса с Mac")
             return null
         }
         suspend fun packs(): List<GgtgSyncTransport.Remote>? = kotlin.coroutines.suspendCoroutine { cont ->
@@ -254,7 +253,7 @@ class GgtgSyncAccountsActivity : BaseFragment() {
         file.writeBytes(bytes)
         try {
             if (!GgtgPackImporter.isPack(file)) return Triple(false, null, "Mac прислал не сессию")
-            val res = GgtgPackImporter.import(file, null, progress, createBackup = true, noDirectFallback = true)
+            val res = GgtgPackImporter.import(file, null, progress, createBackup = true)
             GgtgSyncTransport.deleteIncoming(remote)
             if (acc.userId !in res.imported) {
                 return Triple(false, null, res.failReason ?: "Не удалось создать сессию из временной")
@@ -278,233 +277,11 @@ class GgtgSyncAccountsActivity : BaseFragment() {
         progress: TdataImportProgressDialog,
         process: GgtgProcess.Handle
     ): Triple<Boolean, Int?, String?> = withContext(Dispatchers.IO) {
-        val digits = acc.phone.filter(Char::isDigit)
-        if (digits.isEmpty()) return@withContext Triple(false, null, "Номер телефона пуст")
-
-        // 0. The Mac makes a temporary session of its own, this phone makes its Android session from it
-        mintViaMac(acc, progress, process)?.let { return@withContext it }
-
-        val freeSlot = (0 until UserConfig.MAX_ACCOUNT_COUNT).firstOrNull {
-            !UserConfig.getInstance(it).isClientActivated
-        } ?: return@withContext Triple(false, null, "Достигнут лимит аккаунтов на телефоне")
-
-        val cm = ConnectionsManager.getInstance(freeSlot)
-        val uc = UserConfig.getInstance(freeSlot)
-
-        fun cleanupSlot() {
-            try {
-                uc.clearConfig()
-                ConnectionsManager.setProxySettingsForAccount(freeSlot, false, "", 0, "", "", "")
-                cm.setAsleep(true)
-            } catch (_: Throwable) {}
-        }
-
-        // 1. Setup proxy if account has one
-        val proxy = acc.proxy
-        if (proxy != null && proxy.has("host") && proxy.optString("host").isNotEmpty()) {
-            val host = proxy.optString("host")
-            val port = proxy.optInt("port", 1080)
-            val user = proxy.optString("user")
-            val pass = proxy.optString("password")
-            val secret = proxy.optString("secret")
-            // ggtg: a dead proxy would only show up as a long silent wait - check it first
-            val reachable = try {
-                java.net.Socket().use { it.connect(java.net.InetSocketAddress(host, port), 6000) }
-                true
-            } catch (_: Throwable) { false }
-            if (!reachable) {
-                process.log("Прокси $host:$port не отвечает")
-                return@withContext Triple(false, null, "Прокси $host:$port не отвечает")
-            }
-            if (proxy.optString("type") == "http") {
-                return@withContext Triple(false, null, "HTTP-прокси не поддерживается на Android (нужен SOCKS5 или MTProto)")
-            }
-            ConnectionsManager.setProxySettingsForAccount(freeSlot, true, host, port, user, pass, secret)
-            // ggtg: keep the account's own proxy with the account (shown in its info, used after restart, exported again)
-            uc.ncgProxyEnabled = true
-            uc.ncgProxyAddress = host
-            uc.ncgProxyPort = port
-            uc.ncgProxyUsername = user
-            uc.ncgProxyPassword = pass
-            uc.ncgProxySecret = secret
-            uc.saveConfig(false)
-        } else {
-            ConnectionsManager.setProxySettingsForAccount(freeSlot, false, "", 0, "", "", "")
-        }
-
-        // 2. Setup authentic Android device parameters (model, SDK, app build, tz, languages)
-        GgtgDevice.randomizeForPhoneLogin(freeSlot, acc.phone)
-
-        val targetAppId = BuildVars.APP_ID
-        val targetAppHash = BuildVars.APP_HASH
-        val targetDc = ConnectionsManager.DEFAULT_DATACENTER_ID
-
-        // same flags as the working tdata sign-in: the phone may live on another DC (PHONE_MIGRATE) - without
-        // TryDifferentDc / EnableUnauthorized the request does not follow it
-        val flags = ConnectionsManager.RequestFlagWithoutLogin or ConnectionsManager.RequestFlagFailOnServerErrors or
-            ConnectionsManager.RequestFlagTryDifferentDc or ConnectionsManager.RequestFlagEnableUnauthorized
-
-        // ggtg: a free slot is kept asleep (no network) by earlier imports / cleanups; without
-        // waking it the code request never leaves the phone and just times out
-        cm.setAsleep(false)
-
-        // 3. Send code
-        process.log("Запрос кода в Telegram")
-        progress.setWorkingText("+${acc.phone}: запрос кода…")
-        val (sent, sendError) = cm.sendSuspend(TLRPC.TL_auth_sendCode().apply {
-            phone_number = digits
-            api_id = targetAppId
-            api_hash = targetAppHash
-            settings = TLRPC.TL_codeSettings()
-        }, flags, targetDc, "sendCode") ?: run {
-            cleanupSlot()
-            return@withContext Triple(false, null, "Таймаут отправки кода")
-        }
-
-        if (sendError != null || sent !is TLRPC.TL_auth_sentCode) {
-            cleanupSlot()
-            val errText = sendError?.text ?: "Ошибка отправки кода"
-            return@withContext Triple(false, null, "Ошибка Telegram: $errText")
-        }
-
-        val phoneCodeHash = sent.phone_code_hash
-
-        // 4. The code lands in Telegram on the Mac: it passes it back by itself (the sync); by hand only if it does not
-        val viaSms = sent.type is TLRPC.TL_auth_sentCodeTypeSms
-        val kindText = when (sent.type) {
-            is TLRPC.TL_auth_sentCodeTypeApp -> "в Telegram на других устройствах"
-            is TLRPC.TL_auth_sentCodeTypeSms -> "по SMS на номер"
-            is TLRPC.TL_auth_sentCodeTypeCall -> "звонком на номер"
-            else -> "способом ${sent.type?.javaClass?.simpleName}"
-        }
-        process.log("Код отправлен $kindText")
-        var note = "Код отправлен $kindText"
-        var auto: String? = null
-        if (!viaSms) {
-            progress.setWorkingText("+${acc.phone}: ждём код от Mac…")
-            auto = GgtgSyncTransport.requestLoginCode(acc.userId, 90_000) { state ->
-                note = "Код отправлен $kindText. $state"
-                process.log(state)
-                progress.setWorkingText("+${acc.phone}: $state")
-            }
-        }
-        val code = if (!auto.isNullOrBlank()) auto else progress.askCodeSuspend(
-            acc.phone,
-            "$note\nВведите код для +${acc.phone}"
-        )
-        if (code.isNullOrBlank()) {
-            cm.sendSuspend(TLRPC.TL_auth_cancelCode().apply {
-                phone_number = digits
-                phone_code_hash = phoneCodeHash
-            }, flags, targetDc, "cancelCode")
-            cleanupSlot()
-            return@withContext Triple(false, null, "Ввод кода отменён")
-        }
-
-        // 5. Sign in
-        process.log("Вход по коду")
-        progress.setWorkingText("+${acc.phone}: вход…")
-        val (signed, signError) = cm.sendSuspend(TLRPC.TL_auth_signIn().apply {
-            this.flags = this.flags or 1
-            phone_number = digits
-            phone_code_hash = phoneCodeHash
-            phone_code = code
-        }, flags, targetDc, "signIn") ?: run {
-            cleanupSlot()
-            return@withContext Triple(false, null, "Таймаут авторизации")
-        }
-
-        val dcId = if (cm.currentDatacenterId != 0 && cm.currentDatacenterId != ConnectionsManager.DEFAULT_DATACENTER_ID) {
-            cm.currentDatacenterId
-        } else if (acc.mainDcId != 0) {
-            acc.mainDcId
-        } else {
-            ConnectionsManager.DEFAULT_DATACENTER_ID
-        }
-
-        var authorization: TLRPC.auth_Authorization? = null
-
-        if (signError != null) {
-            if (signError.text == "SESSION_PASSWORD_NEEDED") {
-                // Check 2FA
-                var passwordSuccess = false
-                if (acc.twoFactor.isNotEmpty()) {
-                    val pwRes = TdataImportHelper.trySubmitPassword(cm, dcId, acc.twoFactor)
-                    if (pwRes.isSuccess) {
-                        authorization = pwRes.getOrNull()
-                        passwordSuccess = true
-                        GgtgTwoFaStore.save(acc.userId, acc.twoFactor)
-                    }
-                }
-
-                if (!passwordSuccess) {
-                    var wrong = false
-                    var hint: String? = null
-                    while (true) {
-                        val typed = progress.askPasswordSuspend(acc.phone, wrong, hint)
-                        if (typed == null) {
-                            cleanupSlot()
-                            return@withContext Triple(false, null, "Ввод 2FA отменён")
-                        }
-                        val pwRes = TdataImportHelper.trySubmitPassword(cm, dcId, typed)
-                        if (pwRes.isSuccess) {
-                            authorization = pwRes.getOrNull()
-                            GgtgTwoFaStore.save(acc.userId, typed)
-                            break
-                        }
-                        val reason = pwRes.exceptionOrNull()?.message ?: "checkPassword failed"
-                        if (reason == "PASSWORD_HASH_INVALID") {
-                            wrong = true
-                            hint = null
-                            continue
-                        }
-                        if (reason.startsWith("FLOOD_WAIT")) {
-                            cleanupSlot()
-                            return@withContext Triple(false, null, "Лимит попыток: $reason")
-                        }
-                        wrong = false
-                        hint = reason
-                    }
-                }
-            } else {
-                cleanupSlot()
-                return@withContext Triple(false, null, "Ошибка входа: ${signError.text}")
-            }
-        } else {
-            authorization = signed as? TLRPC.auth_Authorization
-        }
-
-        if (authorization !is TLRPC.TL_auth_authorization) {
-            cleanupSlot()
-            return@withContext Triple(false, null, "Аккаунт требует регистрации имени")
-        }
-
-        val user = authorization.user
-        cm.setUserId(user.id)
-        if (dcId != ConnectionsManager.DEFAULT_DATACENTER_ID) {
-            cm.setDefaultDatacenterId(dcId)
-        }
-
-        process.log("Активация слота #$freeSlot")
-        progress.setWorkingText("+${acc.phone}: настройка аккаунта…")
-        val actRes = GgtgImportSupport.activateSlot(freeSlot, user, dcId)
-        if (actRes.isFailure) {
-            cleanupSlot()
-            return@withContext Triple(false, null, "Ошибка активации: ${actRes.exceptionOrNull()?.message}")
-        }
-
-        if (acc.folder.isNotEmpty()) {
-            uc.ncgFolder = acc.folder
-            uc.saveConfig(false)
-        }
-        if (acc.twoFactor.isNotEmpty()) {
-            uc.ncgTwoFactor = acc.twoFactor
-            uc.saveConfig(false)
-        }
-        // ggtg: the trash is synced like folders
-        if (acc.trashed) GgtgAccounts.setTrashed(listOf(freeSlot), true)
-
-        return@withContext Triple(true, freeSlot, null)
+        // The Mac makes a separate session of its own for this phone (control message, no SMS, no e-mail);
+        // the phone installs it as it is. Telegram asks a login e-mail on every new Android login, so
+        // there is no "log in here by code" way any more.
+        mintViaMac(acc, progress, process)
+            ?: Triple(false, null, "Mac не ответил: откройте GGTG на Mac с этим аккаунтом и повторите")
     }
 
     private suspend fun ConnectionsManager.sendSuspend(

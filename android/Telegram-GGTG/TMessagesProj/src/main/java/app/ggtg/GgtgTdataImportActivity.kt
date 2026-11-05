@@ -48,7 +48,7 @@ class GgtgTdataImportActivity : BaseFragment() {
     private fun pickAndImport(folder: Boolean) {
         val context = context ?: return
         val activity = parentActivity as? androidx.fragment.app.FragmentActivity ?: return
-        GgtgImportSupport.askCreateBackupDialog(context) { createBackup ->
+        GgtgImportSupport.askTdataImportModeDialog(context) { createBackup ->
             if (folder) {
                 // a tdata folder never contains a self-sufficient .ggtg pack, so a proxy source is
                 // always required up front

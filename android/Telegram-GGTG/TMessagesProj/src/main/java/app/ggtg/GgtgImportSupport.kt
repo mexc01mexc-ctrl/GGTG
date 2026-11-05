@@ -28,6 +28,21 @@ object GgtgImportSupport {
         val passwordSkipped: Int = 0
     )
 
+    // ggtg: one import at a time - two runs pick the same free slots, and the first one to end puts
+    // those slots to sleep under the other, whose requests then just hang until the timeout
+    @PublishedApi internal val importLock = kotlinx.coroutines.sync.Mutex()
+
+    suspend inline fun exclusive(block: () -> ImportResult): ImportResult {
+        if (!importLock.tryLock()) {
+            return ImportResult(emptyList(), 0, 0, 1, "импорт уже идёт, дождитесь его окончания")
+        }
+        try {
+            return block()
+        } finally {
+            importLock.unlock()
+        }
+    }
+
     fun buildResultMessage(result: ImportResult): String {
         val msg = StringBuilder()
         fun line(text: String) { if (msg.isNotEmpty()) msg.append('\n'); msg.append(text) }
@@ -50,6 +65,16 @@ object GgtgImportSupport {
             .show()
     }
 
+    /** Same Yes/No for tdata: the answer also picks the import mode (see GgtgTdataImport.importAccountsInner). */
+    fun askTdataImportModeDialog(context: Context, onChoice: (newSession: Boolean) -> Unit) {
+        org.telegram.ui.ActionBar.AlertDialog.Builder(context)
+            .setTitle("Как добавить аккаунт")
+            .setMessage("«Да» - создать для телефона новую отдельную сессию (Desktop-типа, через QR-передачу, без кода и почты); сохранится и резервная копия.\n\n«Нет» - поставить ключ из tdata как есть: это та же сессия, что на компьютере, новая не создаётся.")
+            .setPositiveButton("Да (новая сессия)") { _, _ -> onChoice(true) }
+            .setNegativeButton("Нет (ключ как есть)") { _, _ -> onChoice(false) }
+            .show()
+    }
+
     /** MTProto convention: auth_key_id = last 8 bytes of SHA1(authKey), read little-endian. */
     fun authKeyIdFor(authKey: ByteArray): Long {
         val digest = MessageDigest.getInstance("SHA-1").digest(authKey)
@@ -59,7 +84,7 @@ object GgtgImportSupport {
     }
 
     private suspend fun ConnectionsManager.sendSuspend(request: TLObject, dcId: Int = ConnectionsManager.DEFAULT_DATACENTER_ID): Pair<TLObject?, TLRPC.TL_error?>? =
-        withTimeoutOrNull(20_000) {
+        withTimeoutOrNull(120_000) { // ggtg: was 20 s - a slow proxy made getUsers(self) time out right after a successful key import
             suspendCancellableCoroutine { cont ->
                 sendRequest(request, { resp, err -> if (cont.isActive) cont.resume(resp to err) }, null, null, 0,
                     dcId, ConnectionsManager.ConnectionTypeGeneric, true)

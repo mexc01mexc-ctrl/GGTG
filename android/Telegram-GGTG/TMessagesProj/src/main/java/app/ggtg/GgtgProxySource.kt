@@ -8,12 +8,15 @@ import org.telegram.ui.Components.GgtgProxyPoolStore
 sealed class GgtgProxySource {
     abstract fun peekFirst(): GgtgProxyPoolStore.Entry?
     abstract fun popNext(): GgtgProxyPoolStore.Entry?
+    // ggtg: the popped proxy goes back: the account it was meant for was not imported
+    abstract fun giveBack(entry: GgtgProxyPoolStore.Entry)
     // country / language / time zone from the list name, if it has one
     open fun geo(): GgtgGeo.GeoMatch? = null
 
     class NamedList(val name: String) : GgtgProxySource() {
         override fun peekFirst(): GgtgProxyPoolStore.Entry? = GgtgProxyPoolStore.peekFirst(name)
         override fun popNext(): GgtgProxyPoolStore.Entry? = GgtgProxyPoolStore.popFirst(name)
+        override fun giveBack(entry: GgtgProxyPoolStore.Entry) = GgtgProxyPoolStore.pushFirst(name, entry)
         override fun geo(): GgtgGeo.GeoMatch? = GgtgGeo.matchForName(name)
     }
 
@@ -21,6 +24,7 @@ sealed class GgtgProxySource {
         private var remaining: GgtgProxyPoolStore.Entry? = entry
         override fun peekFirst(): GgtgProxyPoolStore.Entry? = remaining
         override fun popNext(): GgtgProxyPoolStore.Entry? = remaining.also { remaining = null }
+        override fun giveBack(entry: GgtgProxyPoolStore.Entry) { remaining = entry }
     }
 }
 

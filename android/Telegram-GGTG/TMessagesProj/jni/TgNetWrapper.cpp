@@ -42,6 +42,16 @@ jmethodID jclass_ConnectionsManager_onCaptchaCheck;
 
 bool check_utf8(const char *data, size_t len);
 
+// ggtg: a Java upcall that throws must not leave a pending exception on the network thread (the next JNI call would
+// abort ART with "No pending exception expected"): log it and clear it.
+static inline void ggtgClearJavaException(int32_t instanceNum) {
+    JNIEnv *env = jniEnv[instanceNum];
+    if (env != nullptr && env->ExceptionCheck()) {
+        env->ExceptionDescribe();
+        env->ExceptionClear();
+    }
+}
+
 jlong getFreeBuffer(JNIEnv *env, jclass c, jint length) {
     return (jlong) (intptr_t) BuffersStorage::getInstance().getFreeBuffer((uint32_t) length);
 }
@@ -127,22 +137,22 @@ void sendRequest(JNIEnv *env, jclass c, jint instanceNum, jlong object, jint fla
                 errorText = jniEnv[instanceNum]->NewStringUTF("UTF-8 ERROR");
             }
         }
-        jniEnv[instanceNum]->CallStaticVoidMethod(jclass_ConnectionsManager, jclass_ConnectionsManager_onRequestComplete, instanceNum, token, ptr, errorCode, errorText, networkType, responseTime, msgId, dcId);
+        jniEnv[instanceNum]->CallStaticVoidMethod(jclass_ConnectionsManager, jclass_ConnectionsManager_onRequestComplete, instanceNum, token, ptr, errorCode, errorText, networkType, responseTime, msgId, dcId); ggtgClearJavaException(instanceNum); // ggtg
         if (errorText != nullptr) {
             jniEnv[instanceNum]->DeleteLocalRef(errorText);
         }
     }), ([instanceNum, token] {
-        jniEnv[instanceNum]->CallStaticVoidMethod(jclass_ConnectionsManager, jclass_ConnectionsManager_onRequestQuickAck, instanceNum, token);
+        jniEnv[instanceNum]->CallStaticVoidMethod(jclass_ConnectionsManager, jclass_ConnectionsManager_onRequestQuickAck, instanceNum, token); ggtgClearJavaException(instanceNum); // ggtg
     }), ([instanceNum, token] {
-        jniEnv[instanceNum]->CallStaticVoidMethod(jclass_ConnectionsManager, jclass_ConnectionsManager_onRequestWriteToSocket, instanceNum, token);
+        jniEnv[instanceNum]->CallStaticVoidMethod(jclass_ConnectionsManager, jclass_ConnectionsManager_onRequestWriteToSocket, instanceNum, token); ggtgClearJavaException(instanceNum); // ggtg
     }), ([instanceNum, token] {
-        jniEnv[instanceNum]->CallStaticVoidMethod(jclass_ConnectionsManager, jclass_ConnectionsManager_onRequestClear, instanceNum, token, false);
+        jniEnv[instanceNum]->CallStaticVoidMethod(jclass_ConnectionsManager, jclass_ConnectionsManager_onRequestClear, instanceNum, token, false); ggtgClearJavaException(instanceNum); // ggtg
     }), (uint32_t) flags, (uint32_t) datacenterId, (ConnectionType) connectionType, immediate, token);
 }
 
 void cancelRequest(JNIEnv *env, jclass c, jint instanceNum, jint token, jboolean notifyServer) {
     return ConnectionsManager::getInstance(instanceNum).cancelRequest(token, notifyServer, ([instanceNum, token]() -> void {
-        jniEnv[instanceNum]->CallStaticVoidMethod(jclass_ConnectionsManager, jclass_ConnectionsManager_onRequestClear, instanceNum, token, true);
+        jniEnv[instanceNum]->CallStaticVoidMethod(jclass_ConnectionsManager, jclass_ConnectionsManager_onRequestClear, instanceNum, token, true); ggtgClearJavaException(instanceNum); // ggtg
     }));
 }
 
@@ -342,7 +352,7 @@ jlong checkProxy(JNIEnv *env, jclass c, jint instanceNum, jstring address, jint 
 
     jlong result = ConnectionsManager::getInstance(instanceNum).checkProxy(addressStr, (uint16_t) port, usernameStr, passwordStr, secretStr, [instanceNum, requestTimeFunc](int64_t time) {
         if (requestTimeFunc != nullptr) {
-            jniEnv[instanceNum]->CallVoidMethod(requestTimeFunc, jclass_RequestTimeDelegate_run, time);
+            jniEnv[instanceNum]->CallVoidMethod(requestTimeFunc, jclass_RequestTimeDelegate_run, time); ggtgClearJavaException(instanceNum); // ggtg
         }
     }, requestTimeFunc);
 
@@ -365,73 +375,75 @@ jlong checkProxy(JNIEnv *env, jclass c, jint instanceNum, jstring address, jint 
 class Delegate : public ConnectiosManagerDelegate {
     
     void onUpdate(int32_t instanceNum) {
-        jniEnv[instanceNum]->CallStaticVoidMethod(jclass_ConnectionsManager, jclass_ConnectionsManager_onUpdate, instanceNum);
+        jniEnv[instanceNum]->CallStaticVoidMethod(jclass_ConnectionsManager, jclass_ConnectionsManager_onUpdate, instanceNum); ggtgClearJavaException(instanceNum); // ggtg
     }
     
     void onSessionCreated(int32_t instanceNum) {
-        jniEnv[instanceNum]->CallStaticVoidMethod(jclass_ConnectionsManager, jclass_ConnectionsManager_onSessionCreated, instanceNum);
+        jniEnv[instanceNum]->CallStaticVoidMethod(jclass_ConnectionsManager, jclass_ConnectionsManager_onSessionCreated, instanceNum); ggtgClearJavaException(instanceNum); // ggtg
     }
     
     void onConnectionStateChanged(ConnectionState state, int32_t instanceNum) {
-        jniEnv[instanceNum]->CallStaticVoidMethod(jclass_ConnectionsManager, jclass_ConnectionsManager_onConnectionStateChanged, state, instanceNum);
+        jniEnv[instanceNum]->CallStaticVoidMethod(jclass_ConnectionsManager, jclass_ConnectionsManager_onConnectionStateChanged, state, instanceNum); ggtgClearJavaException(instanceNum); // ggtg
     }
     
     void onUnparsedMessageReceived(int64_t reqMessageId, NativeByteBuffer *buffer, ConnectionType connectionType, int32_t instanceNum) {
         if (connectionType == ConnectionTypeGeneric) {
-            jniEnv[instanceNum]->CallStaticVoidMethod(jclass_ConnectionsManager, jclass_ConnectionsManager_onUnparsedMessageReceived, (jlong) (intptr_t) buffer, instanceNum, reqMessageId);
+            jniEnv[instanceNum]->CallStaticVoidMethod(jclass_ConnectionsManager, jclass_ConnectionsManager_onUnparsedMessageReceived, (jlong) (intptr_t) buffer, instanceNum, reqMessageId); ggtgClearJavaException(instanceNum); // ggtg
         }
     }
     
     void onLogout(int32_t instanceNum) {
-        jniEnv[instanceNum]->CallStaticVoidMethod(jclass_ConnectionsManager, jclass_ConnectionsManager_onLogout, instanceNum);
+        jniEnv[instanceNum]->CallStaticVoidMethod(jclass_ConnectionsManager, jclass_ConnectionsManager_onLogout, instanceNum); ggtgClearJavaException(instanceNum); // ggtg
     }
     
     void onUpdateConfig(TL_config *config, int32_t instanceNum) {
         NativeByteBuffer *buffer = BuffersStorage::getInstance().getFreeBuffer(config->getObjectSize());
         config->serializeToStream(buffer);
         buffer->position(0);
-        jniEnv[instanceNum]->CallStaticVoidMethod(jclass_ConnectionsManager, jclass_ConnectionsManager_onUpdateConfig, (jlong) (intptr_t) buffer, instanceNum);
+        jniEnv[instanceNum]->CallStaticVoidMethod(jclass_ConnectionsManager, jclass_ConnectionsManager_onUpdateConfig, (jlong) (intptr_t) buffer, instanceNum); ggtgClearJavaException(instanceNum); // ggtg
         buffer->reuse();
     }
     
     void onInternalPushReceived(int32_t instanceNum) {
-        jniEnv[instanceNum]->CallStaticVoidMethod(jclass_ConnectionsManager, jclass_ConnectionsManager_onInternalPushReceived, instanceNum);
+        jniEnv[instanceNum]->CallStaticVoidMethod(jclass_ConnectionsManager, jclass_ConnectionsManager_onInternalPushReceived, instanceNum); ggtgClearJavaException(instanceNum); // ggtg
     }
 
     void onBytesReceived(int32_t amount, int32_t networkType, int32_t instanceNum) {
-        jniEnv[instanceNum]->CallStaticVoidMethod(jclass_ConnectionsManager, jclass_ConnectionsManager_onBytesReceived, amount, networkType, instanceNum);
+        jniEnv[instanceNum]->CallStaticVoidMethod(jclass_ConnectionsManager, jclass_ConnectionsManager_onBytesReceived, amount, networkType, instanceNum); ggtgClearJavaException(instanceNum); // ggtg
     }
 
     void onBytesSent(int32_t amount, int32_t networkType, int32_t instanceNum) {
-        jniEnv[instanceNum]->CallStaticVoidMethod(jclass_ConnectionsManager, jclass_ConnectionsManager_onBytesSent, amount, networkType, instanceNum);
+        jniEnv[instanceNum]->CallStaticVoidMethod(jclass_ConnectionsManager, jclass_ConnectionsManager_onBytesSent, amount, networkType, instanceNum); ggtgClearJavaException(instanceNum); // ggtg
     }
 
     void onRequestNewServerIpAndPort(int32_t second, int32_t instanceNum) {
-        jniEnv[instanceNum]->CallStaticVoidMethod(jclass_ConnectionsManager, jclass_ConnectionsManager_onRequestNewServerIpAndPort, second, instanceNum);
+        jniEnv[instanceNum]->CallStaticVoidMethod(jclass_ConnectionsManager, jclass_ConnectionsManager_onRequestNewServerIpAndPort, second, instanceNum); ggtgClearJavaException(instanceNum); // ggtg
     }
 
     void onProxyError(int32_t instanceNum) {
-        jniEnv[instanceNum]->CallStaticVoidMethod(jclass_ConnectionsManager, jclass_ConnectionsManager_onProxyError);
+        jniEnv[instanceNum]->CallStaticVoidMethod(jclass_ConnectionsManager, jclass_ConnectionsManager_onProxyError); ggtgClearJavaException(instanceNum); // ggtg
     }
 
     void getHostByName(std::string domain, int32_t instanceNum, ConnectionSocket *socket) {
         jstring domainName = jniEnv[instanceNum]->NewStringUTF(domain.c_str());
-        jniEnv[instanceNum]->CallStaticVoidMethod(jclass_ConnectionsManager, jclass_ConnectionsManager_getHostByName, domainName, (jlong) (intptr_t) socket);
+        jniEnv[instanceNum]->CallStaticVoidMethod(jclass_ConnectionsManager, jclass_ConnectionsManager_getHostByName, domainName, (jlong) (intptr_t) socket); ggtgClearJavaException(instanceNum); // ggtg
         jniEnv[instanceNum]->DeleteLocalRef(domainName);
     }
 
     int32_t getInitFlags(int32_t instanceNum) {
-        return (int32_t) jniEnv[instanceNum]->CallStaticIntMethod(jclass_ConnectionsManager, jclass_ConnectionsManager_getInitFlags);
+        int32_t flags = (int32_t) jniEnv[instanceNum]->CallStaticIntMethod(jclass_ConnectionsManager, jclass_ConnectionsManager_getInitFlags);
+        ggtgClearJavaException(instanceNum); // ggtg
+        return flags;
     }
 
     void onPremiumFloodWait(int32_t instanceNum, int32_t requestToken, bool isUpload) {
-        jniEnv[instanceNum]->CallStaticVoidMethod(jclass_ConnectionsManager, jclass_ConnectionsManager_onPremiumFloodWait, instanceNum, requestToken, isUpload);
+        jniEnv[instanceNum]->CallStaticVoidMethod(jclass_ConnectionsManager, jclass_ConnectionsManager_onPremiumFloodWait, instanceNum, requestToken, isUpload); ggtgClearJavaException(instanceNum); // ggtg
     }
 
     void onIntegrityCheckClassic(int32_t instanceNum, int32_t requestToken, std::string project, std::string nonce) {
         jstring projectStr = jniEnv[instanceNum]->NewStringUTF(project.c_str());
         jstring nonceStr = jniEnv[instanceNum]->NewStringUTF(nonce.c_str());
-        jniEnv[instanceNum]->CallStaticVoidMethod(jclass_ConnectionsManager, jclass_ConnectionsManager_onIntegrityCheckClassic, instanceNum, requestToken, projectStr, nonceStr);
+        jniEnv[instanceNum]->CallStaticVoidMethod(jclass_ConnectionsManager, jclass_ConnectionsManager_onIntegrityCheckClassic, instanceNum, requestToken, projectStr, nonceStr); ggtgClearJavaException(instanceNum); // ggtg
         jniEnv[instanceNum]->DeleteLocalRef(projectStr);
         jniEnv[instanceNum]->DeleteLocalRef(nonceStr);
     }
@@ -439,7 +451,7 @@ class Delegate : public ConnectiosManagerDelegate {
     void onCaptchaCheck(int32_t instanceNum, int32_t requestToken, std::string action, std::string key_id) {
         jstring actionStr = jniEnv[instanceNum]->NewStringUTF(action.c_str());
         jstring keyIdStr = jniEnv[instanceNum]->NewStringUTF(key_id.c_str());
-        jniEnv[instanceNum]->CallStaticVoidMethod(jclass_ConnectionsManager, jclass_ConnectionsManager_onCaptchaCheck, instanceNum, requestToken, actionStr, keyIdStr);
+        jniEnv[instanceNum]->CallStaticVoidMethod(jclass_ConnectionsManager, jclass_ConnectionsManager_onCaptchaCheck, instanceNum, requestToken, actionStr, keyIdStr); ggtgClearJavaException(instanceNum); // ggtg
         jniEnv[instanceNum]->DeleteLocalRef(actionStr);
         jniEnv[instanceNum]->DeleteLocalRef(keyIdStr);
     }

@@ -729,6 +729,13 @@ void ShowTwoFactorBox(
 			QJsonDocument(info).toJson(QJsonDocument::Indented))) {
 		failed.push_back(u"ggtg.json"_q);
 	}
+	// The same proxy in tdata's own settings file, for an ordinary Telegram.
+	if (QFileInfo(accountFolder + u"/tdata"_q).isDir()
+		&& !Storage::WriteTdataProxySettings(
+			accountFolder + u"/tdata"_q,
+			proxy)) {
+		failed.push_back(u"tdata/settingss"_q);
+	}
 	return failed.isEmpty()
 		? QString()
 		: (u"не записаны файлы: "_q + failed.join(u", "_q) + u" ("_q

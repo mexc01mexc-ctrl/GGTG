@@ -339,7 +339,7 @@ object GgtgSessionJsonSupport {
         progressDialog: TdataImportProgressDialog,
         createBackup: Boolean = false
     ): GgtgImportSupport.ImportResult =
-        GgtgDevice.withListGeo(proxySource) { importAccountsInner(accounts, proxySource, progressDialog, createBackup) }
+        GgtgImportSupport.exclusive { GgtgDevice.withListGeo(proxySource) { importAccountsInner(accounts, proxySource, progressDialog, createBackup) } }
 
     private suspend fun importAccountsInner(
         accounts: List<SessionAccount>,
@@ -373,28 +373,39 @@ object GgtgSessionJsonSupport {
                 continue
             }
             val slot = freeSlots.removeAt(0)
-            if (firstImportedSlot == null) firstImportedSlot = slot
 
             progressDialog.setWorkingText("Импорт ${acc.label} (${index + 1} из ${toImport.size})…")
 
-            val proxy = acc.proxy ?: proxySource?.popNext()?.toProxyBits()
+            val poppedEntry = if (acc.proxy == null) proxySource?.popNext() else null
+            val proxy = acc.proxy ?: poppedEntry?.toProxyBits()
             if (proxy == null) {
                 noFreeProxy++
+                freeSlots.add(0, slot) // ggtg: the slot stays free for an account that has its own proxy
                 continue
+            }
+            // ggtg: a failed account must not cost a slot or a proxy
+            val releaseSlot = {
+                ConnectionsManager.getInstance(slot).setAsleep(true)
+                UserConfig.getInstance(slot).clearConfig()
+                ConnectionsManager.setProxySettingsForAccount(slot, false, "", 0, "", "", "")
+                freeSlots.add(0, slot)
+                if (poppedEntry != null) proxySource?.giveBack(poppedEntry)
             }
 
             try {
                 ConnectionsManager.setProxySettingsForAccount(slot, true, proxy.address, proxy.port, proxy.username, proxy.password, proxy.secret)
                 GgtgDevice.assignNew(slot, acc.device, isDesktop = false)
                 val cm = ConnectionsManager.getInstance(slot)
+                cm.setAsleep(false) // ggtg: earlier imports leave free slots asleep
                 for ((dcId, key) in acc.keys) {
                     cm.importAuthKey(dcId, key, GgtgImportSupport.authKeyIdFor(key), dcId == acc.mainDcId)
                 }
                 cm.setUserId(acc.userId)
                 delay(300)
 
-                val result = GgtgImportSupport.activateSlot(slot, null)
+                val result = GgtgImportSupport.activateSlot(slot, null, acc.mainDcId)
                 result.onSuccess {
+                    if (firstImportedSlot == null) firstImportedSlot = slot
                     val uc = UserConfig.getInstance(slot)
                     acc.folder?.let { uc.ncgFolder = it }
                     uc.ncgPinned = acc.pinned
@@ -444,16 +455,12 @@ object GgtgSessionJsonSupport {
                 }.onFailure { err ->
                     failed++
                     lastFailReason = err.message ?: err.javaClass.simpleName
-                    ConnectionsManager.getInstance(slot).setAsleep(true)
-                    UserConfig.getInstance(slot).clearConfig()
-                    ConnectionsManager.setProxySettingsForAccount(slot, false, "", 0, "", "", "")
+                    releaseSlot()
                 }
             } catch (t: Throwable) {
                 failed++
                 lastFailReason = t.message ?: t.javaClass.simpleName
-                ConnectionsManager.getInstance(slot).setAsleep(true)
-                UserConfig.getInstance(slot).clearConfig()
-                ConnectionsManager.setProxySettingsForAccount(slot, false, "", 0, "", "", "")
+                releaseSlot()
             }
         }
 
