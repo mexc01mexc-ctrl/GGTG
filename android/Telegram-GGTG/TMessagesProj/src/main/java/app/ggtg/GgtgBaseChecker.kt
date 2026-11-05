@@ -72,7 +72,7 @@ object GgtgBaseChecker {
             text = if (usingTrash) {
                 "Используются аккаунты из корзины (${workers.size} шт.) — рабочие аккаунты защищены от флуда."
             } else {
-                "Используется ротация рабочих аккаунтов (${workers.size} шт.) — по 3 запроса на аккаунт."
+                "Используется ротация рабочих аккаунтов (${workers.size} шт.) — по 3 запроса на аккаунт. «В фоне» — окно закроется, проверка продолжится."
             }
             setPadding(0, 0, 0, AndroidUtilities.dp(8f))
         }
@@ -106,14 +106,10 @@ object GgtgBaseChecker {
             .setTitle("Проверка базы: $title")
             .setView(root)
             .setNegativeButton("Остановить") { d, _ ->
+                checkJob?.cancel()
                 d.dismiss()
             }
-            .setOnDismissListener {
-                checkJob?.cancel()
-                if (usingTrash) {
-                    GgtgAccounts.sleepIdle()
-                }
-            }
+            .setNeutralButton("В фоне") { d, _ -> d.dismiss() }
             .create()
         dialog.show()
 
@@ -122,7 +118,8 @@ object GgtgBaseChecker {
             var resolvedCount = 0
             var workerIdx = 0
             var batchCount = 0
-            val maxBatch = if (usingTrash) 5 else 3
+            var maxBatch = if (usingTrash) 15 + kotlin.random.Random.nextInt(16) else 3
+            fun newBatch() { maxBatch = if (usingTrash) 15 + kotlin.random.Random.nextInt(16) else 3 }
             val cooldownUntil = HashMap<Int, Long>()
 
             try {
@@ -149,14 +146,14 @@ object GgtgBaseChecker {
                             // every account is resting: say so, then wait for the nearest one
                             val soonest = workers.minOf { cooldownUntil[it] ?: 0L }
                             withContext(Dispatchers.Main) {
-                                currentWorkerTv.text = "Все аккаунты на паузе (лимит Telegram). Продолжу через ${((soonest - now) / 1000).coerceAtLeast(1)} с"
+                                if (dialog?.isShowing == true) currentWorkerTv.text = "Все аккаунты на паузе (лимит Telegram). Продолжу через ${((soonest - now) / 1000).coerceAtLeast(1)} с"
                             }
                             delay(minOf(maxOf(soonest - now, 1000L), 15000L))
                             continue
                         }
 
                         withContext(Dispatchers.Main) {
-                            currentWorkerTv.text = "Аккаунт: ${GgtgAccounts.label(chosenSlot)}"
+                            if (dialog?.isShowing == true) currentWorkerTv.text = "Аккаунт: ${GgtgAccounts.label(chosenSlot)}"
                         }
 
                         try {
@@ -170,6 +167,7 @@ object GgtgBaseChecker {
                                 val seconds = Regex("\\d+").find(errText)?.value?.toLongOrNull() ?: 60L
                                 cooldownUntil[chosenSlot] = System.currentTimeMillis() + seconds.coerceAtMost(6 * 3600L) * 1000L
                                 batchCount = 0
+                                newBatch()
                                 workerIdx = (workerIdx + 1) % workers.size
                                 delay(GgtgRegistration.jitter(600))
                                 continue
@@ -186,6 +184,7 @@ object GgtgBaseChecker {
                             batchCount++
                             if (batchCount >= maxBatch) {
                                 batchCount = 0
+                                newBatch()
                                 workerIdx = (workerIdx + 1) % workers.size
                             }
                         } catch (t: Throwable) {
@@ -194,12 +193,14 @@ object GgtgBaseChecker {
                                 val seconds = Regex("\\d+").find(msg)?.value?.toLongOrNull() ?: 60L
                                 cooldownUntil[chosenSlot] = System.currentTimeMillis() + seconds.coerceAtMost(6 * 3600L) * 1000L
                                 batchCount = 0
+                                newBatch()
                                 workerIdx = (workerIdx + 1) % workers.size
                             } else {
                                 settled = true
                                 batchCount++
                                 if (batchCount >= maxBatch) {
                                     batchCount = 0
+                                newBatch()
                                     workerIdx = (workerIdx + 1) % workers.size
                                 }
                             }

@@ -2817,14 +2817,32 @@ void StartBaseVerification(
 			base::flat_map<not_null<Main::Account*>, crl::time> cooldownUntil;
 			int currentIndex = 0;
 			bool active = false;
+			int maxBatch = 25;
+			bool stopped = false;
 			base::Timer stepTimer;
 		};
-		const auto state = box->lifetime().make_state<VerifyState>();
+		// ggtg: the run lives in this shared state, not in the box: closing the box ("В фоне") leaves it
+		// going; only "Остановить" ends it. Labels are guarded because they die with the box.
+		const auto state = std::make_shared<VerifyState>();
 		const auto weakBox = QPointer<Ui::GenericBox>(box.get());
+		const auto weakStatus = QPointer<Ui::FlatLabel>(statusLabel);
+		const auto weakWorker = QPointer<Ui::FlatLabel>(workerLabel);
+		const auto setStatus = [=](const QString &t) { if (weakStatus) weakStatus->setText(t); };
+		const auto setWorker = [=](const QString &t) { if (weakWorker) weakWorker->setText(t); };
+		// big randomised batches per account (trash accounts do nothing else), then the next account in turn
+		const auto newBatch = [=] {
+			state->maxBatch = usingTrash ? (15 + int(base::RandomIndex(16))) : 3;
+		};
+		newBatch();
+		const auto finish = [=](const std::shared_ptr<Fn<void()>> &stepFn) {
+			state->stopped = true;
+			state->stepTimer.cancel();
+			*stepFn = nullptr;
+		};
 
 		const auto step = std::make_shared<Fn<void()>>();
 		*step = [=] {
-			if (!weakBox || state->active || state->currentIndex >= toCheck.size()) {
+			if (state->stopped || state->active || state->currentIndex >= toCheck.size()) {
 				return;
 			}
 			const auto now = crl::now();
@@ -2848,7 +2866,7 @@ void StartBaseVerification(
 				return;
 			}
 
-			workerLabel->setText(u"Аккаунт: "_q + worker->session().user()->name());
+			setWorker(u"Аккаунт: "_q + worker->session().user()->name());
 
 			const auto username = toCheck[state->currentIndex];
 			state->active = true;
@@ -2859,7 +2877,7 @@ void StartBaseVerification(
 				MTP_string(QString())
 			)).done([=](const MTPcontacts_ResolvedPeer &result) {
 				state->active = false;
-				if (!weakBox) {
+				if (state->stopped) {
 					return;
 				}
 				result.match([&](const MTPDcontacts_resolvedPeer &data) {
@@ -2874,14 +2892,14 @@ void StartBaseVerification(
 					}
 				});
 				state->batchCount++;
-				const auto maxBatch = usingTrash ? 5 : 3;
-				if (state->batchCount >= maxBatch) {
+				if (state->batchCount >= state->maxBatch) {
 					state->batchCount = 0;
+					newBatch();
 					state->workerIdx = (state->workerIdx + 1) % int(workers.size());
 				}
 				state->checkedCount++;
 				state->currentIndex++;
-				statusLabel->setText(
+				setStatus(
 					u"Проверено: "_q + QString::number(state->checkedCount)
 					+ u" из "_q + QString::number(toCheck.size())
 					+ u" (найдено: "_q + QString::number(state->resolvedCount) + u")"_q);
@@ -2894,11 +2912,14 @@ void StartBaseVerification(
 					if (onDone) {
 						onDone();
 					}
-					weakBox->closeBox();
+					if (weakBox) {
+						weakBox->closeBox();
+					}
+					finish(step);
 				}
 			}).fail([=](const MTP::Error &error) {
 				state->active = false;
-				if (!weakBox) {
+				if (state->stopped) {
 					return;
 				}
 				const auto type = error.type();
@@ -2910,6 +2931,7 @@ void StartBaseVerification(
 					const auto waitMs = (seconds > 0 ? std::min(seconds, 6 * 3600) : 60) * 1000;
 					state->cooldownUntil[worker] = crl::now() + waitMs;
 					state->batchCount = 0;
+					newBatch();
 					state->workerIdx = (state->workerIdx + 1) % int(workers.size());
 					auto soonest = crl::time(0);
 					for (const auto &account : workers) {
@@ -2919,21 +2941,21 @@ void StartBaseVerification(
 					}
 					const auto restMs = std::max(soonest - crl::now(), crl::time(0));
 					if (restMs > 1000) {
-						workerLabel->setText(u"Все аккаунты на паузе (лимит Telegram). Продолжу через %1 с"_q
+						setWorker(u"Все аккаунты на паузе (лимит Telegram). Продолжу через %1 с"_q
 							.arg(int(restMs / 1000)));
 					}
 					state->stepTimer.callOnce(int(std::min<crl::time>(std::max<crl::time>(restMs, 600), 15000)));
 					return;
 				}
 				state->batchCount++;
-				const auto maxBatch = usingTrash ? 5 : 3;
-				if (state->batchCount >= maxBatch) {
+								if (state->batchCount >= state->maxBatch) {
 					state->batchCount = 0;
+					newBatch();
 					state->workerIdx = (state->workerIdx + 1) % int(workers.size());
 				}
 				state->checkedCount++;
 				state->currentIndex++;
-				statusLabel->setText(
+				setStatus(
 					u"Проверено: "_q + QString::number(state->checkedCount)
 					+ u" из "_q + QString::number(toCheck.size())
 					+ u" (найдено: "_q + QString::number(state->resolvedCount) + u")"_q);
@@ -2946,7 +2968,10 @@ void StartBaseVerification(
 					if (onDone) {
 						onDone();
 					}
-					weakBox->closeBox();
+					if (weakBox) {
+						weakBox->closeBox();
+					}
+					finish(step);
 				}
 			}).send();
 		};
@@ -2954,8 +2979,11 @@ void StartBaseVerification(
 		state->stepTimer.setCallback([=] { (*step)(); });
 		state->stepTimer.callOnce(100);
 
-		box->addButton(tr::lng_cancel(), [=] {
-			state->stepTimer.cancel();
+		box->addButton(rpl::single(u"Остановить"_q), [=] {
+			finish(step);
+			box->closeBox();
+		});
+		box->addLeftButton(rpl::single(u"В фоне"_q), [=] {
 			box->closeBox();
 		});
 	}));
