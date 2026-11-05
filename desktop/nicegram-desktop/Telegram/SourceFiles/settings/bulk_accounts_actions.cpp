@@ -2783,6 +2783,13 @@ void StartBaseVerification(
 		return;
 	}
 
+	// ggtg: «Корзина» accounts sleep without a connection, so their requests used to hang for ever
+	// ("Проверено: 0"): wake them for the run, put them back to sleep when it ends.
+	if (usingTrash) {
+		for (const auto &account : workers) {
+			account->wake();
+		}
+	}
 	show->show(Box([=](not_null<Ui::GenericBox*> box) {
 		box->setWidth(st::accountsBoxWidth);
 		box->setTitle(rpl::single(u"Проверка базы: "_q + title));
@@ -2819,7 +2826,9 @@ void StartBaseVerification(
 			bool active = false;
 			int maxBatch = 25;
 			bool stopped = false;
+			uint64 generation = 0;
 			base::Timer stepTimer;
+			base::Timer watchdog;
 		};
 		// ggtg: the run lives in this shared state, not in the box: closing the box ("В фоне") leaves it
 		// going; only "Остановить" ends it. Labels are guarded because they die with the box.
@@ -2837,6 +2846,14 @@ void StartBaseVerification(
 		const auto finish = [=](const std::shared_ptr<Fn<void()>> &stepFn) {
 			state->stopped = true;
 			state->stepTimer.cancel();
+			state->watchdog.cancel();
+			if (usingTrash) {
+				for (const auto &account : workers) {
+					if (account->trashed()) {
+						account->sleep();
+					}
+				}
+			}
 			*stepFn = nullptr;
 		};
 
@@ -2870,12 +2887,34 @@ void StartBaseVerification(
 
 			const auto username = toCheck[state->currentIndex];
 			state->active = true;
+			// a request that never answers (account still connecting, dead proxy) must not freeze the run:
+			// after 25 s this account rests for 5 minutes and the same person goes to the next one
+			const auto gen = ++state->generation;
+			state->watchdog.setCallback([=] {
+				if (state->stopped || !state->active || state->generation != gen) {
+					return;
+				}
+				state->generation++;
+				state->active = false;
+				state->cooldownUntil[worker] = crl::now() + 5 * 60 * 1000;
+				state->batchCount = 0;
+				newBatch();
+				state->workerIdx = (state->workerIdx + 1) % int(workers.size());
+				setWorker(u"Аккаунт не отвечает, беру следующий"_q);
+				state->stepTimer.callOnce(300);
+			});
+			state->watchdog.callOnce(25 * 1000);
 			const auto api = static_cast<MTP::Sender*>(&worker->session().api());
 			api->request(MTPcontacts_ResolveUsername(
 				MTP_flags(MTPcontacts_ResolveUsername::Flags(0)),
 				MTP_string(username),
 				MTP_string(QString())
 			)).done([=](const MTPcontacts_ResolvedPeer &result) {
+				if (state->generation != gen) {
+					return;
+				}
+				state->generation++;
+				state->watchdog.cancel();
 				state->active = false;
 				if (state->stopped) {
 					return;
@@ -2918,6 +2957,11 @@ void StartBaseVerification(
 					finish(step);
 				}
 			}).fail([=](const MTP::Error &error) {
+				if (state->generation != gen) {
+					return;
+				}
+				state->generation++;
+				state->watchdog.cancel();
 				state->active = false;
 				if (state->stopped) {
 					return;
