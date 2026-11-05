@@ -524,17 +524,17 @@ object GgtgDevice {
         return false
     }
 
+    // ggtg: the geo of the proxy list a slot's login was started with (set by GgtgAddAccount): it wins over the
+    // number's own country, which is only the fallback (list names carry the country the proxies are in)
+    @JvmField
+    val slotListGeo = java.util.concurrent.ConcurrentHashMap<Int, GgtgGeo.GeoMatch>()
+
     /**
      * When logging in or registering with a phone number, automatically generates
      * new realistic Android device parameters matched to the phone country code and geo,
      * so the real device hardware is never exposed while remaining 100% platform authentic.
      */
     @JvmStatic
-    // ggtg: the geo of the proxy list a slot's login was started with (set by GgtgAddAccount): it wins over the
-    // number's own country, which is only the fallback (list names carry the country the proxies are in)
-    @JvmField
-    val slotListGeo = java.util.concurrent.ConcurrentHashMap<Int, GgtgGeo.GeoMatch>()
-
     fun randomizeForPhoneLogin(slot: Int, phone: String) {
         val phoneGeo = slotListGeo[slot]?.let { GeoMatch(it.country, it.tzOffset, it.systemLang.lowercase(), it.cloudLang) }
             ?: matchForPhone(phone)
