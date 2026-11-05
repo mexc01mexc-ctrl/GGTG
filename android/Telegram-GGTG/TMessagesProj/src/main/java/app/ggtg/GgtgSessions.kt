@@ -892,21 +892,25 @@ object GgtgSessions {
         val userId = uc.clientUserId
         if (userId == 0L) return Result.failure(Exception("Аккаунт не авторизован"))
 
-        val sessions = listForUser(userId)
-        val mobileSessions = sessions.filter { s ->
-            s.role == "android" || s.source.contains("android", ignoreCase = true) ||
-            s.device?.optString("deviceModel", "")?.let { m ->
-                m.contains("Samsung", true) || m.contains("Xiaomi", true) || m.contains("Pixel", true)
-            } == true
+        // Telegram refuses a number change from a session younger than 24 h (FRESH_CHANGE_PHONE_FORBIDDEN): the age
+        // of THIS session (the one the request goes through) is read from the account's authorizations
+        val cmAge = ConnectionsManager.getInstance(slot)
+        val ageSeconds: Long? = kotlinx.coroutines.withTimeoutOrNull(20_000L) {
+            suspendCancellableCoroutine<Long?> { cont ->
+                cmAge.sendRequest(TL_account.getAuthorizations()) { resp, err ->
+                    val list = (resp as? TL_account.authorizations)?.authorizations
+                    val current = list?.firstOrNull { it.current }
+                    if (err != null || current == null) cont.resume(null)
+                    else cont.resume((System.currentTimeMillis() / 1000L) - current.date_created)
+                }
+            }
         }
-
-        val trustedMobile = mobileSessions.firstOrNull { isTrusted(it) }
-        val youngMobile = mobileSessions.firstOrNull { !isTrusted(it) }
-
-        if (trustedMobile == null && youngMobile != null) {
-            val cd = trustCountdownString(youngMobile)
-            return Result.failure(Exception("Мобильная сессия на отлёжке ($cd). Telegram отклонит смену номера (FRESH_CHANGE_PHONE_FORBIDDEN)."))
+        if (ageSeconds != null && ageSeconds < 24 * 3600) {
+            val left = 24 * 3600 - ageSeconds
+            return Result.failure(Exception("Сессия, с которой делается смена номера, ещё не отлежалась: осталось ${left / 3600} ч ${(left % 3600) / 60} мин (Telegram отклонит смену: FRESH_CHANGE_PHONE_FORBIDDEN)."))
         }
+        val trustedMobile: StoredSession? = null
+        val youngMobile: StoredSession? = null
 
         val maxAttempts = 4
         for (attempt in 1..maxAttempts) {

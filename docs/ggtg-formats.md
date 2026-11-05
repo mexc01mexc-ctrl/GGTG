@@ -77,6 +77,7 @@
   "tomb":  { "base:<id>": "unix", "sent:<username>": "unix" },
   "files": { "ai_profile.json": { "mtime": "unix", "text": "…" }, "ai_knowledge/<id>.json": {…} },
   "account_statuses": { "<userId>": { "userId": "…", "phone": "…", "state": "clear|temporary|permanent", "until": "0", "checkedAt": "unix", "folder": "…", "trashed": false, "offline": false, "sentToday": 0 } },
+  "bad_numbers": [ "79990000000", … ],
   "session_notes": [ { "id": "…", "userId": 12345, "note": "…", "role": "…", "platform": "android", "current": true, "createdAt": 1790000000, "hash": "…", "device": {…} } ]
 }
 ```
@@ -99,6 +100,8 @@
 - `files` (ИИ: профиль, примеры, плейбук, обучение, настройки, материалы, списки чатов): побеждает
   файл с большим `mtime`, целиком.
 - `account_statuses`: вердикт SpamBot (`state`, `until`, `checkedAt`) обновляется у аккаунта, если удалённая проверка свежее локальной (`remote.checkedAt > local.checkedAt`). Для совпадающих активированных аккаунтов также передаются `folder` (если локально папка не назначена) и `trashed` (помещение в корзину).
+- `bad_numbers`: номера, которые уже не подошли в регистрации (заняты, заблокированы, код в приложение, платная SMS...);
+  объединяются как множества (до 50000), чтобы второе устройство не платило за них снова.
 - `session_notes`: примечания и роли сохранённых сессий объединяются по идентификатору и userId.
   `platform` (`desktop` / `android` / `ios`, необязательно) и `current` (сессия, на которой аккаунт работает сейчас,
   необязательно) хранятся отдельными полями, а не в заметке.

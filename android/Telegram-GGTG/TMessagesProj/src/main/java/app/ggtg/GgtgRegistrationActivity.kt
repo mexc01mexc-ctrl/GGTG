@@ -342,6 +342,15 @@ class GgtgRegistrationActivity(
         bindAutoSave(maxPriceInput) { currentConfig = currentConfig.copy(maxPrice = it) }
         GgtgUi.labeled(context, s1Card, "Макс. цена номера", "Максимальная стоимость (например 15.00). Пусто = без ограничения", maxPriceInput)
 
+        val budgetInput = GgtgUi.input(context, "без ограничения", currentConfig.budgetLimit)
+        bindAutoSave(budgetInput) { currentConfig = currentConfig.copy(budgetLimit = it) }
+        GgtgUi.labeled(context, s1Card, "Лимит трат за запуск", "Сколько можно потратить за один запуск (в валюте сервиса, например 5.00). Когда баланс упадёт на эту сумму, новые номера не заказываются. Пусто = без лимита", budgetInput)
+
+        val dryBtn = GgtgUi.withLeadingIcon(GgtgUi.pill(context, "Проверить перед запуском", 0xFFFFFFFF.toInt(), GgtgUi.accent), R.drawable.msg_info, 0xFFFFFFFF.toInt(), 13f, 5f)
+        dryBtn.setOnClickListener { runDryCheck() }
+        s1Card.addView(dryBtn)
+        s1Card.addView(GgtgUi.body(context, "Бесплатно: ключи сервисов, баланс, страна, реальный отклик прокси, слоты. Номера не заказываются.", 12f))
+
         filterCheck = checkBox(context, "Фильтровать номера перед регистрацией", currentConfig.filterNumbers)
         filterCheck.setOnCheckedChangeListener { _, isChecked ->
             currentConfig = currentConfig.copy(filterNumbers = isChecked)
@@ -1489,6 +1498,33 @@ class GgtgRegistrationActivity(
             if (GgtgRegistration.fetchCountries(currentConfig).isSuccess) {
                 countryView.text = GgtgRegistration.currentCountryTitle(currentConfig)
             }
+        }
+    }
+
+    /** The free pre-flight: shows what is wrong (or fine) before a single number is bought. */
+    private fun runDryCheck() {
+        val ctx = parentActivity ?: return
+        val key = apiKeyInput.text.toString().trim()
+        if (key.isNotEmpty()) {
+            currentConfig = currentConfig.copy(apiKey = key)
+            GgtgRegistration.saveApiKeyFor(currentConfig.serviceId, key)
+        }
+        GgtgRegistration.saveConfig(currentConfig)
+        val wait = org.telegram.ui.ActionBar.AlertDialog(ctx, org.telegram.ui.ActionBar.AlertDialog.ALERT_TYPE_SPINNER)
+        wait.setCanCancel(false)
+        wait.show()
+        scope.launch {
+            val lines = try { GgtgRegistration.dryRun(currentConfig) } catch (t: Throwable) {
+                listOf(GgtgRegistration.DryRunLine(false, "Ошибка проверки: ${t.message}"))
+            }
+            try { wait.dismiss() } catch (_: Throwable) {}
+            val bad = lines.count { !it.ok }
+            val text = lines.joinToString("\n") { (if (it.ok) "[OK] " else "[ПРОБЛЕМА] ") + it.text }
+            org.telegram.ui.ActionBar.AlertDialog.Builder(ctx)
+                .setTitle(if (bad == 0) "Всё готово к запуску" else "Нужно поправить: $bad")
+                .setMessage(text)
+                .setPositiveButton("OK", null)
+                .show()
         }
     }
 

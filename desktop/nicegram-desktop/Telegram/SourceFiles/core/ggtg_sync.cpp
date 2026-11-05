@@ -5,6 +5,7 @@ the official desktop application for the Telegram messaging service.
 For license and copyright information please follow this link:
 https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
+#include "core/ggtg_bad_numbers.h"
 #include "core/ggtg_sync.h"
 
 #include "base/unixtime.h"
@@ -325,6 +326,10 @@ Snapshot BuildSnapshot(const Settings &settings) {
 	if (!sessionNotes.isEmpty()) {
 		body.insert("session_notes", sessionNotes);
 	}
+	// numbers that already failed in a registration: the other device must not pay for them again
+	if (!Core::GgtgBadNumbers::Set().isEmpty()) {
+		body.insert("bad_numbers", Core::GgtgBadNumbers::ToJson());
+	}
 
 	auto accountStatuses = QJsonObject();
 	const auto allSpam = Data::AllAccountSpamStatusesJson();
@@ -553,6 +558,10 @@ MergeResult MergeSnapshot(const QByteArray &json) {
 	if (root.contains("proxy_pools")) {
 		const auto pools = root["proxy_pools"].toArray();
 		MTP::GlobalProxyPool().mergeJson(QJsonDocument(pools).toJson(QJsonDocument::Compact));
+	}
+
+	if (root.contains("bad_numbers")) {
+		Core::GgtgBadNumbers::Merge(root["bad_numbers"].toArray());
 	}
 
 	// Merge session notes & roles across devices

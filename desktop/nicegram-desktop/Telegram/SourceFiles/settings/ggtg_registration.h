@@ -17,6 +17,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "core/application.h"
 #include "core/file_utilities.h"
 #include "core/ggtg_api_override.h"
+#include "core/ggtg_bad_numbers.h"
 #include "settings/ggtg_tabs.h"
 #include "core/ggtg_id_date.h"
 #include "core/ggtg_geo.h"
@@ -245,6 +246,7 @@ struct SettingsData {
 	// SMS order options (from TGEX: operator, maxPrice)
 	QString smsOperator; // empty or "any" = any operator; "megafon", "mts" etc.
 	QString maxPrice; // empty = no limit; "15.00" etc.
+	QString budgetLimit; // total to spend per run (service currency); empty / 0 = no limit
 
 	// Name generation options (from TGEX: names from file, gender)
 	int gender = 0; // 0 = random, 1 = male, 2 = female
@@ -336,6 +338,7 @@ inline SettingsData LoadSettings() {
 
 	if (obj.contains(u"smsOperator"_q)) result.smsOperator = obj[u"smsOperator"_q].toString();
 	if (obj.contains(u"maxPrice"_q)) result.maxPrice = obj[u"maxPrice"_q].toString();
+	if (obj.contains(u"budgetLimit"_q)) result.budgetLimit = obj[u"budgetLimit"_q].toString();
 	if (obj.contains(u"gender"_q)) result.gender = std::clamp(obj[u"gender"_q].toInt(), 0, 2);
 	if (obj.contains(u"firstNameFile"_q)) result.firstNameFile = obj[u"firstNameFile"_q].toString();
 	if (obj.contains(u"lastNameFile"_q)) result.lastNameFile = obj[u"lastNameFile"_q].toString();
@@ -413,6 +416,7 @@ inline void SaveSettings(const SettingsData &data) {
 
 	obj[u"smsOperator"_q] = data.smsOperator;
 	obj[u"maxPrice"_q] = data.maxPrice;
+	obj[u"budgetLimit"_q] = data.budgetLimit;
 	obj[u"gender"_q] = data.gender;
 	obj[u"firstNameFile"_q] = data.firstNameFile;
 	obj[u"lastNameFile"_q] = data.lastNameFile;
@@ -1066,6 +1070,20 @@ inline QString CountryCodeById(int id, const QString &serviceId) {
 		}
 	}
 	return u"US"_q;
+}
+
+// The first number in a balance answer ("12.50", "ACCESS_BALANCE:12.5"...); -1 when there is none.
+[[nodiscard]] inline double ParseAmount(const QString &text) {
+	static const auto re = QRegularExpression(u"-?\\d+(?:[.,]\\d+)?"_q);
+	const auto match = re.match(text);
+	if (!match.hasMatch()) {
+		return -1.;
+	}
+	auto number = match.captured(0);
+	number.replace(',', '.');
+	auto ok = false;
+	const auto value = number.toDouble(&ok);
+	return ok ? value : -1.;
 }
 
 inline void FetchBalance(
@@ -2928,45 +2946,12 @@ inline void CheckCaptchaBalance(
 // Numbers that already failed (registered, banned, invalid) - kept between runs
 // so they are never paid for twice.
 // -----------------------------------------------------------------------------
-[[nodiscard]] inline QString BadNumbersPath() {
-	return Core::GgtgPaths::DbDir() + u"registration_bad_numbers.json"_q;
-}
-
-[[nodiscard]] inline QSet<QString> &BadNumbers() {
-	static auto set = [] {
-		auto result = QSet<QString>();
-		auto file = QFile(BadNumbersPath());
-		if (file.open(QIODevice::ReadOnly)) {
-			const auto doc = QJsonDocument::fromJson(file.readAll());
-			for (const auto &value : doc.array()) {
-				result.insert(value.toString());
-			}
-		}
-		return result;
-	}();
-	return set;
-}
-
 [[nodiscard]] inline bool IsBadNumber(const QString &phone) {
-	return BadNumbers().contains(phone);
+	return Core::GgtgBadNumbers::Contains(phone);
 }
 
 inline void AddBadNumber(const QString &phone) {
-	if (phone.isEmpty() || BadNumbers().contains(phone)) {
-		return;
-	}
-	BadNumbers().insert(phone);
-	QDir().mkpath(Core::GgtgPaths::DbDir());
-	auto file = QSaveFile(BadNumbersPath());
-	if (!file.open(QIODevice::WriteOnly)) {
-		return;
-	}
-	auto array = QJsonArray();
-	for (const auto &number : BadNumbers()) {
-		array.push_back(number);
-	}
-	file.write(QJsonDocument(array).toJson(QJsonDocument::Compact));
-	file.commit();
+	Core::GgtgBadNumbers::Add(phone);
 }
 
 // Push Notifications (FCM) tokens that were bought but not used (the registration
@@ -3450,7 +3435,13 @@ private:
 
 		_currentMobileProfile = LoadRandomMobileProfile(_settings.baseDbPath);
 		auto dev = ToDeviceOverride(_currentMobileProfile);
-		const auto geoMatch = !_phone.isEmpty()
+		// language / time zone follow the proxy list's country (its name); the number's country is the fallback
+		const auto listGeo = _settings.proxyPoolName.isEmpty()
+			? std::optional<Core::GgtgGeo::GeoMatch>()
+			: Core::GgtgGeo::MatchForName(_settings.proxyPoolName);
+		const auto geoMatch = listGeo
+			? *listGeo
+			: !_phone.isEmpty()
 			? Core::GgtgGeo::MatchForPhone(_phone)
 			: Core::GgtgGeo::MatchForCountry(CountryCodeById(_settings.countryId));
 		dev.tzOffset = geoMatch.tzOffset;
@@ -4224,8 +4215,14 @@ private:
 				Core::GgtgSessions::VaultFolder(mobileStored),
 				&exportErr);
 
-			// 3. Экспорт в .ggtg для GGTG Android
-			if (_settings.autoExportGgtg) {
+			// 3. The scheme: the working session of the account is a Desktop one, the Android session (the one
+			// the registration made) a spare in the vault. A Desktop session is minted from the Android one and
+			// swapped in; any failure leaves the Android session working as it was.
+			const auto userIdText = QString::number(u.vid().v);
+			const auto exportGgtg = [=]() {
+				if (!_settings.autoExportGgtg || !_pendingAccount->sessionExists()) {
+					return;
+				}
 				const auto docs = QStandardPaths::writableLocation(QStandardPaths::DocumentsLocation);
 				const auto folder = _settings.folderTag.trimmed().isEmpty() ? u"Регистрация"_q : _settings.folderTag.trimmed();
 				const auto targetDir = docs + u"/GGTG/"_q + folder;
@@ -4264,13 +4261,73 @@ private:
 					&singleErr);
 
 				log(u"Аккаунты экспортированы в .ggtg: "_q + packPath);
+			};
+			const auto weakSelf = std::weak_ptr<SingleRegistrationWorker>(shared_from_this());
+			const auto mobileEntryId = mobileStored.id;
+			const auto settle = [weakSelf, userIdText, exportGgtg, mobileEntryId](bool promoted, QString note) {
+				const auto self = weakSelf.lock();
+				if (!self) return;
+				if (!note.isEmpty()) {
+					self->log(note);
+				}
+				if (promoted) {
+					// the Android key now lives in the vault as the swap's spare: the registration's own entry of
+					// the same key is dropped so it is not listed twice
+					Core::GgtgSessions::RemoveStored(mobileEntryId);
+					// the new (Desktop) account is frozen like every registered one
+					for (const auto &account : Core::App().domain().orderedAccounts()) {
+						if (account->sessionExists()
+							&& QString::number(account->session().userId().bare) == userIdText) {
+							account->sleep();
+						}
+					}
+				} else {
+					exportGgtg();
+					if (self->_pendingAccount->sessionExists()) {
+						self->_pendingAccount->sleep();
+					}
+				}
+				self->log(u"Аккаунт +"_q + self->_phone + u" успешно зарегистрирован и сохранён!"_q);
+				if (self->_doneCb) self->_doneCb(self->_workerId, true, QString());
+			};
+			if (!_pendingAccount->sessionExists()
+				|| !MTP::HasRealProxy(_pendingAccount->proxyOverride())) {
+				settle(false, u"Desktop-сессия не создаётся: у аккаунта нет прокси или сессии."_q);
+				return;
 			}
-
-			// 4. Замораживаем сетевую активность сессии в Desktop
-			_pendingAccount->sleep();
-
-			log(u"Аккаунт +"_q + _phone + u" успешно зарегистрирован и экспортирован!"_q);
-			if (_doneCb) _doneCb(_workerId, true, QString());
+			log(u"Создаю Desktop-сессию из зарегистрированной (Android-сессия станет резервной)..."_q);
+			CreateBackupSessionWith(
+				_pendingAccount,
+				u"Desktop-сессия (создана после регистрации)"_q,
+				nullptr,
+				[=](QString error, QString id) {
+					if (!error.isEmpty()) {
+						settle(false, u"Desktop-сессия не создана ("_q + error + u"); аккаунт остаётся на Android-сессии."_q);
+						return;
+					}
+					if (!Main::AccountIsLive(_pendingAccount)) {
+						settle(false, u"Desktop-сессия создана, но аккаунт уже не в сети; остаётся Android-сессия."_q);
+						return;
+					}
+					SwapToStoredSession(_pendingAccount, id, [=](QString swapError) {
+						if (!swapError.isEmpty()) {
+							settle(false, u"Переключение на Desktop-сессию не удалось ("_q + swapError + u"); остаётся Android-сессия."_q);
+							return;
+						}
+						// the Android session the swap left behind is a spare, and it is an Android one
+						namespace Sessions = Core::GgtgSessions;
+						auto entries = Sessions::LoadVault();
+						for (auto &entry : entries) {
+							if (entry.userId == userIdText && entry.role == u"previous"_q) {
+								entry.role = u"backup"_q;
+								entry.platform = u"android"_q;
+								entry.note = u"Android-сессия регистрации (резерв)"_q;
+							}
+						}
+						Sessions::SaveVault(entries);
+						settle(true, u"Главная сессия аккаунта — Desktop; Android-сессия сохранена как резервная."_q);
+					});
+				});
 		}, [&](const auto &) {
 			fail(u"Не удалось распознать данные пользователя Telegram."_q);
 		});
@@ -4431,6 +4488,9 @@ public:
 		_workers.clear();
 		_workerStatuses.clear();
 		_inUseProxies.clear();
+		_startBalance = -1.;
+		_budgetStopped = false;
+		refreshBudget();
 
 		if (_runningCallback) _runningCallback(true);
 		if (_pauseCallback) _pauseCallback(false);
@@ -4674,8 +4734,44 @@ private:
 			_inUseProxies.end());
 	}
 
+	// Spending limit of a run: the balance at the start and after every finished number; once it fell by the
+	// limit no new number is ordered (at most the numbers already in flight are still paid).
+	void refreshBudget() {
+		const auto limit = ParseAmount(_settings.budgetLimit);
+		if (limit <= 0 || _budgetStopped) {
+			return;
+		}
+		const auto weak = std::weak_ptr<RegistrationController>(shared_from_this());
+		FetchBalance(_settings, [weak, limit](QString balance, QString error) {
+			const auto strong = weak.lock();
+			if (!strong || !error.isEmpty()) {
+				return;
+			}
+			const auto now = ParseAmount(balance);
+			if (now < 0) {
+				return;
+			}
+			if (strong->_startBalance < 0) {
+				strong->_startBalance = now;
+				return;
+			}
+			if (strong->_startBalance - now >= limit && !strong->_budgetStopped) {
+				strong->_budgetStopped = true;
+				strong->log(u"Достигнут лимит трат за запуск: потрачено %1 из %2. Новые номера не заказываются."_q
+					.arg(strong->_startBalance - now, 0, 'f', 2).arg(limit, 0, 'f', 2));
+				strong->status(u"Лимит трат достигнут"_q, true, false);
+			}
+		});
+	}
+
 	void spawnWorker() {
 		if (!_isRunning || _isPaused || _waitingForInternet) return;
+		if (_budgetStopped) {
+			if (_workers.empty()) {
+				finishBatch();
+			}
+			return;
+		}
 		if (_successCount >= _targetSuccessCount) {
 			if (_workers.empty()) {
 				finishBatch();
@@ -4752,6 +4848,7 @@ private:
 			}
 
 			strong->updateOverallStatus();
+			strong->refreshBudget();
 
 			if (strong->_isRunning && !strong->_isPaused && !strong->_waitingForInternet) {
 				if (strong->_successCount < strong->_targetSuccessCount) {
@@ -4845,6 +4942,8 @@ private:
 	Fn<void(QString, bool)> _logCallbackHtml;
 	Fn<void(QString, bool isError, bool isSuccess)> _statusCallback;
 	Fn<void(QString)> _balanceCallback;
+	double _startBalance = -1.;
+	bool _budgetStopped = false;
 	Fn<void(bool)> _runningCallback;
 	Fn<void(bool)> _pauseCallback;
 };
@@ -5985,6 +6084,88 @@ inline void FillRegistrationBox(
 	};
 	checkBalanceBtn->setClickedCallback(doCheckBalance);
 
+	// --- Проверка перед запуском (бесплатно: номера не заказываются) ---
+	const auto preflightRow = inMain->add(object_ptr<Ui::RpWidget>(inMain));
+	preflightRow->resize(preflightRow->width(), style::ConvertScale(38));
+	const auto preflightBtn = Ui::CreateChild<Ui::RoundButton>(
+		preflightRow,
+		rpl::single(u"Проверить перед запуском"_q),
+		st::defaultActiveButton);
+	preflightRow->widthValue() | rpl::on_next([=](int) {
+		preflightBtn->moveToLeft(0, style::ConvertScale(2));
+	}, preflightRow->lifetime());
+	preflightBtn->setClickedCallback([=] {
+		state->apiKey = apiKeyField->getLastText().trimmed();
+		state->apiKeys.insert(state->serviceId, state->apiKey);
+		SaveSettings(*state);
+		const auto data = *state;
+		FetchBalance(data, [=](QString bal, QString err) {
+			auto problems = 0;
+			auto out = QStringList();
+			const auto add = [&](bool ok, const QString &text) {
+				if (!ok) ++problems;
+				out.push_back((ok ? u"[OK] "_q : u"[ПРОБЛЕМА] "_q) + text);
+			};
+			if (!err.isEmpty()) {
+				add(false, u"SMS-сервис: "_q + err);
+			} else {
+				const auto amount = ParseAmount(bal);
+				add(amount < 0 || amount > 0, u"SMS-сервис: баланс "_q + bal
+					+ ((amount >= 0 && amount <= 0) ? u" - пополните"_q : QString()));
+			}
+			add(data.countryId >= 0, data.countryId >= 0
+				? u"Страна номеров выбрана"_q
+				: u"Страна номеров не выбрана"_q);
+			// proxies: the list must exist and a sample of it must really answer
+			if (data.proxyPoolName.isEmpty()) {
+				add(false, u"Прокси: список не выбран (регистрация идёт только через прокси)"_q);
+			} else {
+				auto found = false;
+				for (const auto &list : MTP::GlobalProxyPool().lists()) {
+					if (list.name != data.proxyPoolName) continue;
+					found = true;
+					if (list.entries.empty()) {
+						add(false, u"Прокси: список «"_q + list.name + u"» пуст"_q);
+						break;
+					}
+					auto checked = 0, alive = 0;
+					for (const auto &entry : list.entries) {
+						if (checked >= 3) break;
+						++checked;
+						QTcpSocket socket;
+						socket.connectToHost(entry.host, entry.port);
+						if (socket.waitForConnected(2000)) ++alive;
+						socket.abort();
+					}
+					add(alive > 0, u"Прокси «"_q + list.name + u"»: в списке %1, из проверенных %2 отвечают %3"_q
+						.arg(list.entries.size()).arg(checked).arg(alive));
+					const auto listGeo = Core::GgtgGeo::MatchForName(list.name);
+					add(true, listGeo
+						? u"Язык и часовой пояс устройства: по списку прокси ("_q + listGeo->country + u")"_q
+						: u"Название списка без страны: язык и пояс будут по номеру"_q);
+					break;
+				}
+				if (!found) {
+					add(false, u"Прокси: список «"_q + data.proxyPoolName + u"» не найден"_q);
+				}
+			}
+			if (data.autoBuyEmail) {
+				const auto key = data.emailApiKey.isEmpty() ? data.apiKey : data.emailApiKey;
+				add(!key.isEmpty(), key.isEmpty()
+					? u"Почта: нет API-ключа - при требовании почты номер будет отменён"_q
+					: u"Почта (если Telegram потребует): ключ указан"_q);
+			} else {
+				add(true, u"Покупка почты выключена: при требовании почты номер будет отменён"_q);
+			}
+			add(true, u"Известных плохих номеров: %1; лимит трат: %2"_q
+				.arg(Core::GgtgBadNumbers::Set().size())
+				.arg(data.budgetLimit.isEmpty() ? u"нет"_q : data.budgetLimit));
+			show->show(Ui::MakeInformBox(
+				(problems ? u"Нужно поправить: %1\n\n"_q.arg(problems) : u"Всё готово к запуску\n\n"_q)
+				+ out.join('\n')));
+		});
+	});
+
 	regController->setBalanceCallback([weakBalanceLabel](QString bal) {
 		if (weakBalanceLabel) {
 			weakBalanceLabel->setText(u"Баланс: "_q + bal);
@@ -6700,6 +6881,21 @@ inline void FillRegistrationBox(
 		state->maxPrice = maxPriceField->getLastText().trimmed();
 		SaveSettings(*state);
 	}, maxPriceField->lifetime());
+
+	// --- Лимит трат за запуск ---
+	Ui::AddSkip(inAdvAuto, style::ConvertScale(8));
+	const auto budgetField = inAdvAuto->add(
+		object_ptr<Ui::InputField>(
+			inAdvAuto,
+			FieldStyle(),
+			rpl::single(u"Лимит трат за запуск (в валюте сервиса, например: 5.00; пусто = без лимита)"_q),
+			state->budgetLimit),
+		style::margins(0, 0, 0, style::ConvertScale(4)));
+
+	budgetField->changes() | rpl::on_next([=] {
+		state->budgetLimit = budgetField->getLastText().trimmed();
+		SaveSettings(*state);
+	}, budgetField->lifetime());
 
 	// --- Фильтрация номеров ---
 	const auto skipAppCheck = inAdvAuto->add(

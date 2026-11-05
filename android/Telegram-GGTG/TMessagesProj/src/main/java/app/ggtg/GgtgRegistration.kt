@@ -126,6 +126,7 @@ object GgtgRegistration {
         // --- Features ported from Mac version ---
         val smsOperator: String = "",
         val maxPrice: String = "",
+        val budgetLimit: String = "", // total to spend per run in the service's currency; empty / 0 = no limit
         val gender: Int = 0, // 0 = random, 1 = male, 2 = female
         val firstNameFile: String = "",
         val lastNameFile: String = "",
@@ -177,20 +178,21 @@ object GgtgRegistration {
             autoBuyEmail = prefs.getBoolean("autoBuyEmail", true),
             emailService = prefs.getString("emailService", "auto") ?: "auto",
             emailApiKey = emailApiKeyFor(resolveEmailProviderIdRaw(prefs.getString("emailService", "auto") ?: "auto", sid, prefs.getInt("tokenService", 0)))
-                .ifBlank { prefs.getString("emailApiKey", "") ?: "" },
+                .ifBlank { GgtgSecrets.get(prefs, "emailApiKey") ?: "" },
             emailDomain = prefs.getString("emailDomain", "any") ?: "any",
             smsOperator = prefs.getString("smsOperator", "") ?: "",
             maxPrice = prefs.getString("maxPrice", "") ?: "",
+            budgetLimit = prefs.getString("budgetLimit", "") ?: "",
             gender = prefs.getInt("gender", 0),
             firstNameFile = prefs.getString("firstNameFile", "") ?: "",
             lastNameFile = prefs.getString("lastNameFile", "") ?: "",
             resetSessionsAfterReg = prefs.getBoolean("resetSessionsAfterReg", false),
             reset2faOnOccupied = prefs.getBoolean("reset2faOnOccupied", false),
             tokenService = prefs.getInt("tokenService", 0),
-            tokenApiKey = prefs.getString("tokenApiKey", "") ?: "",
+            tokenApiKey = GgtgSecrets.get(prefs, "tokenApiKey") ?: "",
             antiSafetyAid = prefs.getString("antiSafetyAid", "308aba4e-5680-466b-81a5-477ac6befa95") ?: "308aba4e-5680-466b-81a5-477ac6befa95",
             captchaService = prefs.getInt("captchaService", 0),
-            captchaApiKey = prefs.getString("captchaApiKey", "") ?: "",
+            captchaApiKey = GgtgSecrets.get(prefs, "captchaApiKey") ?: "",
             autoSetBio = prefs.getBoolean("autoSetBio", false),
             customBio = prefs.getString("customBio", "") ?: "",
             autoSetUsername = prefs.getBoolean("autoSetUsername", false),
@@ -203,11 +205,11 @@ object GgtgRegistration {
     fun saveConfig(cfg: Config) {
         ApplicationLoader.applicationContext.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE).edit()
             .putString("serviceId", cfg.serviceId)
-            .putString("apiKey", cfg.apiKey)
+            .also { GgtgSecrets.put(it, "apiKey", cfg.apiKey) }
             .putString("customUrl", cfg.customUrl)
             .putInt("countryId", cfg.countryId)
             .putString("countryName", cfg.countryName)
-            .putString("apiKey_${cfg.serviceId}", cfg.apiKey)
+            .also { GgtgSecrets.put(it, "apiKey_${cfg.serviceId}", cfg.apiKey) }
             .putString("proxyListName", cfg.proxyListName)
             .putString("folderTag", cfg.folderTag)
             .putString("twoFactorPassword", cfg.twoFactorPassword)
@@ -228,20 +230,21 @@ object GgtgRegistration {
             .putBoolean("replaceTokenOnFlood", cfg.replaceTokenOnFlood)
             .putBoolean("autoBuyEmail", cfg.autoBuyEmail)
             .putString("emailService", cfg.emailService)
-            .putString("emailApiKey", cfg.emailApiKey)
+            .also { GgtgSecrets.put(it, "emailApiKey", cfg.emailApiKey) }
             .putString("emailDomain", cfg.emailDomain)
             .putString("smsOperator", cfg.smsOperator)
             .putString("maxPrice", cfg.maxPrice)
+            .putString("budgetLimit", cfg.budgetLimit)
             .putInt("gender", cfg.gender)
             .putString("firstNameFile", cfg.firstNameFile)
             .putString("lastNameFile", cfg.lastNameFile)
             .putBoolean("resetSessionsAfterReg", cfg.resetSessionsAfterReg)
             .putBoolean("reset2faOnOccupied", cfg.reset2faOnOccupied)
             .putInt("tokenService", cfg.tokenService)
-            .putString("tokenApiKey", cfg.tokenApiKey)
+            .also { GgtgSecrets.put(it, "tokenApiKey", cfg.tokenApiKey) }
             .putString("antiSafetyAid", cfg.antiSafetyAid)
             .putInt("captchaService", cfg.captchaService)
-            .putString("captchaApiKey", cfg.captchaApiKey)
+            .also { GgtgSecrets.put(it, "captchaApiKey", cfg.captchaApiKey) }
             .putBoolean("autoSetBio", cfg.autoSetBio)
             .putString("customBio", cfg.customBio)
             .putBoolean("autoSetUsername", cfg.autoSetUsername)
@@ -255,14 +258,14 @@ object GgtgRegistration {
     /** The API key kept for [serviceId] (each SMS service has its own). */
     fun apiKeyFor(serviceId: String): String {
         val prefs = ApplicationLoader.applicationContext.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
-        return prefs.getString("apiKey_$serviceId", null)
-            ?: (if (prefs.getString("serviceId", "hero-sms") == serviceId) prefs.getString("apiKey", "") else "")
+        return GgtgSecrets.get(prefs, "apiKey_$serviceId", null)
+            ?: (if (prefs.getString("serviceId", "hero-sms") == serviceId) GgtgSecrets.get(prefs, "apiKey") else "")
             ?: ""
     }
 
     fun saveApiKeyFor(serviceId: String, key: String) {
         val prefs = ApplicationLoader.applicationContext.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
-        prefs.edit().putString("apiKey_$serviceId", key).apply()
+        GgtgSecrets.put(prefs.edit(), "apiKey_$serviceId", key).apply()
     }
 
     /** "auto" resolves to whichever concrete e-mail provider the SMS-service/token settings imply;
@@ -281,19 +284,35 @@ object GgtgRegistration {
      * each one has its own, like [apiKeyFor] does for SMS services. */
     fun emailApiKeyFor(providerId: String): String {
         val prefs = ApplicationLoader.applicationContext.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
-        return prefs.getString("emailApiKey_$providerId", "") ?: ""
+        return GgtgSecrets.get(prefs, "emailApiKey_$providerId") ?: ""
     }
 
     fun saveEmailApiKeyFor(providerId: String, key: String) {
         if (key.isBlank()) return
         val prefs = ApplicationLoader.applicationContext.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
-        prefs.edit().putString("emailApiKey_$providerId", key).apply()
+        GgtgSecrets.put(prefs.edit(), "emailApiKey_$providerId", key).apply()
     }
 
     /** Numbers that already failed (registered, banned, invalid): kept between runs so they are never paid for twice. */
     fun isBadNumber(phone: String): Boolean =
         ApplicationLoader.applicationContext.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
             .getStringSet("badNumbers", emptySet())?.contains(phone) == true
+
+    fun allBadNumbers(): Set<String> =
+        ApplicationLoader.applicationContext.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+            .getStringSet("badNumbers", emptySet()) ?: emptySet()
+
+    /** Adds what the other device (Mac) learned the hard way - the numbers it has already paid for in vain. */
+    fun mergeBadNumbers(remote: Collection<String>): Int {
+        val prefs = ApplicationLoader.applicationContext.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+        val set = HashSet(prefs.getStringSet("badNumbers", emptySet()) ?: emptySet())
+        var added = 0
+        for (n in remote) {
+            if (n.isNotBlank() && set.size < 50_000 && set.add(n)) added++
+        }
+        if (added > 0) prefs.edit().putStringSet("badNumbers", set).apply()
+        return added
+    }
 
     fun addBadNumber(phone: String) {
         val prefs = ApplicationLoader.applicationContext.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
@@ -1763,6 +1782,86 @@ object GgtgRegistration {
         }
     }
 
+    /** The first number in a balance answer ("ACCESS_BALANCE:12.5", "12.50 RUB", {"balance": 3}...). */
+    fun parseAmount(text: String?): Double? =
+        Regex("-?\\d+(?:[.,]\\d+)?").find(text.orEmpty())?.value?.replace(',', '.')?.toDoubleOrNull()
+
+    data class DryRunLine(val ok: Boolean, val text: String)
+
+    /**
+     * Everything that can be checked for free before a run costs money: the keys of the services, the balance,
+     * whether the country offers numbers, the proxies (really connected to), free slots. Nothing is ordered.
+     */
+    suspend fun dryRun(config: Config): List<DryRunLine> = withContext(Dispatchers.IO) {
+        val out = ArrayList<DryRunLine>()
+        fun add(ok: Boolean, text: String) { out.add(DryRunLine(ok, text)) }
+
+        // SMS service
+        val svc = SERVICES.firstOrNull { it.id == config.serviceId }?.name ?: config.serviceId
+        if (config.apiKey.isBlank()) {
+            add(false, "SMS-сервис $svc: не указан API-ключ")
+        } else {
+            val bal = fetchBalance(config)
+            if (bal.isSuccess) {
+                val amount = parseAmount(bal.getOrNull())
+                add(amount == null || amount > 0, "SMS-сервис $svc: баланс ${bal.getOrNull()}" + if (amount != null && amount <= 0) " - пополните" else "")
+            } else {
+                add(false, "SMS-сервис $svc: ${bal.exceptionOrNull()?.message}")
+            }
+            val ops = fetchOperators(config, config.countryId)
+            if (config.countryId < 0) add(false, "Страна номеров не выбрана")
+            else if (ops.isSuccess) add(true, "Страна ${currentCountryTitle(config)}: ${if (ops.getOrNull().orEmpty().isEmpty()) "список операторов пуст (сервис мог не вернуть его)" else "операторов: ${ops.getOrNull().orEmpty().size}"}")
+            else add(true, "Страна ${currentCountryTitle(config)}: операторы не получены (${ops.exceptionOrNull()?.message}) - проверка по номеру только при заказе")
+        }
+
+        // proxies: the list must exist, and a sample of it must really answer
+        if (config.proxyListName.isBlank()) {
+            add(false, "Прокси: список не выбран (регистрация идёт только через прокси)")
+        } else {
+            val entries = GgtgProxyPoolStore.getListEntries(config.proxyListName)
+            if (entries.isEmpty()) {
+                add(false, "Прокси: список «${config.proxyListName}» пуст")
+            } else {
+                val sample = entries.shuffled().take(5)
+                var alive = 0
+                for (e in sample) {
+                    val reachable = try {
+                        java.net.Socket().use { it.connect(java.net.InetSocketAddress(e.host, e.port), 4000) }
+                        true
+                    } catch (_: Throwable) { false }
+                    if (reachable) alive++
+                }
+                val needed = config.targetSuccessCount
+                add(alive > 0 && entries.size >= minOf(needed, 1), "Прокси «${config.proxyListName}»: в списке ${entries.size}, из проверенных ${sample.size} отвечают $alive" +
+                    if (entries.size < needed) " (аккаунтов в цели $needed, прокси меньше - часть потоков поделит прокси)" else "")
+                val listGeo = GgtgGeo.matchForName(config.proxyListName)
+                add(true, if (listGeo != null) "Язык и часовой пояс устройства: по списку прокси (${listGeo.country})" else "Название списка без страны: язык и пояс будут по номеру")
+            }
+        }
+
+        // e-mail service (only when Telegram asks for an e-mail)
+        if (config.autoBuyEmail) {
+            val provider = resolveEmailProviderId(config)
+            val key = config.emailApiKey.ifBlank { config.apiKey }
+            add(key.isNotBlank(), if (key.isNotBlank()) "Почта (если Telegram потребует): сервис $provider, ключ указан" else "Почта: нет API-ключа для $provider - при требовании почты номер будет отменён")
+        } else {
+            add(true, "Покупка почты выключена: при требовании почты номер будет отменён")
+        }
+
+        // push tokens / captcha
+        if (config.tokenService != 0) {
+            val tb = fetchTokenBalance(config.tokenService, config.tokenApiKey, config.antiSafetyAid)
+            add(tb.isSuccess, "Сервис токенов ${tokenServiceName(config.tokenService)}: " + (tb.getOrNull() ?: tb.exceptionOrNull()?.message.orEmpty()))
+        }
+        if (config.captchaService != 0) add(config.captchaApiKey.isNotBlank(), "Решатель капчи ${captchaServiceName(config.captchaService)}: " + if (config.captchaApiKey.isNotBlank()) "ключ указан" else "нет ключа")
+
+        // slots
+        val free = (0 until UserConfig.MAX_ACCOUNT_COUNT).count { !UserConfig.getInstance(it).isClientActivated }
+        add(free >= config.threadsCount + 2, "Свободных слотов: $free (нужно потоков ${config.threadsCount} и ещё 2 на Desktop-сессию)")
+        add(true, "Известных плохих номеров: ${allBadNumbers().size}; лимит трат: ${config.budgetLimit.ifBlank { "нет" }}")
+        out
+    }
+
     /** A pause around [base] ms, never the same twice: every waiting step looks like a person, not a timer. */
     fun jitter(base: Long): Long = (base * Random.nextDouble(0.7, 1.45)).toLong().coerceAtLeast(200L)
 
@@ -2018,6 +2117,8 @@ object GgtgRegistration {
             inUseProxies.clear()
             pendingActivations.clear()
             proxyCursor.set(0)
+            startBalance = null
+            budgetStopLogged = false
 
             saveConfig(config)
 
@@ -2072,6 +2173,26 @@ object GgtgRegistration {
             onFinished?.invoke(successCount.get(), failedCount.get())
         }
 
+        @Volatile private var startBalance: Double? = null
+        @Volatile private var budgetStopLogged = false
+
+        /** True once the balance fell by the run's spending limit since the run began. */
+        private suspend fun budgetExceeded(config: Config): Boolean {
+            val limit = parseAmount(config.budgetLimit) ?: return false
+            if (limit <= 0) return false
+            val now = parseAmount(fetchBalance(config).getOrNull()) ?: return false
+            val start = synchronized(this) { startBalance ?: now.also { startBalance = it } }
+            if (start - now >= limit) {
+                if (!budgetStopLogged) {
+                    budgetStopLogged = true
+                    log("Достигнут лимит трат за запуск: потрачено ${"%.2f".format(start - now)} из $limit. Новые номера не заказываются.")
+                    status("Лимит трат достигнут", isError = true)
+                }
+                return true
+            }
+            return false
+        }
+
         private suspend fun workerLoop(threadId: Int, config: Config) {
             activeThreads.incrementAndGet()
             updateProgress(config.targetSuccessCount)
@@ -2081,6 +2202,7 @@ object GgtgRegistration {
                     if (!waitIfPausedOrNoNetwork()) break
                     val target = config.targetSuccessCount
                     if (successCount.get() >= target) break
+                    if (budgetExceeded(config)) break
 
                     val success = runSingleRegistration(threadId, config)
                     if (success) {
@@ -2192,7 +2314,9 @@ object GgtgRegistration {
 
                 // 3. Android device profile with country-matched timezone and language
                 val countryItem = COUNTRIES.firstOrNull { it.id == config.countryId }
-                val initialGeo = GgtgGeo.matchForCountry(countryItem?.isoCode ?: "US")
+                // language / time zone follow the proxy list's country (its name), the number's country is the fallback
+                val listGeo = if (config.proxyListName.isNotBlank()) GgtgGeo.matchForName(config.proxyListName) else null
+                val initialGeo = listGeo ?: GgtgGeo.matchForCountry(countryItem?.isoCode ?: "US")
                 val deviceProfile = GgtgAndroidProfiles.random()
                 GgtgDevice.save(
                     slot, deviceProfile.deviceModel, deviceProfile.systemVersion,
@@ -2225,13 +2349,13 @@ object GgtgRegistration {
                 } else {
                     log("[Поток $threadId] Получен номер: +$phone (ID: $activationId)")
                 }
-                val phoneGeo = GgtgGeo.matchForPhone(phone)
+                val phoneGeo = listGeo ?: GgtgGeo.matchForPhone(phone)
                 GgtgDevice.save(
                     slot, deviceProfile.deviceModel, deviceProfile.systemVersion,
                     phoneGeo.systemLang, phoneGeo.cloudLang, phoneGeo.tzOffset,
                     deviceProfile.appVersion, "android", 6, "eb06d4abfb49dc3eeb1aeb98ae0f581e"
                 )
-                log("[Поток $threadId] Согласовано гео по номеру: ${phoneGeo.country} → язык: ${phoneGeo.systemLang}, часовой пояс: UTC${GgtgDevice.formatOffset(phoneGeo.tzOffset)}")
+                log("[Поток $threadId] Гео ${if (listGeo != null) "по списку прокси" else "по номеру"}: ${phoneGeo.country} → язык: ${phoneGeo.systemLang}, часовой пояс: UTC${GgtgDevice.formatOffset(phoneGeo.tzOffset)}")
 
                 if (config.filterNumbers && isBadNumber(digits)) {
                     log("[Поток $threadId] Номер +$phone уже не подошёл раньше (занят, заблокирован или неверный). Отмена, средства будут возвращены.")
@@ -2848,7 +2972,8 @@ object GgtgRegistration {
                     }
 
                     // 3. Android device profile with country-matched timezone
-                    val phoneGeo = GgtgGeo.matchForPhone(digits)
+                    val phoneGeo = (if (config.proxyListName.isNotBlank()) GgtgGeo.matchForName(config.proxyListName) else null)
+                        ?: GgtgGeo.matchForPhone(digits)
                     val deviceProfile = GgtgAndroidProfiles.random()
                     GgtgDevice.save(
                         slot, deviceProfile.deviceModel, deviceProfile.systemVersion,

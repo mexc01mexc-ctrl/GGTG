@@ -261,6 +261,8 @@ object GgtgSync {
         if (sessionNotes.length() > 0) {
             body.put("session_notes", sessionNotes)
         }
+        // numbers that already failed in a registration: the other device must not pay for them again
+        GgtgRegistration.allBadNumbers().takeIf { it.isNotEmpty() }?.let { body.put("bad_numbers", org.json.JSONArray(it.toList())) }
 
         val accountStatuses = JSONObject()
         for ((uId, status) in GgtgSpamStatus.all()) {
@@ -476,6 +478,10 @@ object GgtgSync {
         // merge proxy pools if present
         root.optJSONArray("proxy_pools")?.let { poolsArr ->
             org.telegram.ui.Components.GgtgProxyPoolStore.mergeJson(poolsArr.toString())
+        }
+
+        root.optJSONArray("bad_numbers")?.let { arr ->
+            GgtgRegistration.mergeBadNumbers((0 until arr.length()).map { arr.optString(it) })
         }
 
         // merge session notes & roles across devices
