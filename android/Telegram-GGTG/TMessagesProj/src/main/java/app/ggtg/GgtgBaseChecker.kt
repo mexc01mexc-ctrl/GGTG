@@ -129,54 +129,79 @@ object GgtgBaseChecker {
                 for (username in toCheck) {
                     if (!isActive) break
 
-                    val now = System.currentTimeMillis()
-                    var attempts = workers.size
-                    while (attempts-- > 0) {
-                        if (workerIdx >= workers.size) workerIdx = 0
-                        val slot = workers[workerIdx]
-                        val cool = cooldownUntil[slot] ?: 0L
-                        if (now >= cool) break
-                        workerIdx = (workerIdx + 1) % workers.size
-                    }
-                    val chosenSlot = workers[workerIdx]
-                    val cool = cooldownUntil[chosenSlot] ?: 0L
-                    if (cool > now) {
-                        val waitTime = minOf(cool - now, 15000L)
-                        delay(waitTime)
-                    }
-
-                    withContext(Dispatchers.Main) {
-                        currentWorkerTv.text = "Аккаунт: ${GgtgAccounts.label(chosenSlot)}"
-                    }
-
-                    try {
-                        val req = TLRPC.TL_contacts_resolveUsername().apply { this.username = username }
-                        val pair = GgtgAccounts.request(chosenSlot, req, ConnectionsManager.RequestFlagFailOnServerErrors)
-                        val res = pair?.first as? TLRPC.TL_contacts_resolvedPeer
-                        if (res != null) {
-                            val user = res.users.firstOrNull()
-                            if (user != null) {
-                                GgtgDb.rememberUser(user)
-                                resolvedCount++
+                    // the same person is retried on another account when one runs into its limit - a flood answer
+                    // used to be taken for "checked" and the person was silently dropped
+                    var settled = false
+                    var tries = 0
+                    while (!settled && isActive && tries++ < 60) {
+                        val now = System.currentTimeMillis()
+                        var attempts = workers.size
+                        while (attempts-- > 0) {
+                            if (workerIdx >= workers.size) workerIdx = 0
+                            val slot = workers[workerIdx]
+                            val cool = cooldownUntil[slot] ?: 0L
+                            if (now >= cool) break
+                            workerIdx = (workerIdx + 1) % workers.size
+                        }
+                        val chosenSlot = workers[workerIdx]
+                        val cool = cooldownUntil[chosenSlot] ?: 0L
+                        if (cool > now) {
+                            // every account is resting: say so, then wait for the nearest one
+                            val soonest = workers.minOf { cooldownUntil[it] ?: 0L }
+                            withContext(Dispatchers.Main) {
+                                currentWorkerTv.text = "Все аккаунты на паузе (лимит Telegram). Продолжу через ${((soonest - now) / 1000).coerceAtLeast(1)} с"
                             }
+                            delay(minOf(maxOf(soonest - now, 1000L), 15000L))
+                            continue
                         }
-                        batchCount++
-                        if (batchCount >= maxBatch) {
-                            batchCount = 0
-                            workerIdx = (workerIdx + 1) % workers.size
+
+                        withContext(Dispatchers.Main) {
+                            currentWorkerTv.text = "Аккаунт: ${GgtgAccounts.label(chosenSlot)}"
                         }
-                    } catch (t: Throwable) {
-                        val msg = t.message ?: ""
-                        if (msg.contains("FLOOD_WAIT", ignoreCase = true)) {
-                            val seconds = Regex("\\d+").find(msg)?.value?.toIntOrNull() ?: 30
-                            cooldownUntil[chosenSlot] = System.currentTimeMillis() + (seconds.coerceAtMost(60) * 1000L)
-                            batchCount = 0
-                            workerIdx = (workerIdx + 1) % workers.size
-                        } else {
+
+                        try {
+                            val req = TLRPC.TL_contacts_resolveUsername().apply { this.username = username }
+                            val pair = GgtgAccounts.request(chosenSlot, req, ConnectionsManager.RequestFlagFailOnServerErrors)
+                            val err = pair?.second
+                            val errText = err?.text.orEmpty()
+                            if (errText.startsWith("FLOOD_WAIT")) {
+                                // the error comes back as an answer, not as an exception: this account rests for as long
+                                // as Telegram says (not a fixed minute) and the person goes to the next account
+                                val seconds = Regex("\\d+").find(errText)?.value?.toLongOrNull() ?: 60L
+                                cooldownUntil[chosenSlot] = System.currentTimeMillis() + seconds.coerceAtMost(6 * 3600L) * 1000L
+                                batchCount = 0
+                                workerIdx = (workerIdx + 1) % workers.size
+                                delay(GgtgRegistration.jitter(600))
+                                continue
+                            }
+                            val res = pair?.first as? TLRPC.TL_contacts_resolvedPeer
+                            if (res != null) {
+                                val user = res.users.firstOrNull()
+                                if (user != null) {
+                                    GgtgDb.rememberUser(user)
+                                    resolvedCount++
+                                }
+                            }
+                            settled = true
                             batchCount++
                             if (batchCount >= maxBatch) {
                                 batchCount = 0
                                 workerIdx = (workerIdx + 1) % workers.size
+                            }
+                        } catch (t: Throwable) {
+                            val msg = t.message ?: ""
+                            if (msg.contains("FLOOD_WAIT", ignoreCase = true)) {
+                                val seconds = Regex("\\d+").find(msg)?.value?.toLongOrNull() ?: 60L
+                                cooldownUntil[chosenSlot] = System.currentTimeMillis() + seconds.coerceAtMost(6 * 3600L) * 1000L
+                                batchCount = 0
+                                workerIdx = (workerIdx + 1) % workers.size
+                            } else {
+                                settled = true
+                                batchCount++
+                                if (batchCount >= maxBatch) {
+                                    batchCount = 0
+                                    workerIdx = (workerIdx + 1) % workers.size
+                                }
                             }
                         }
                     }
@@ -186,7 +211,7 @@ object GgtgBaseChecker {
                         progress.progress = checkedCount
                         statusTv.text = "Проверено: $checkedCount из ${toCheck.size} (найдено: $resolvedCount)"
                     }
-                    delay(250)
+                    delay(GgtgRegistration.jitter(450))
                 }
             } finally {
                 if (usingTrash) {

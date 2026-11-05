@@ -2903,18 +2903,33 @@ void StartBaseVerification(
 				}
 				const auto type = error.type();
 				if (type.startsWith(u"FLOOD_WAIT"_q)) {
+					// this account rests for as long as Telegram says (not a fixed minute), and the SAME person is
+					// asked again through the next account: before, the person was skipped and counted as checked,
+					// so after the first few every other one was lost
 					const auto seconds = type.mid(11).toInt();
-					const auto waitMs = (seconds > 0 ? std::min(seconds, 60) : 30) * 1000;
+					const auto waitMs = (seconds > 0 ? std::min(seconds, 6 * 3600) : 60) * 1000;
 					state->cooldownUntil[worker] = crl::now() + waitMs;
 					state->batchCount = 0;
 					state->workerIdx = (state->workerIdx + 1) % int(workers.size());
-				} else {
-					state->batchCount++;
-					const auto maxBatch = usingTrash ? 5 : 3;
-					if (state->batchCount >= maxBatch) {
-						state->batchCount = 0;
-						state->workerIdx = (state->workerIdx + 1) % int(workers.size());
+					auto soonest = crl::time(0);
+					for (const auto &account : workers) {
+						const auto cooling = state->cooldownUntil.find(account);
+						const auto until = (cooling == state->cooldownUntil.end()) ? crl::time(0) : cooling->second;
+						soonest = (soonest == 0) ? until : std::min(soonest, until);
 					}
+					const auto restMs = std::max(soonest - crl::now(), crl::time(0));
+					if (restMs > 1000) {
+						workerLabel->setText(u"Все аккаунты на паузе (лимит Telegram). Продолжу через %1 с"_q
+							.arg(int(restMs / 1000)));
+					}
+					state->stepTimer.callOnce(int(std::min<crl::time>(std::max<crl::time>(restMs, 600), 15000)));
+					return;
+				}
+				state->batchCount++;
+				const auto maxBatch = usingTrash ? 5 : 3;
+				if (state->batchCount >= maxBatch) {
+					state->batchCount = 0;
+					state->workerIdx = (state->workerIdx + 1) % int(workers.size());
 				}
 				state->checkedCount++;
 				state->currentIndex++;
