@@ -73,7 +73,7 @@ class GgtgSyncAccountsActivity : BaseFragment() {
         GgtgUi.addCard(root, refreshRow, top = 8f)
 
         GgtgUi.addCard(root, GgtgUi.infoCard(context, R.drawable.msg_channel, "Аккаунты этого телефона на Mac",
-            "На Mac: «Синхронизация» → «Аккаунты с телефона Android» → «Войти по QR». Телефон сам подтвердит вход этим аккаунтом, прокси, язык и время берутся с аккаунта. Для аккаунтов Mac на телефоне код тоже приходит сам."), top = 14f)
+            "На Mac: «Синхронизация» → «Аккаунты с телефона Android» → «Войти по QR». Телефон сам подтвердит вход этим аккаунтом, прокси, язык и время берутся с аккаунта."), top = 14f)
 
         root.addView(GgtgUi.spacer(context))
 

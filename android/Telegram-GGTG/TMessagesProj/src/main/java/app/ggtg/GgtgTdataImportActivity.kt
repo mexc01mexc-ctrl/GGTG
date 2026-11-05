@@ -39,9 +39,9 @@ class GgtgTdataImportActivity : BaseFragment() {
         val root = GgtgUi.page(context, frame)
 
         GgtgUi.addCard(root, GgtgUi.infoCard(context, org.telegram.messenger.R.drawable.msg_folders, "Что такое tdata",
-            "Папка tdata — это сессия Telegram Desktop (Windows: AppData\\Roaming\\Telegram Desktop\\tdata). Отсюда она дублируется в новый, независимый вход на этом телефоне — сама сессия Desktop не трогается и не выходит из аккаунта. Прокси выбирается перед импортом."), top = 10f)
+            "Принимаем папку tdata или архив (zip, rar, .ggtg), в том числе сразу с несколькими аккаунтами. Рядом с tdata читаются 2fa.txt и ggtg.json: пароль 2FA, папка, устройство и прокси аккаунта. Нет прокси там — берётся из выбранного списка, язык и часовой пояс по его названию. Дальше вопрос: «Да» — новая отдельная сессия (QR-передача), «Нет» — ключ как есть (та же сессия, что на компьютере)."), top = 10f)
         GgtgUi.addCard(root, GgtgUi.actionCard(context, org.telegram.messenger.R.drawable.msg_openin, "Импорт папки tdata", "Выбрать папку tdata на телефоне") { pickAndImport(folder = true) })
-        GgtgUi.addCard(root, GgtgUi.actionCard(context, org.telegram.messenger.R.drawable.msg_archive, "Импорт из архива", "zip / rar / .ggtg — можно сразу несколько аккаунтов") { pickAndImport(folder = false) })
+        GgtgUi.addCard(root, GgtgUi.actionCard(context, org.telegram.messenger.R.drawable.msg_archive, "Импорт из архива", "zip, rar или .ggtg — сразу несколько аккаунтов") { pickAndImport(folder = false) })
         return frame
     }
 

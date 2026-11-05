@@ -45,7 +45,7 @@ class GgtgTdataExportActivity(private val preselectedSlots: List<Int> = emptyLis
                 context,
                 org.telegram.messenger.R.drawable.msg_shareout,
                 "Экспорт сессий и аккаунтов",
-                "Экспорт выбранных аккаунтов в Telegram Desktop (tdata), сессии с JSON или единый пакет .ggtg. Доступен экспорт основной сессии с переходом на резервную, экспорт готовой резервной сессии или создание нового независимого дубликата."
+                "Выбранные аккаунты уходят в формате tdata (папка Telegram Desktop), Сессия + JSON или одним архивом .ggtg. Что отдать: основную сессию (телефон перейдёт на резервную, если она есть), готовую резервную или новую отдельную. Пароль 2FA, устройство, папка и прокси кладутся рядом в любом формате."
             ),
             top = 10f
         )
@@ -96,17 +96,17 @@ class GgtgTdataExportActivity(private val preselectedSlots: List<Int> = emptyLis
         addFormatOption(
             TdataExportHelper.ExportFormat.TData,
             "TData (Папка Telegram Desktop)",
-            "Готовые папки tdata для Telegram Desktop (macOS, Windows, Linux) в zip архиве."
+            "Папка на каждый аккаунт (tdata, 2fa.txt, ggtg.json) в zip-архиве; открывается в Telegram Desktop и в GGTG."
         )
         addFormatOption(
             TdataExportHelper.ExportFormat.SessionJson,
-            "Сессия + JSON (Android / Telethon / Pyrogram)",
-            "Ключи авторизации session.json, параметры устройства и прокси для софта и мобильных клиентов."
+            "Сессия + JSON (Telethon / Pyrogram / софт)",
+            "Файлы .session и .json: ключ, устройство, язык, часовой пояс, прокси и пароль 2FA."
         )
         addFormatOption(
             TdataExportHelper.ExportFormat.GgtgPack,
             "Пакет GGTG (.ggtg)",
-            "Единый файл .ggtg для быстрого импорта на телефон или Desktop со всеми настройками."
+            "Один архив с несколькими аккаунтами: сессии, устройство, прокси, папки и пароли 2FA. Импортируется в GGTG на телефоне и на Mac."
         )
         refreshFormats()
 

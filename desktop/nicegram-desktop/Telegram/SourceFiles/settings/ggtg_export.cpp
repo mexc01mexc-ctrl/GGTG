@@ -851,7 +851,7 @@ void ExportNext(std::shared_ptr<ExportRun> run, size_t index) {
 void ShowExportBox(std::shared_ptr<ExportRun> run) {
 	if (!run || !run->show) return;
 	run->show->show(Box([=](not_null<Ui::GenericBox*> box) {
-		box->setTitle(rpl::single(u"Экспорт аккаунтов для Android"_q));
+		box->setTitle(rpl::single(u"Экспорт аккаунтов (.ggtg)"_q));
 		box->setWidth(st::boxWideWidth + style::ConvertScale(120));
 		box->setMaxHeight(st::boxMaxListHeight);
 
@@ -1030,9 +1030,9 @@ void StartExport(
 			.arg(accounts.size());
 		path = QFileDialog::getSaveFileName(
 			nullptr,
-			u"Сохранить экспорт для Android"_q,
+			u"Сохранить архив .ggtg"_q,
 			suggested,
-			u"GGTG Android (*.ggtg)"_q);
+			u"Архив GGTG (*.ggtg)"_q);
 		if (path.isEmpty()) {
 			return;
 		}
@@ -1050,8 +1050,8 @@ void StartExport(
 		run->metas.push_back(AccountMeta(account, options));
 	}
 	const auto title = accounts.size() == 1
-		? u"Экспорт для Android"_q
-		: u"Экспорт для Android (%1)"_q.arg(accounts.size());
+		? u"Экспорт в .ggtg"_q
+		: u"Экспорт в .ggtg (%1)"_q.arg(accounts.size());
 	run->process = Core::App().processes().start(
 		title,
 		[run] { ShowExportBox(run); },
@@ -1102,7 +1102,7 @@ Fn<std::optional<TdataExportOptions>()> AddTdataExportChoices(
 	radio(content, formatGroup, kFormatTdata, u"TData (папка Telegram Desktop)"_q);
 	radio(content, formatGroup, kFormatSessionJson, u"Сессия + JSON (Telethon / Pyrogram / софт)"_q);
 	if (withAndroid) {
-		radio(content, formatGroup, kFormatAndroid, u"Для GGTG Android (один файл .ggtg)"_q);
+		radio(content, formatGroup, kFormatAndroid, u"Архив .ggtg (для GGTG на телефоне и Mac, много аккаунтов)"_q);
 	}
 
 	const auto sessionWrap = section();
@@ -1138,7 +1138,7 @@ Fn<std::optional<TdataExportOptions>()> AddTdataExportChoices(
 	const auto sidecars = sidecarInner->add(
 		object_ptr<Ui::Checkbox>(
 			sidecarInner,
-			u"Положить рядом 2fa.txt и ggtg.json (папка, прокси, пароль 2FA)"_q,
+			u"Положить рядом 2fa.txt и ggtg.json (папка, прокси, устройство, пароль 2FA), а в tdata - settings с прокси"_q,
 			true),
 		st::ggtgChoiceRowPadding);
 	sidecars->setAllowTextLines(0);
@@ -1284,7 +1284,7 @@ void StartHandoffForAndroid(not_null<Main::Account*> account) {
 	options.viaSync = true;
 	options.handoff = true;
 	options.silent = true;
-	options.sessionNote = u"резервная сессия (создана при переносе на Android)"_q;
+	options.sessionNote = u"отдельная сессия для телефона (перенос на Android)"_q;
 	StartExport(nullptr, { account }, options);
 }
 

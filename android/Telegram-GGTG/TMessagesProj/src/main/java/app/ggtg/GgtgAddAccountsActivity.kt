@@ -69,15 +69,15 @@ class GgtgAddAccountsActivity : BaseFragment() {
             presentFragment(GgtgRegistrationActivity())
         })
         GgtgUi.addCard(column, GgtgUi.actionCard(context, R.drawable.msg_list, "Импорт Сессия + JSON",
-            "Файлы .session и .json (Telethon / Pyrogram / софт): zip-архив или папка с 2FA и прокси.") {
+            "Архив .zip или папка с файлами .session и .json (Telethon, Pyrogram, софт). Прокси берётся из .json, если его там нет — из выбранного списка; 2FA, устройство и папка — из файлов.") {
             presentFragment(GgtgSessionJsonImportActivity())
         })
         GgtgUi.addCard(column, GgtgUi.actionCard(context, R.drawable.msg_archive, "Импорт .ggtg",
-            "Файл экспорта с GGTG Desktop: аккаунты с прокси, папками и паролями 2FA.") {
+            "Архив .ggtg из GGTG Desktop: отдельные сессии с устройством, прокси, папкой и паролем 2FA. Ставятся как есть.") {
             presentFragment(GgtgImportActivity())
         })
         GgtgUi.addCard(column, GgtgUi.actionCard(context, R.drawable.msg_folders, "Импорт tdata",
-            "Папка tdata с компьютера: телефон получает свою отдельную сессию.") {
+            "Папка или архив (zip, rar, .ggtg) с tdata, можно несколько аккаунтов. Прокси, 2FA, устройство и папка — из ggtg.json и 2fa.txt рядом; нет прокси — из выбранного списка.") {
             presentFragment(GgtgTdataImportActivity())
         })
         GgtgUi.addCard(column, GgtgUi.actionCard(context, R.drawable.msg_calls, "Войти по номеру телефона",
@@ -86,7 +86,7 @@ class GgtgAddAccountsActivity : BaseFragment() {
         })
         if (GgtgSyncTransport.mainSlot() != null) {
             GgtgUi.addCard(column, GgtgUi.actionCard(context, R.drawable.msg_download, "Принять аккаунты с Desktop",
-                "Через синхронизацию: новой отдельной сессией, без разрыва на Desktop.") {
+                "Через синхронизацию: Mac создаёт для телефона отдельную сессию, телефон ставит её как есть. Сессия Mac продолжает работать.") {
                 presentFragment(GgtgSyncAccountsActivity())
             })
         }

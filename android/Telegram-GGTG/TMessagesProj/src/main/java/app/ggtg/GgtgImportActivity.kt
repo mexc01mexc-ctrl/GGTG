@@ -50,8 +50,8 @@ class GgtgImportActivity : BaseFragment() {
         val root = GgtgUi.page(context, frame)
 
         GgtgUi.addCard(root, GgtgUi.infoCard(context, R.drawable.msg_info, "Что это",
-            "Файл .ggtg создаётся в GGTG Desktop (раздел «Экспорт»): каждому аккаунту там выдаётся новая отдельная сессия, папка, прокси и пароль 2FA. Здесь он ставится напрямую, без повторного дублирования."), top = 10f)
-        GgtgUi.addCard(root, GgtgUi.actionCard(context, R.drawable.msg_archive, "Выбрать файл .ggtg", "Откроется выбор файла на телефоне") {
+            "Архив .ggtg создаётся в GGTG Desktop (раздел «Экспорт»): для каждого аккаунта там создаётся новая отдельная Desktop-сессия со своим устройством, языком, часовым поясом, прокси, папкой и паролем 2FA. Телефон ставит её как есть, без нового входа. Если у аккаунта нет подходящего прокси, берётся из выбранного списка."), top = 10f)
+        GgtgUi.addCard(root, GgtgUi.actionCard(context, R.drawable.msg_archive, "Выбрать архив .ggtg", "Можно выбрать несколько аккаунтов в одном архиве") {
             val intent = Intent(Intent.ACTION_OPEN_DOCUMENT).apply {
                 addCategory(Intent.CATEGORY_OPENABLE)
                 type = "*/*"

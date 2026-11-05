@@ -511,14 +511,16 @@ inline void FillAddAccountsBox(
 	action(u"Импорт папки tdata…"_q, st::menuIconShowInFolder, [=] {
 		ImportTdataFolder(show);
 	});
-	hint(u"Одна папка tdata или папка с несколькими. Пароль 2FA берётся "
-		"из файла рядом (2fa.txt, twoFA.txt), папка аккаунта - из имени "
-		"папки."_q);
+	hint(u"Принимаем папку tdata (одну или с несколькими аккаунтами). Рядом "
+		"читаются 2fa.txt и ggtg.json: пароль 2FA, папка, устройство и "
+		"прокси аккаунта. Нет прокси там - берётся из выбранного списка, "
+		"язык и часовой пояс по его названию."_q);
 	action(u"Импорт Сессия + JSON…"_q, st::menuIconDownload, [=] {
 		ImportSessionJsonFolder(show);
 	});
-	hint(u"Папка с файлами .session и .json (Telethon, Pyrogram, софт) или архив. "
-		"Пароль 2FA, параметры устройства и прокси применяются автоматически."_q);
+	hint(u"Принимаем архив или папку с файлами .session и .json (Telethon, "
+		"Pyrogram, софт). Пароль 2FA, устройство и прокси берутся из файлов; "
+		"нет прокси - из выбранного списка."_q);
 	action(u"Войти по номеру телефона…"_q, st::menuIconPhone, [=] {
 		AddAccountByPhone(show);
 	});
