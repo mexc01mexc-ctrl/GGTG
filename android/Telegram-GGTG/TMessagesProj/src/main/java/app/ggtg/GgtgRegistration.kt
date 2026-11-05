@@ -1639,7 +1639,7 @@ object GgtgRegistration {
         var emailCode: String? = null
         val deadline = System.currentTimeMillis() + 120_000L
         while (System.currentTimeMillis() < deadline) {
-            delay(jitter(3000))
+            delay(jitter(5500))
             val (st, code, _) = pollEmailCode(config, mailId)
             if (st == "ok" && !code.isNullOrEmpty()) { emailCode = code; break }
         }
@@ -2543,7 +2543,7 @@ object GgtgRegistration {
                     var emailCode: String? = null
                     val emailDeadline = System.currentTimeMillis() + 120_000L
                     while (System.currentTimeMillis() < emailDeadline && !cancelled.get()) {
-                        delay(jitter(3000))
+                        delay(jitter(5500))
                         val (st, code, _) = pollEmailCode(config, mailId)
                         if (st == "ok" && !code.isNullOrEmpty()) {
                             emailCode = code
