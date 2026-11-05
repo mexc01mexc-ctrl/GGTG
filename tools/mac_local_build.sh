@@ -30,6 +30,34 @@ if [ ! -d "$LIBS" ] || [ ! -d "$OUT/Telegram.xcodeproj" ]; then
 fi
 [ "$MODE" = "deps" ] && { echo "Зависимости на месте."; exit 0; }
 
+# --- 1b. Qt host tools (moc, rcc, uic...). The prebuilt deps carry only stubs for them: libexec/rcc is a 175-byte
+# script that "generates" EMPTY .rcc files (the app then dies at start in RegisterBundledResources - fonts, icons
+# and emoji are missing), and moc & co. are links into /tmp/qt-clean, which a reboot wipes. A real Qt host install
+# (aqtinstall, as the CI does) lives in ~/.ggtg-qt-host; libexec/ and bin/ get small wrappers that run those.
+QT="$LIBS/local/Qt-6.11.2"
+QTHOST="${GGTG_QT_HOST:-$HOME/.ggtg-qt-host}/6.11.2/macos"
+tools_ok() { [ -f "$QT/libexec/rcc" ] && [ "$(stat -f%z "$QT/libexec/rcc")" -lt 1000 ] && grep -q "$QTHOST" "$QT/libexec/rcc"; }
+if ! tools_ok; then
+  echo "=== Qt host tools: ставим настоящие moc/rcc/uic (в deps лежат заглушки) ==="
+  if [ ! -x "$QTHOST/libexec/rcc" ]; then
+    python3 -m pip install --user aqtinstall
+    python3 -m aqt install-qt mac desktop 6.11.2 clang_64 --archives qtbase -O "${GGTG_QT_HOST:-$HOME/.ggtg-qt-host}"
+  fi
+  [ -x "$QTHOST/libexec/rcc" ] || { echo "Не удалось поставить Qt host tools ($QTHOST)" >&2; exit 1; }
+  for sub in libexec bin; do
+    mkdir -p "$QT/$sub"
+    for f in "$QTHOST/$sub"/*; do
+      [ -f "$f" ] && [ -x "$f" ] || continue
+      name="$(basename "$f")"
+      rm -rf "$QT/$sub/$name"
+      printf '#!/bin/sh\nexec "%s" "$@"\n' "$f" > "$QT/$sub/$name"
+      chmod +x "$QT/$sub/$name"
+    done
+  done
+  # the resource packs made with the stub are empty: make them again
+  rm -f "$OUT"/*.rcc
+fi
+
 # --- 2. The project files hold absolute paths of the machine they were generated on (see the CI):
 # make them resolve here.
 LINK=/Users/macbookair/Desktop/GGTG
