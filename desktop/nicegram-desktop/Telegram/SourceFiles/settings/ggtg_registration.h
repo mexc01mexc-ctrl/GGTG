@@ -4412,6 +4412,12 @@ public:
 		if (_isRunning) return;
 		CurrentRegistrationController() = shared_from_this();
 		_settings = settings;
+		if (!proxyListIsUsable()) {
+			const auto msg = u"Выберите список прокси (в нём должен быть хотя бы один): регистрация никогда не идёт с адреса этого компьютера."_q;
+			log(msg);
+			status(msg, true, false);
+			return;
+		}
 		SaveSettings(_settings);
 		_isRunning = true;
 		_isPaused = false;
@@ -4457,6 +4463,12 @@ public:
 		if (_isRunning) return;
 		CurrentRegistrationController() = shared_from_this();
 		_settings = settings;
+		if (!proxyListIsUsable()) {
+			const auto msg = u"Выберите список прокси: номер никогда не запрашивается с адреса этого компьютера."_q;
+			log(msg);
+			status(msg, true, false);
+			return;
+		}
 		SaveSettings(_settings);
 		_isRunning = true;
 		if (_runningCallback) _runningCallback(true);
@@ -4605,6 +4617,19 @@ private:
 
 	void status(const QString &msg, bool isError, bool isSuccess) {
 		if (_statusCallback) _statusCallback(msg, isError, isSuccess);
+	}
+
+	// A number is never requested from this machine's own address: the chosen list must exist and hold a proxy.
+	[[nodiscard]] bool proxyListIsUsable() const {
+		if (_settings.proxyPoolName.isEmpty()) {
+			return false;
+		}
+		for (const auto &list : MTP::GlobalProxyPool().lists()) {
+			if (list.name == _settings.proxyPoolName) {
+				return !list.entries.empty();
+			}
+		}
+		return false;
 	}
 
 	MTP::ProxyData pickProxyForWorker() {
@@ -6236,7 +6261,7 @@ inline void FillRegistrationBox(
 	};
 
 	const auto getProxyTitle = [=](const QString &name) {
-		if (name.isEmpty()) return u"Без прокси (напрямую)"_q;
+		if (name.isEmpty()) return u"Не выбран (нужен список)"_q;
 		const auto count = countProxies(name);
 		return name + u" ("_q + QString::number(count) + u" шт.)"_q;
 	};

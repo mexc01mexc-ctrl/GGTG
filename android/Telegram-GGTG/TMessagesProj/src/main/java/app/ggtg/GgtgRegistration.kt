@@ -1544,6 +1544,229 @@ object GgtgRegistration {
     }
 
     // -----------------------------------------------------------------------------
+    // What Telegram can answer to a code request (auth.sendCode / account.sendChangePhoneCode / verifyEmail):
+    //   auth.sentCode(type = ...)           - SMS, SmsWord, SmsPhrase, FirebaseSms: the SMS is on its way (the only good case)
+    //   ... type = SetUpEmailRequired       - a login e-mail must be set up first (bought through the mail service)
+    //   ... type = App                      - the code went to Telegram on another device: the number is already registered
+    //   ... type = Call / MissedCall / FlashCall - a call: virtual numbers do not take calls
+    //   ... type = EmailCode                - the code goes to the e-mail already linked to the number: taken
+    //   ... type = FragmentSms              - sent through Fragment (anonymous number)
+    //   auth.sentCodePaymentRequired        - "One-time SMS Fee": Telegram wants a paid Premium week to send the SMS
+    //   auth.sentCodeSuccess                - signed in without any code
+    // Anything but SMS / SetUpEmailRequired means: drop this number (cancel the request, refund it, keep the
+    // push token for the next one) and take another.
+    // -----------------------------------------------------------------------------
+    enum class CodeKind(val title: String, val badNumber: Boolean) {
+        SMS("SMS", false),
+        EMAIL_SETUP("Telegram требует привязать почту", false),
+        APP("код ушёл в приложение на другом устройстве (номер уже зарегистрирован)", true),
+        CALL("звонок вместо SMS (виртуальные номера звонки не принимают)", true),
+        EMAIL_LOGIN("код ушёл на почту, привязанную к номеру (номер занят)", true),
+        FRAGMENT("код через Fragment (анонимный номер)", true),
+        PAYMENT("платная отправка SMS (One-time SMS Fee / Telegram Premium)", true),
+        INSTANT("вход без кода (аккаунт уже авторизован)", false),
+        UNKNOWN("неизвестный ответ Telegram", false)
+    }
+
+    fun classifyCode(sent: TLObject?): CodeKind = when (sent) {
+        is TLRPC.TL_auth_sentCodePaymentRequired -> CodeKind.PAYMENT
+        is TLRPC.TL_auth_sentCodeSuccess -> CodeKind.INSTANT
+        is TLRPC.TL_auth_sentCode -> when (sent.type) {
+            is TLRPC.TL_auth_sentCodeTypeSms, is TLRPC.TL_auth_sentCodeTypeSmsWord,
+            is TLRPC.TL_auth_sentCodeTypeSmsPhrase, is TLRPC.TL_auth_sentCodeTypeFirebaseSms -> CodeKind.SMS
+            is TLRPC.TL_auth_sentCodeTypeSetUpEmailRequired -> CodeKind.EMAIL_SETUP
+            is TLRPC.TL_auth_sentCodeTypeApp -> CodeKind.APP
+            is TLRPC.TL_auth_sentCodeTypeCall, is TLRPC.TL_auth_sentCodeTypeMissedCall,
+            is TLRPC.TL_auth_sentCodeTypeFlashCall -> CodeKind.CALL
+            is TLRPC.TL_auth_sentCodeTypeEmailCode -> CodeKind.EMAIL_LOGIN
+            is TLRPC.TL_auth_sentCodeTypeFragmentSms -> CodeKind.FRAGMENT
+            else -> CodeKind.UNKNOWN
+        }
+        else -> CodeKind.UNKNOWN
+    }
+
+    /**
+     * Telegram demands a login e-mail before it sends the code: buys one through the mail service, hands it to
+     * Telegram, waits for Telegram's code there and confirms it. Returns the hash of the follow-up SMS request,
+     * or null and the reason (the caller then drops the number). Pauses are random, like a person's.
+     */
+    suspend fun setUpLoginEmail(
+        config: Config,
+        cm: ConnectionsManager,
+        flags: Int,
+        digits: String,
+        phoneCodeHash: String,
+        log: (String) -> Unit
+    ): Pair<String?, String?> {
+        if (!config.autoBuyEmail) return null to "Telegram требует привязать почту, а покупка почты выключена в настройках"
+        delay(jitter(3500))
+        log("Запрос временной почты в сервисе...")
+        val order = orderEmail(config)
+        if (order.isFailure) return null to "не удалось получить почту: ${order.exceptionOrNull()?.message}"
+        val (mailId, email) = order.getOrThrow()
+        delay(jitter(4500))
+        log("Получена почта: $email. Отправка в Telegram...")
+        val sendErr = cm.sendSuspend(TL_account.sendVerifyEmailCode().apply {
+            purpose = TLRPC.TL_emailVerifyPurposeLoginSetup().apply {
+                phone_number = digits
+                phone_code_hash = phoneCodeHash
+            }
+            this.email = email
+        }, flags, ConnectionsManager.DEFAULT_DATACENTER_ID, "sendVerifyEmailCode", 25_000)
+        if (sendErr == null || sendErr.second != null) {
+            cancelEmail(config, mailId)
+            return null to "Telegram не принял почту: ${sendErr?.second?.text ?: "нет ответа"}"
+        }
+        var emailCode: String? = null
+        val deadline = System.currentTimeMillis() + 120_000L
+        while (System.currentTimeMillis() < deadline) {
+            delay(jitter(3000))
+            val (st, code, _) = pollEmailCode(config, mailId)
+            if (st == "ok" && !code.isNullOrEmpty()) { emailCode = code; break }
+        }
+        if (emailCode == null) {
+            cancelEmail(config, mailId)
+            return null to "код из почты не пришёл за 120 с"
+        }
+        delay(jitter(3500))
+        log("Код из почты получен. Подтверждение в Telegram...")
+        val verified = cm.sendSuspend(TL_account.verifyEmail().apply {
+            purpose = TLRPC.TL_emailVerifyPurposeLoginSetup().apply {
+                phone_number = digits
+                phone_code_hash = phoneCodeHash
+            }
+            verification = TLRPC.TL_emailVerificationCode().apply { code = emailCode }
+        }, flags, ConnectionsManager.DEFAULT_DATACENTER_ID, "verifyEmail", 25_000)
+        if (verified == null || verified.second != null) {
+            cancelEmail(config, mailId)
+            return null to "Telegram отклонил код почты: ${verified?.second?.text ?: "нет ответа"}"
+        }
+        val resp = verified.first as? TL_account.TL_emailVerifiedLogin
+        val follow = resp?.sent_code
+        val kind = classifyCode(follow)
+        if (kind != CodeKind.SMS) return null to "после подтверждения почты Telegram ответил: ${kind.title}"
+        return (follow as TLRPC.TL_auth_sentCode).phone_code_hash to null
+    }
+
+    /**
+     * After a registration the new account is only an Android session. By the scheme (Desktop keys everywhere) the
+     * working session should be a Desktop one and the Android one a spare in the vault. Order, so nothing can be
+     * lost: (1) a Desktop session is minted from the Android one (QR handoff on a throwaway slot), (2) the Android
+     * key goes to the vault as a spare, (3) the Desktop key is installed in a fresh slot and checked there over the
+     * proxy (getUsers), (4) only then the old slot is released LOCALLY - nothing is ended on Telegram. Any failure
+     * leaves the Android session working as before. Returns the slot the account lives in now.
+     */
+    suspend fun promoteToDesktop(srcSlot: Int, log: (String) -> Unit): Int? {
+        val src = UserConfig.getInstance(srcSlot)
+        val userId = src.clientUserId
+        if (userId == 0L) return null
+        if (!src.ncgProxyEnabled || src.ncgProxyAddress.isEmpty() || src.ncgProxyPort <= 0) {
+            log("Desktop-сессия не создаётся: у аккаунта нет прокси")
+            return null
+        }
+        val proxy = GgtgProxyBits(src.ncgProxyAddress, src.ncgProxyPort, src.ncgProxyUsername, src.ncgProxyPassword, src.ncgProxySecret)
+        val free = (0 until UserConfig.MAX_ACCOUNT_COUNT).filter {
+            it != srcSlot && !UserConfig.getInstance(it).isClientActivated && Engine.reservedSlots.add(it)
+        }.take(2)
+        if (free.size < 2) {
+            free.forEach { Engine.reservedSlots.remove(it) }
+            log("Desktop-сессия не создана: нужно два свободных слота")
+            return null
+        }
+        val temp = free[0]
+        val target = free[1]
+        var storedId: String? = null
+        try {
+            val androidKeys = TdataExportHelper.currentSession(srcSlot)
+            val phone = src.currentUser?.phone.orEmpty()
+            log("Создаю Desktop-сессию (QR-передача с Android-сессии)...")
+            delay(jitter(4000))
+            val minted = TdataExportHelper.duplicateSession(srcSlot, temp, proxy, null, "+$phone", false, null, null)
+            val (desktopAcc, deviceJson) = minted.getOrElse {
+                log("Desktop-сессия не создана (${it.message}); аккаунт остаётся на Android-сессии")
+                return null
+            }
+            // the Android session becomes a spare - written first, removed again if the switch fails
+            val entry = GgtgSessions.StoredSession(
+                id = "${System.currentTimeMillis()}_${(1000..9999).random()}",
+                userId = userId,
+                role = "backup",
+                source = "registration_android",
+                note = "Android-сессия регистрации (резерв)",
+                platform = "android",
+                phone = phone,
+                name = src.currentUser?.let { org.telegram.messenger.UserObject.getUserName(it) }.orEmpty(),
+                folder = src.ncgFolder.orEmpty(),
+                twoFactor = src.ncgTwoFactor.orEmpty(),
+                mainDcId = androidKeys.mainDcId,
+                keys = androidKeys.keys,
+                device = org.json.JSONObject().apply {
+                    put("deviceModel", src.ncgDeviceModel); put("systemVersion", src.ncgSystemVersion)
+                    put("appVersion", src.ncgAppVersion); put("systemLangCode", src.ncgSystemLang)
+                    put("cloudLangCode", src.ncgCloudLang); put("langPackName", "android"); put("apiId", 6)
+                },
+                proxy = org.json.JSONObject().apply {
+                    put("type", "socks5"); put("host", proxy.address); put("port", proxy.port)
+                    put("user", proxy.username); put("password", proxy.password)
+                }
+            )
+            GgtgSessions.addStored(entry)
+            GgtgSessions.saveToVault(entry, androidKeys)
+            storedId = entry.id
+
+            delay(jitter(3000))
+            val install = TdataImportHelper.installDesktopKey(desktopAcc, target, proxy, deviceJson)
+            if (install.isFailure) {
+                log("Desktop-сессия не встала (${install.exceptionOrNull()?.message}); аккаунт остаётся на Android-сессии")
+                GgtgSessions.removeStored(entry.id)
+                storedId = null
+                runCatching {
+                    ConnectionsManager.getInstance(target).setAsleep(true)
+                    UserConfig.getInstance(target).clearConfig()
+                }
+                return null
+            }
+            // the account's own data follows it
+            UserConfig.getInstance(target).apply {
+                ncgFolder = src.ncgFolder
+                ncgTwoFactor = src.ncgTwoFactor
+                ncgProxyEnabled = true
+                ncgProxyAddress = proxy.address
+                ncgProxyPort = proxy.port
+                ncgProxyUsername = proxy.username
+                ncgProxyPassword = proxy.password
+                ncgProxySecret = proxy.secret
+                saveConfig(false)
+            }
+            // the Android slot is released locally only - the session itself lives on as the spare
+            runCatching {
+                ConnectionsManager.getInstance(srcSlot).setAsleep(true)
+                UserConfig.getInstance(srcSlot).clearConfig()
+                ConnectionsManager.setProxySettingsForAccount(srcSlot, false, "", 0, "", "", "")
+            }
+            Engine.reservedSlots.remove(srcSlot)
+            log("Главная сессия аккаунта — Desktop (слот #$target); Android-сессия сохранена как резервная.")
+            return target
+        } catch (t: Throwable) {
+            log("Desktop-сессия не создана: ${t.message ?: t.javaClass.simpleName}; аккаунт остаётся на Android-сессии")
+            storedId?.let { runCatching { GgtgSessions.removeStored(it) } }
+            return null
+        } finally {
+            runCatching {
+                ConnectionsManager.getInstance(temp).setAsleep(true)
+                UserConfig.getInstance(temp).clearConfig()
+                ConnectionsManager.setProxySettingsForAccount(temp, false, "", 0, "", "", "")
+            }
+            Engine.reservedSlots.remove(temp)
+            if (UserConfig.getInstance(target).isClientActivated) Engine.reservedSlots.remove(target)
+            else Engine.reservedSlots.remove(target)
+        }
+    }
+
+    /** A pause around [base] ms, never the same twice: every waiting step looks like a person, not a timer. */
+    fun jitter(base: Long): Long = (base * Random.nextDouble(0.7, 1.45)).toLong().coerceAtLeast(200L)
+
+    // -----------------------------------------------------------------------------
     // Registration Engine with Multi-threading & Queue Loop
     // -----------------------------------------------------------------------------
     object Engine {
@@ -1775,6 +1998,14 @@ object GgtgRegistration {
         }
 
         fun start(config: Config, customScope: CoroutineScope? = null) {
+            // never from this phone's own address: a number is requested only through a proxy of the chosen list
+            if (config.proxyListName.isBlank() || GgtgProxyPoolStore.getListEntries(config.proxyListName).isEmpty()) {
+                val msg = "Выберите список прокси (в нём должен быть хотя бы один): регистрация никогда не идёт с адреса этого телефона."
+                log(msg)
+                status(msg, isError = true)
+                onFinished?.invoke(0, 0)
+                return
+            }
             if (isRunning.getAndSet(true)) return
             activeConfig = config
             cancelled.set(false)
@@ -1874,6 +2105,7 @@ object GgtgRegistration {
                     val summary = "Регистрация завершена! Успешно: $s из ${config.targetSuccessCount}. Ошибок: $f."
                     log("========================================")
                     log(summary)
+                    GgtgRegStats.summary().takeIf { it.isNotEmpty() }?.let { log("Статистика ответов Telegram по странам (за всё время):\n$it") }
                     log("========================================")
                     status(summary, isSuccess = true)
                     processHandle?.succeed(summary)
@@ -1900,6 +2132,7 @@ object GgtgRegistration {
             var phone: String? = null
             var mobileToken = ""
             var tokenSpent = false
+            var registeredOk = false // the account exists: the number is used, never refund it
 
             try {
                 // 2. Assign proxy from pool if configured
@@ -2070,7 +2303,7 @@ object GgtgRegistration {
                         && config.replaceTokenOnFlood && config.tokenService != 0 && config.tokenApiKey.isNotBlank() && floodRetries < 2) {
                         floodRetries++
                         log("[Поток $threadId] Флуд на токене: заменяю токен новым (попытка $floodRetries из 2)...")
-                        delay(2000)
+                        delay(jitter(2000))
                         val tokenRes = fetchMobileToken(config.tokenService, config.tokenApiKey, digits, config.antiSafetyAid)
                         mobileToken = tokenRes.getOrDefault("")
                         continue
@@ -2093,7 +2326,7 @@ object GgtgRegistration {
                             return false
                         }
                         log("[Поток $threadId] Токен reCAPTCHA получен! Отправка решения...")
-                        delay(1000)
+                        delay(jitter(1000))
                         continue
                     }
                     break
@@ -2108,45 +2341,26 @@ object GgtgRegistration {
                     enqueueRefund(config, activationId, phone, orderedAt)
                     return false
                 }
-                if (sent is TLRPC.TL_auth_sentCodePaymentRequired) {
-                    addBadNumber(digits)
-                    log("[Поток $threadId] Telegram требует платную отправку SMS / Premium для номера +$digits. Отмена, возврат средств.")
-                    enqueueRefund(config, activationId, phone, orderedAt)
-                    return false
-                }
-                val sentCode = sent as? TLRPC.TL_auth_sentCode ?: run {
-                    log("[Поток $threadId] Неизвестный ответ Telegram на sendCode (${sent?.javaClass?.simpleName}). Отмена, возврат средств.")
-                    enqueueRefund(config, activationId, phone, orderedAt)
-                    return false
-                }
-                var phoneCodeHash = sentCode.phone_code_hash
-                tokenSpent = true
-
-                val isSms = (sentCode.type is TLRPC.TL_auth_sentCodeTypeSms) ||
-                            (sentCode.type is TLRPC.TL_auth_sentCodeTypeSmsWord) ||
-                            (sentCode.type is TLRPC.TL_auth_sentCodeTypeSmsPhrase) ||
-                            (sentCode.type is TLRPC.TL_auth_sentCodeTypeFirebaseSms)
-
-                if (sentCode.type is TLRPC.TL_auth_sentCodeTypeApp) {
-                    addBadNumber(digits)
-                    log("[Поток $threadId] Telegram отправил код в приложение на других устройствах (номер уже кем-то используется). Номер отменяется, возврат средств и подбор нового...")
-                    enqueueRefund(config, activationId, phone, orderedAt)
-                    return false
-                }
-
-                if (!isSms) {
-                    addBadNumber(digits)
-                    val reason = if (sentCode.type is TLRPC.TL_auth_sentCodeTypeCall ||
-                                     sentCode.type is TLRPC.TL_auth_sentCodeTypeMissedCall ||
-                                     sentCode.type is TLRPC.TL_auth_sentCodeTypeFlashCall) {
-                        "звонком (виртуальные номера не принимают звонки)"
-                    } else {
-                        "не по SMS"
+                val kind = classifyCode(sent)
+                if (kind != CodeKind.SMS && kind != CodeKind.EMAIL_SETUP) {
+                    if (kind.badNumber) addBadNumber(digits)
+                    GgtgRegStats.record(config.countryId, config.smsOperator, kind.name.lowercase())
+                    log("[Поток $threadId] Telegram ответил: ${kind.title}. Номер +$digits отменяется, токен остаётся в резерве, средства возвращаются, подбираю другой номер...")
+                    // let Telegram drop the pending code request too (only a normal sentCode carries a hash)
+                    (sent as? TLRPC.TL_auth_sentCode)?.let { sc ->
+                        cm.sendSuspend(TLRPC.TL_auth_cancelCode().apply {
+                            phone_number = digits
+                            phone_code_hash = sc.phone_code_hash
+                        }, flags, ConnectionsManager.DEFAULT_DATACENTER_ID, "cancelCode", 15_000)
                     }
-                    log("[Поток $threadId] Telegram отправил код $reason вместо SMS. Номер отменяется, возврат средств и подбор нового...")
                     enqueueRefund(config, activationId, phone, orderedAt)
                     return false
                 }
+                val sentCode = sent as TLRPC.TL_auth_sentCode
+                var phoneCodeHash = sentCode.phone_code_hash
+                // the push token is used up only once Telegram really sends an SMS; for an e-mail first it is
+                // marked below when the SMS follows
+                tokenSpent = (kind == CodeKind.SMS)
 
                 if (sentCode.type is TLRPC.TL_auth_sentCodeTypeSms) {
                     log("[Поток $threadId] Telegram подтвердил отправку сотового SMS на номер +$digits! Ожидаем поступления SMS от сервиса...")
@@ -2176,6 +2390,7 @@ object GgtgRegistration {
                         enqueueRefund(config, activationId, phone, orderedAt)
                         return false
                     }
+                    stepDelay(threadId, "Пауза перед заказом почты", config)
                     log("[Поток $threadId] Запрос временной почты в сервисе...")
                     val emailOrder = orderEmail(config)
                     if (emailOrder.isFailure) {
@@ -2184,6 +2399,7 @@ object GgtgRegistration {
                         return false
                     }
                     val (mailId, email) = emailOrder.getOrThrow()
+                    stepDelay(threadId, "Пауза перед вводом почты в Telegram", config)
                     log("[Поток $threadId] Получена почта: $email (ID: $mailId). Отправка в Telegram...")
                     val sendVerifyReq = TL_account.sendVerifyEmailCode().apply {
                         this.purpose = TLRPC.TL_emailVerifyPurposeLoginSetup().apply {
@@ -2203,7 +2419,7 @@ object GgtgRegistration {
                     var emailCode: String? = null
                     val emailDeadline = System.currentTimeMillis() + 120_000L
                     while (System.currentTimeMillis() < emailDeadline && !cancelled.get()) {
-                        delay(3000)
+                        delay(jitter(3000))
                         val (st, code, _) = pollEmailCode(config, mailId)
                         if (st == "ok" && !code.isNullOrEmpty()) {
                             emailCode = code
@@ -2216,6 +2432,7 @@ object GgtgRegistration {
                         enqueueRefund(config, activationId, phone, orderedAt)
                         return false
                     }
+                    stepDelay(threadId, "Пауза перед вводом кода из почты", config)
                     log("[Поток $threadId] Код из почты получен: $emailCode. Верификация email в Telegram...")
                     val verifyReq = TL_account.verifyEmail().apply {
                         this.purpose = TLRPC.TL_emailVerifyPurposeLoginSetup().apply {
@@ -2237,31 +2454,16 @@ object GgtgRegistration {
 
                     if (verifyResp is TL_account.TL_emailVerifiedLogin) {
                         val loginSentCode = verifyResp.sent_code
-                        if (loginSentCode is TLRPC.TL_auth_sentCode) {
-                            phoneCodeHash = loginSentCode.phone_code_hash
-                            val loginIsSms = (loginSentCode.type is TLRPC.TL_auth_sentCodeTypeSms) ||
-                                             (loginSentCode.type is TLRPC.TL_auth_sentCodeTypeSmsWord) ||
-                                             (loginSentCode.type is TLRPC.TL_auth_sentCodeTypeSmsPhrase) ||
-                                             (loginSentCode.type is TLRPC.TL_auth_sentCodeTypeFirebaseSms)
-                            if (loginSentCode.type is TLRPC.TL_auth_sentCodeTypeApp) {
-                                addBadNumber(digits)
-                                log("[Поток $threadId] Telegram отправил код в приложение на других устройствах (номер уже кем-то используется). Номер отменяется, возврат средств и подбор нового...")
-                                enqueueRefund(config, activationId, phone, orderedAt)
-                                return false
-                            }
-                            if (!loginIsSms) {
-                                addBadNumber(digits)
-                                log("[Поток $threadId] Telegram отправил код не по SMS. Номер отменяется, возврат средств и подбор нового...")
-                                enqueueRefund(config, activationId, phone, orderedAt)
-                                return false
-                            }
-                            log("[Поток $threadId] Telegram подтвердил отправку SMS на номер +$digits! Ожидаем код от сервиса...")
-                        } else if (loginSentCode is TLRPC.TL_auth_sentCodePaymentRequired) {
-                            addBadNumber(digits)
-                            log("[Поток $threadId] Telegram требует платную отправку SMS / Premium для номера +$digits. Отмена, возврат средств.")
+                        val loginKind = classifyCode(loginSentCode)
+                        if (loginKind != CodeKind.SMS) {
+                            if (loginKind.badNumber) addBadNumber(digits)
+                            log("[Поток $threadId] После подтверждения почты Telegram ответил: ${loginKind.title}. Номер +$digits отменяется, токен остаётся в резерве, средства возвращаются.")
                             enqueueRefund(config, activationId, phone, orderedAt)
                             return false
                         }
+                        phoneCodeHash = (loginSentCode as TLRPC.TL_auth_sentCode).phone_code_hash
+                        tokenSpent = true
+                        log("[Поток $threadId] Telegram подтвердил отправку SMS на номер +$digits! Ожидаем код от сервиса...")
                     }
                 }
 
@@ -2274,7 +2476,7 @@ object GgtgRegistration {
                 val deadline = System.currentTimeMillis() + config.smsWaitSeconds * 1000L
                 while (System.currentTimeMillis() < deadline && !cancelled.get()) {
                     if (!waitIfPausedOrNoNetwork()) break
-                    delay(3000)
+                    delay(jitter(3000))
                     val (st, code, pollErr) = pollSmsCode(config, activationId)
                     if (st == "ok" && !code.isNullOrEmpty()) {
                         smsCode = code
@@ -2286,6 +2488,7 @@ object GgtgRegistration {
                 }
 
                 if (cancelled.get() || smsCode == null) {
+                    GgtgRegStats.record(config.countryId, config.smsOperator, "sms_timeout")
                     log("[Поток $threadId] SMS не пришло за ${config.smsWaitSeconds} сек. Автоматический возврат средств...")
                     enqueueRefund(config, activationId, phone, orderedAt)
                     return false
@@ -2395,11 +2598,18 @@ object GgtgRegistration {
                 } else {
                     generateStrongPassword(18)
                 }
+                if (signedUpNow) GgtgIdDate.calibrate(user.id, System.currentTimeMillis() / 1000L)
                 if (final2fa.isNotEmpty()) {
-                    UserConfig.getInstance(slot).ncgTwoFactor = final2fa
-                    GgtgTwoFaStore.save(user.id, final2fa)
-                    if (signedUpNow) GgtgIdDate.calibrate(user.id, System.currentTimeMillis() / 1000L)
-                    log("[Поток $threadId] Пароль 2FA установлен: $final2fa (сохранён в хранилище приложения)")
+                    // the password is set on Telegram first and remembered only when that worked: a stored
+                    // password the account does not have would break every later login / export
+                    val setRes = GgtgCloudPassword.set(slot, final2fa)
+                    if (setRes.isSuccess) {
+                        UserConfig.getInstance(slot).ncgTwoFactor = final2fa
+                        GgtgTwoFaStore.save(user.id, final2fa)
+                        log("[Поток $threadId] Пароль 2FA установлен в Telegram: $final2fa (сохранён в хранилище приложения)")
+                    } else {
+                        log("[Поток $threadId] ВНИМАНИЕ: пароль 2FA в Telegram НЕ установлен (${setRes.exceptionOrNull()?.message}). Аккаунт остаётся без пароля; задайте его вручную.")
+                    }
                 }
 
                 // 12. Folder Tag
@@ -2461,14 +2671,20 @@ object GgtgRegistration {
                     return false
                 }
 
+                registeredOk = true
+                GgtgRegStats.record(config.countryId, config.smsOperator, "ok")
                 // 17. Proxy consumed only upon confirmed successful registration
                 if (proxyEntry != null && config.proxyListName.isNotEmpty()) {
                     GgtgProxyPoolStore.removeEntry(config.proxyListName, proxyEntry.host, proxyEntry.port)
                     log("[Поток $threadId] Прокси ${proxyEntry.host}:${proxyEntry.port} закреплён за аккаунтом и удалён из пула.")
                 }
 
-                // Make the account directly available and active in Android without any desktop duplication
+                // by the scheme the working session is a Desktop one, the Android session a spare
+                val liveSlot = try { promoteToDesktop(slot) { log("[Поток $threadId] $it") } } catch (t: Throwable) { null } ?: slot
+
+                // Make the account directly available and active in Android
                 AndroidUtilities.runOnUIThread {
+                    val slot = liveSlot
                     val users = ArrayList<TLRPC.User>()
                     users.add(user)
                     MessagesStorage.getInstance(slot).putUsersAndChats(users, null, true, true)
@@ -2482,7 +2698,7 @@ object GgtgRegistration {
                     NotificationCenter.getInstance(slot).postNotificationName(NotificationCenter.dialogsNeedReload)
                 }
 
-                log("[Поток $threadId] Аккаунт +$phone (${user.first_name}) готов к использованию в приложении Android (слот #$slot)!")
+                log("[Поток $threadId] Аккаунт +$phone (${user.first_name}) готов к использованию в приложении (слот #$liveSlot)!")
                 return true
 
             } catch (t: Throwable) {
@@ -2495,7 +2711,7 @@ object GgtgRegistration {
                     log("[Поток $threadId] Неиспользованный токен сохранён в резерв (в резерве: ${tokenReserve.size})")
                 }
                 // Cancel SMS if failed to refund
-                if (activationId != null && !UserConfig.getInstance(slot).isClientActivated) {
+                if (activationId != null && !registeredOk && !UserConfig.getInstance(slot).isClientActivated) {
                     val ordered = orderTimestamps[activationId] ?: System.currentTimeMillis()
                     enqueueRefund(config, activationId, phone ?: "", ordered)
                 }
@@ -2583,6 +2799,11 @@ object GgtgRegistration {
                         isBusy.set(false)
                         return@launch
                     }
+                    if (config.proxyListName.isBlank() || GgtgProxyPoolStore.getListEntries(config.proxyListName).isEmpty()) {
+                        status("Выберите список прокси: номер никогда не запрашивается с адреса этого телефона", isError = true)
+                        isBusy.set(false)
+                        return@launch
+                    }
                     currentPhone = digits
                     currentConfig = config
                     currentPhoneCodeHash = ""
@@ -2664,6 +2885,7 @@ object GgtgRegistration {
                     val flags = ConnectionsManager.RequestFlagWithoutLogin or ConnectionsManager.RequestFlagFailOnServerErrors or
                         ConnectionsManager.RequestFlagTryDifferentDc or ConnectionsManager.RequestFlagEnableUnauthorized
 
+                    delay(jitter(3000)) // a person does not ask for the code the instant the number is typed
                     status("Отправка запроса кода в Telegram...")
                     log("Отправка запроса MTPauth_SendCode в Telegram для +$digits...")
 
@@ -2721,7 +2943,7 @@ object GgtgRegistration {
                             }
                             log("Токен reCAPTCHA получен! Отправка решения...")
                             captchaToken = capToken
-                            delay(1000)
+                            delay(jitter(1000))
                             continue
                         }
                         break
@@ -2735,43 +2957,36 @@ object GgtgRegistration {
                         return@launch
                     }
 
-                    if (sent is TLRPC.TL_auth_sentCodePaymentRequired) {
-                        log("Telegram требует платную отправку SMS / Premium для номера +$digits.")
-                        status("Telegram требует Premium для отправки SMS", isError = true)
-                        cancel()
+                    val kind = classifyCode(sent)
+                    if (kind != CodeKind.SMS && kind != CodeKind.EMAIL_SETUP) {
+                        if (kind.badNumber) addBadNumber(digits)
+                        log("Telegram ответил: ${kind.title}. Номер +$digits не подходит.")
+                        (sent as? TLRPC.TL_auth_sentCode)?.let { sc ->
+                            cm.sendSuspend(TLRPC.TL_auth_cancelCode().apply {
+                                phone_number = digits
+                                phone_code_hash = sc.phone_code_hash
+                            }, flags, ConnectionsManager.DEFAULT_DATACENTER_ID, "cancelCode", 15_000)
+                        }
+                        cancel("Telegram ответил: ${kind.title}. Введите другой номер.")
                         return@launch
                     }
-
-                    val sentCode = sent as? TLRPC.TL_auth_sentCode ?: run {
-                        val name = sent?.javaClass?.simpleName ?: "null"
-                        log("Неизвестный ответ Telegram на sendCode ($name)")
-                        status("Неизвестный ответ Telegram", isError = true)
-                        cancel()
-                        return@launch
-                    }
-
+                    val sentCode = sent as TLRPC.TL_auth_sentCode
                     currentPhoneCodeHash = sentCode.phone_code_hash
-                    val codeType = sentCode.type
-                    when (codeType) {
-                        is TLRPC.TL_auth_sentCodeTypeApp -> {
-                            addBadNumber(digits)
-                            log("Telegram отправил код в приложение на других устройствах (номер уже кем-то используется). Номер отклонён.")
-                            cancel("Telegram отправил код в приложение (номер занят). Введите другой номер.")
+                    if (kind == CodeKind.EMAIL_SETUP) {
+                        log("Telegram требует привязать почту: покупаю и подтверждаю...")
+                        status("Telegram требует почту: покупка и подтверждение...")
+                        val (newHash, why) = setUpLoginEmail(config, cm, flags, digits, currentPhoneCodeHash) { log(it) }
+                        if (newHash == null) {
+                            log("Почта не подошла: $why")
+                            cancel("Не удалось пройти требование почты: $why")
                             return@launch
                         }
-                        is TLRPC.TL_auth_sentCodeTypeSms -> {
-                            log("Telegram подтвердил отправку сотового SMS на номер +$digits (длина кода: ${codeType.length} цифр)! Ожидаем ввод SMS...")
-                            status("SMS отправлено на номер +$digits! Введите код.")
-                        }
-                        is TLRPC.TL_auth_sentCodeTypeFirebaseSms -> {
-                            log("Telegram подтвердил отправку SMS через Push Notifications на номер +$digits! Введите полученный код.")
-                            status("SMS отправлено! Введите полученный код.")
-                        }
-                        else -> {
-                            log("Telegram подтвердил запрос кода на номер +$digits! Введите полученный код.")
-                            status("Код отправлен! Введите полученный код.")
-                        }
+                        currentPhoneCodeHash = newHash
                     }
+                    // Telegram has dispatched the SMS: the push token is used up
+                    tokenSpent = true
+                    log("Telegram подтвердил отправку SMS на номер +$digits! Ожидаем ввод кода...")
+                    status("SMS отправлено на номер +$digits! Введите код.")
                     isBusy.set(false)
                     AndroidUtilities.runOnUIThread { onStateChanged?.invoke(false, true) }
 
@@ -2871,11 +3086,17 @@ object GgtgRegistration {
 
                     // 2FA setup
                     val final2fa = twoFactorPassword.trim()
-                    if (final2fa.isNotEmpty()) {
-                        UserConfig.getInstance(slot).ncgTwoFactor = final2fa
-                        GgtgTwoFaStore.save(user.id, final2fa)
                     if (signedUpNow) GgtgIdDate.calibrate(user.id, System.currentTimeMillis() / 1000L)
-                        log("Пароль 2FA установлен: $final2fa")
+                    if (final2fa.isNotEmpty()) {
+                        // set on Telegram first, remembered only when that worked
+                        val setRes = GgtgCloudPassword.set(slot, final2fa)
+                        if (setRes.isSuccess) {
+                            UserConfig.getInstance(slot).ncgTwoFactor = final2fa
+                            GgtgTwoFaStore.save(user.id, final2fa)
+                            log("Пароль 2FA установлен в Telegram: $final2fa")
+                        } else {
+                            log("ВНИМАНИЕ: пароль 2FA в Telegram НЕ установлен (${setRes.exceptionOrNull()?.message}). Задайте его вручную.")
+                        }
                     }
 
                     val cfg = currentConfig

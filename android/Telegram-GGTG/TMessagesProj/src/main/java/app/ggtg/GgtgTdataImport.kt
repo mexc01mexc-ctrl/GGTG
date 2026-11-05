@@ -458,7 +458,7 @@ object TdataImportHelper {
     }
 
     /** Installs the tdata auth keys straight into [targetSlot] - no new login, no code, no e-mail. */
-    private suspend fun installDesktopKey(account: TdataAccount, targetSlot: Int, proxy: GgtgProxyBits, device: org.json.JSONObject? = null): Result<Long> = runCatching {
+    internal suspend fun installDesktopKey(account: TdataAccount, targetSlot: Int, proxy: GgtgProxyBits, device: org.json.JSONObject? = null): Result<Long> = runCatching {
         if (proxy.address.isNotEmpty()) {
             ConnectionsManager.setProxySettingsForAccount(targetSlot, true, proxy.address, proxy.port, proxy.username, proxy.password, proxy.secret)
         } else {

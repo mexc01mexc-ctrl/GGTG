@@ -931,7 +931,7 @@ object GgtgSessions {
             val orderedAt = System.currentTimeMillis()
 
             // 1. Human delay: simulate checking number before requesting SMS
-            val prepDelay = kotlin.random.Random.nextLong(2500, 4000)
+            val prepDelay = GgtgRegistration.jitter(3200)
             onProgress("Номер получен: +$newPhone. Подготовка запроса к Telegram (пауза ${prepDelay / 1000}с)...")
             delay(prepDelay)
 
@@ -971,7 +971,7 @@ object GgtgSessions {
                 }
 
                 sendErrorText = null
-                val result = suspendCancellableCoroutine<TLRPC.TL_auth_sentCode?> { cont ->
+                val result = kotlinx.coroutines.withTimeoutOrNull(30_000L) { suspendCancellableCoroutine<TLRPC.TL_auth_sentCode?> { cont ->
                     cm.sendRequest(reqObject) { resp, err ->
                         if (err != null) {
                             sendErrorText = err.text
@@ -985,7 +985,8 @@ object GgtgSessions {
                             cont.resume(null)
                         }
                     }
-                }
+                } }
+                if (result == null && sendErrorText.isNullOrEmpty()) sendErrorText = "TIMEOUT (Telegram не ответил за 30 с: проверьте прокси)"
 
                 if (result != null) {
                     sentCode = result
@@ -1059,30 +1060,28 @@ object GgtgSessions {
 
             val phoneCodeHash = sentCode.phone_code_hash
             val codeType = sentCode.type
-            val isSms = (codeType is TLRPC.TL_auth_sentCodeTypeSms) ||
-                        (codeType is TLRPC.TL_auth_sentCodeTypeSmsWord) ||
-                        (codeType is TLRPC.TL_auth_sentCodeTypeSmsPhrase) ||
-                        (codeType is TLRPC.TL_auth_sentCodeTypeFirebaseSms)
+            val kind = GgtgRegistration.classifyCode(sentCode)
 
-            if (!isSms) {
-                GgtgRegistration.addBadNumber(newPhone)
-                val reason = when (codeType) {
-                    is TLRPC.TL_auth_sentCodeTypeApp -> "в приложение на других устройствах (номер уже кем-то используется)"
-                    is TLRPC.TL_auth_sentCodeTypeCall, is TLRPC.TL_auth_sentCodeTypeMissedCall, is TLRPC.TL_auth_sentCodeTypeFlashCall -> "звонком (виртуальные номера не принимают звонки)"
-                    else -> "не по SMS"
-                }
+            if (kind != GgtgRegistration.CodeKind.SMS) {
+                if (kind.badNumber) GgtgRegistration.addBadNumber(newPhone)
+                val reason = kind.title
+                // let Telegram drop the pending request too
+                cm.sendRequest(TLRPC.TL_auth_cancelCode().apply {
+                    phone_number = newPhone
+                    this.phone_code_hash = phoneCodeHash
+                }) { _, _ -> }
                 if (mobileToken.isNotEmpty()) {
                     GgtgRegistration.reserveToken(mobileToken)
                     mobileToken = ""
                 }
                 GgtgRegistration.enqueueRefund(config, activationId, newPhone, orderedAt)
                 if (attempt < maxAttempts) {
-                    val retryPause = kotlin.random.Random.nextLong(4000, 6000)
-                    onProgress("Telegram отправил код $reason вместо SMS. Отмена номера, возврат средств и подбор нового (попытка ${attempt + 1} из $maxAttempts, пауза ${retryPause / 1000}с)...")
+                    val retryPause = GgtgRegistration.jitter(5000)
+                    onProgress("Telegram ответил: $reason. Номер отменён, токен в резерве, средства возвращены. Подбираю другой (попытка ${attempt + 1} из $maxAttempts, пауза ${retryPause / 1000}с)...")
                     delay(retryPause)
                     continue
                 }
-                return Result.failure(Exception("Telegram не отправляет SMS на выданные номера (отправляет $reason). Средства возвращены на баланс сервиса. Попробуйте позже."))
+                return Result.failure(Exception("Telegram не отправляет SMS на выданные номера ($reason). Средства возвращены на баланс сервиса. Попробуйте позже."))
             }
 
             val codeDesc = when (codeType) {
@@ -1093,8 +1092,9 @@ object GgtgSessions {
             onProgress("$codeDesc Ожидание SMS-кода...")
 
             var smsCode: String? = null
-            for (i in 1..70) {
-                delay(3000)
+            val maxPolls = (config.smsWaitSeconds / 3).coerceIn(20, 600)
+            for (i in 1..maxPolls) {
+                delay(GgtgRegistration.jitter(3000))
                 onProgress("Ожидание SMS-кода (+${newPhone}, ${i * 3}с)...")
                 val (status, code, _) = GgtgRegistration.pollSmsCode(config, activationId)
                 if (status == "ok" && !code.isNullOrEmpty()) {
@@ -1121,7 +1121,7 @@ object GgtgSessions {
             }
 
             // 2. Human delay: simulate reading SMS and entering code
-            val enterDelay = kotlin.random.Random.nextLong(2000, 3500)
+            val enterDelay = GgtgRegistration.jitter(2800)
             onProgress("SMS код $smsCode получен. Ввод кода (пауза ${enterDelay / 1000}с)...")
             delay(enterDelay)
 
@@ -1132,7 +1132,7 @@ object GgtgSessions {
             }
 
             var changeErrorText: String? = null
-            val changeUser = suspendCancellableCoroutine<TLRPC.User?> { cont ->
+            val changeUser = kotlinx.coroutines.withTimeoutOrNull(30_000L) { suspendCancellableCoroutine<TLRPC.User?> { cont ->
                 cm.sendRequest(changeReq) { resp, err ->
                     if (err != null) {
                         changeErrorText = err.text
@@ -1143,7 +1143,8 @@ object GgtgSessions {
                         cont.resume(null)
                     }
                 }
-            }
+            } }
+            if (changeUser == null && changeErrorText.isNullOrEmpty()) changeErrorText = "TIMEOUT (Telegram не ответил за 30 с)"
 
             if (changeUser == null) {
                 if (mobileToken.isNotEmpty()) {
