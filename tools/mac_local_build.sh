@@ -58,6 +58,24 @@ if ! tools_ok; then
   rm -f "$OUT"/*.rcc
 fi
 
+# --- 1c. The shader compiler. The prebuilt deps carry a stub `qsb` that only creates EMPTY .qsb files: the app then
+# starts, but everything drawn with those shaders (the media viewer, round video, premium effects) is blank and the log
+# is full of "RHI Shader Error: Failed to deserialize :/shaders/*.qsb". The real qsb comes with Qt's qtshadertools module.
+if [ "$(stat -f%z "$QT/bin/qsb" 2>/dev/null || echo 0)" -lt 1000 ] && ! grep -q "$QTHOST" "$QT/bin/qsb" 2>/dev/null; then
+  echo "=== qsb: ставим настоящий компилятор шейдеров (в deps лежит заглушка) ==="
+  if [ ! -x "$QTHOST/bin/qsb" ]; then
+    python3 -m pip install --user aqtinstall
+    python3 -m aqt install-qt mac desktop 6.11.2 clang_64 -m qtshadertools --archives qtbase -O "${GGTG_QT_HOST:-$HOME/.ggtg-qt-host}"
+  fi
+  [ -x "$QTHOST/bin/qsb" ] || { echo "Не удалось поставить qsb ($QTHOST/bin/qsb)" >&2; exit 1; }
+  rm -f "$QT/bin/qsb"
+  printf '#!/bin/sh\nexec "%s" "$@"\n' "$QTHOST/bin/qsb" > "$QT/bin/qsb"
+  chmod +x "$QT/bin/qsb"
+  # shaders compiled by the stub are empty: compile them again, and the packs that hold them
+  find "$OUT" -name "*.qsb" -size 0 -delete 2>/dev/null
+  rm -f "$OUT"/*.rcc
+fi
+
 # --- 2. The project files hold absolute paths of the machine they were generated on (see the CI):
 # make them resolve here.
 LINK=/Users/macbookair/Desktop/GGTG
