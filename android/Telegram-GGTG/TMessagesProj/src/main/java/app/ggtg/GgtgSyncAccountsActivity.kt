@@ -312,7 +312,7 @@ class GgtgSyncAccountsActivity : BaseFragment() {
         // ggtg: other sessions may be waiting in the queue (for another phone, or left over from earlier runs):
         // only a pack that holds THIS account is taken, the others are left where they are
         var remote: GgtgSyncTransport.Remote? = null
-        val rejected = HashSet<Long>()
+        val rejected = HashSet<Int>()
         val file = java.io.File(org.telegram.messenger.ApplicationLoader.applicationContext.cacheDir, "ggtg_sync_mint.ggtg")
         val until = System.currentTimeMillis() + 180_000
         while (System.currentTimeMillis() < until && remote == null) {
