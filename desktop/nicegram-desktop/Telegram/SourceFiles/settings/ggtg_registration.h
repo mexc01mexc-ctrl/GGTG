@@ -3244,6 +3244,20 @@ public:
 		}
 		_sendCodeRequestId = 0;
 		_resendRequestId = 0;
+		// ggtg: tell Telegram the code is no longer wanted (auth.cancelCode): it stops sending / re-sending it
+		// and drops the pending login for this number. Best effort - the connection may already be gone.
+		if (!_phoneCodeHash.isEmpty() && !_phone.isEmpty() && _pendingAccount) {
+			const auto cancelSender = std::make_shared<MTP::Sender>(&_pendingAccount->mtp());
+			cancelSender->request(MTPauth_CancelCode(
+				MTP_string(_phone),
+				MTP_bytes(_phoneCodeHash)
+			)).done([cancelSender, phone = _phone](const MTPBool &) {
+				Core::GgtgLog::Info(u"Регистрация"_q, u"Telegram принял auth.cancelCode для +"_q + phone + u": код отменён"_q);
+			}).fail([cancelSender, phone = _phone](const MTP::Error &error) {
+				Core::GgtgLog::Info(u"Регистрация"_q, u"auth.cancelCode для +"_q + phone + u": "_q + error.type());
+			}).send();
+			log(u"Отправлен auth.cancelCode: Telegram отменяет код для +"_q + _phone);
+		}
 		_sender.reset();
 		_sendCode = nullptr;
 		reserveUnusedToken();
