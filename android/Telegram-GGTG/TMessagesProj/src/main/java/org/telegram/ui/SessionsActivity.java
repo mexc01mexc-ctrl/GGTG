@@ -141,6 +141,12 @@ public class SessionsActivity extends BaseFragment implements NotificationCenter
     private int storedSessionsStartRow = -1;
     private int storedSessionsEndRow = -1;
     private int storedSessionsDetailRow = -1;
+    // ggtg: sessions held by the other device, from the sync (read-only; only the note is editable)
+    private ArrayList<app.ggtg.GgtgSessionCatalog.Record> remoteSessions = new ArrayList<>();
+    private int remoteSessionsSectionRow = -1;
+    private int remoteSessionsStartRow = -1;
+    private int remoteSessionsEndRow = -1;
+    private int remoteSessionsDetailRow = -1;
 
     private int repeatLoad = 0;
 
@@ -266,6 +272,12 @@ public class SessionsActivity extends BaseFragment implements NotificationCenter
                 final int index = position - storedSessionsStartRow;
                 if (index >= 0 && index < unmatchedStoredSessions.size()) {
                     showStoredSessionDialog(unmatchedStoredSessions.get(index));
+                }
+                return;
+            } else if (position >= remoteSessionsStartRow && position < remoteSessionsEndRow) {
+                final int index = position - remoteSessionsStartRow;
+                if (index >= 0 && index < remoteSessions.size()) {
+                    showRemoteSessionNote(remoteSessions.get(index));
                 }
                 return;
             } else if (position == ttlRow) {
@@ -725,6 +737,29 @@ public class SessionsActivity extends BaseFragment implements NotificationCenter
         showDialog(builder.create());
     }
 
+    // ggtg: the note of a session held by the other device; the edit goes back to it through the sync
+    private void showRemoteSessionNote(final app.ggtg.GgtgSessionCatalog.Record r) {
+        if (getParentActivity() == null) return;
+        final android.widget.EditText input = new android.widget.EditText(getContext());
+        input.setHint("Например: Телефон мастера, Рассылка #1");
+        input.setText(r.getNote());
+        if (r.getNote().length() > 0) input.setSelection(r.getNote().length());
+        int pad = AndroidUtilities.dp(20);
+        FrameLayout container = new FrameLayout(getContext());
+        container.setPadding(pad, AndroidUtilities.dp(10), pad, AndroidUtilities.dp(10));
+        container.addView(input);
+        AlertDialog.Builder bld = new AlertDialog.Builder(getParentActivity());
+        bld.setTitle("Подпись сессии");
+        bld.setMessage(app.ggtg.GgtgSessionCatalog.INSTANCE.label(r) + "\n\nКлюч на другом устройстве: можно изменить только подпись.");
+        bld.setView(container);
+        bld.setPositiveButton("Сохранить", (d, w) -> {
+            app.ggtg.GgtgSessionCatalog.INSTANCE.editNote(r.getHolderId(), r.getId(), input.getText().toString().trim());
+            loadSessions(false);
+        });
+        bld.setNegativeButton(LocaleController.getString(R.string.Cancel), null);
+        showDialog(bld.create());
+    }
+
     private void receiveFromDesktop() {
         if (getParentActivity() == null) return;
         if (app.ggtg.GgtgSyncTransport.INSTANCE.mainSlot() == null || app.ggtg.GgtgSync.INSTANCE.loadSettings().getPassphrase().isEmpty()) {
@@ -939,6 +974,11 @@ public class SessionsActivity extends BaseFragment implements NotificationCenter
         storedSessionsStartRow = -1;
         storedSessionsEndRow = -1;
         storedSessionsDetailRow = -1;
+        remoteSessions.clear();
+        remoteSessionsSectionRow = -1;
+        remoteSessionsStartRow = -1;
+        remoteSessionsEndRow = -1;
+        remoteSessionsDetailRow = -1;
         syncFromDesktopRow = -1;
 
         if (currentType == 0 && getMessagesController().qrLoginCamera) {
@@ -1038,6 +1078,31 @@ public class SessionsActivity extends BaseFragment implements NotificationCenter
         }
 
         if (currentType == 0) {
+            long remoteUser = UserConfig.getInstance(currentAccount).getClientUserId();
+            if (remoteUser != 0) {
+                for (app.ggtg.GgtgSessionCatalog.Record r : app.ggtg.GgtgSessionCatalog.INSTANCE.forUser(remoteUser)) {
+                    boolean shown = false;
+                    if (r.getHash() != 0) {
+                        for (TLObject obj : sessions) {
+                            if (obj instanceof TLRPC.TL_authorization && ((TLRPC.TL_authorization) obj).hash == r.getHash()) {
+                                shown = true;
+                                break;
+                            }
+                        }
+                    }
+                    if (!shown) remoteSessions.add(r);
+                }
+            }
+        }
+        if (!remoteSessions.isEmpty()) {
+            remoteSessionsSectionRow = rowCount++;
+            remoteSessionsStartRow = rowCount;
+            rowCount += remoteSessions.size();
+            remoteSessionsEndRow = rowCount;
+            remoteSessionsDetailRow = rowCount++;
+        }
+
+        if (currentType == 0) {
             syncFromDesktopRow = rowCount++;
         }
 
@@ -1067,7 +1132,7 @@ public class SessionsActivity extends BaseFragment implements NotificationCenter
         @Override
         public boolean isEnabled(RecyclerView.ViewHolder holder) {
             int position = holder.getAdapterPosition();
-            return position == syncFromDesktopRow || position == terminateAllSessionsRow || position >= otherSessionsStartRow && position < otherSessionsEndRow || position >= botSessionsStartRow && position < botSessionsEndRow || position >= passwordSessionsStartRow && position < passwordSessionsEndRow || position == currentSessionRow || position == ttlRow || (position >= storedSessionsStartRow && position < storedSessionsEndRow);
+            return position == syncFromDesktopRow || position == terminateAllSessionsRow || position >= otherSessionsStartRow && position < otherSessionsEndRow || position >= botSessionsStartRow && position < botSessionsEndRow || position >= passwordSessionsStartRow && position < passwordSessionsEndRow || position == currentSessionRow || position == ttlRow || (position >= storedSessionsStartRow && position < storedSessionsEndRow) || (position >= remoteSessionsStartRow && position < remoteSessionsEndRow);
         }
 
         @Override
@@ -1144,6 +1209,8 @@ public class SessionsActivity extends BaseFragment implements NotificationCenter
                         privacyCell.setText(getString(R.string.LoginAttemptsInfo));
                     } else if (position == storedSessionsDetailRow) {
                         privacyCell.setText("Сессии из локального хранилища аккаунта. Вы можете переключиться на любую из них или подписать её.");
+                    } else if (position == remoteSessionsDetailRow) {
+                        privacyCell.setText("Сессии, ключи которых лежат на другом устройстве (телефон или Desktop). Их можно только подписать: подпись уйдёт владельцу сессии.");
                     } else if (position == qrCodeDividerRow || position == ttlDivideRow || position == noOtherSessionsRow) {
                         privacyCell.setText("");
                         privacyCell.setFixedSize(12);
@@ -1165,6 +1232,8 @@ public class SessionsActivity extends BaseFragment implements NotificationCenter
                         headerCell.setText(getString(R.string.TerminateOldSessionHeader));
                     } else if (position == storedSessionsSectionRow) {
                         headerCell.setText("Сохранённые сессии (хранилище)");
+                    } else if (position == remoteSessionsSectionRow) {
+                        headerCell.setText("На других устройствах");
                     }
                     break;
                 case VIEW_TYPE_SCANQR:
@@ -1208,6 +1277,11 @@ public class SessionsActivity extends BaseFragment implements NotificationCenter
                         if (index >= 0 && index < unmatchedStoredSessions.size()) {
                             app.ggtg.GgtgSessions.StoredSession stored = unmatchedStoredSessions.get(index);
                             sessionCell.setStoredSession(stored, index != unmatchedStoredSessions.size() - 1);
+                        }
+                    } else if (position >= remoteSessionsStartRow && position < remoteSessionsEndRow) {
+                        final int index = position - remoteSessionsStartRow;
+                        if (index >= 0 && index < remoteSessions.size()) {
+                            sessionCell.setRemoteSession(remoteSessions.get(index), index != remoteSessions.size() - 1);
                         }
                     }
                     break;
@@ -1269,11 +1343,11 @@ public class SessionsActivity extends BaseFragment implements NotificationCenter
         public int getItemViewType(int position) {
             if (position == terminateAllSessionsRow) {
                 return VIEW_TYPE_TEXT;
-            } else if (position == terminateAllSessionsDetailRow || position == otherSessionsTerminateDetail || position == passwordSessionsDetailRow || position == qrCodeDividerRow || position == ttlDivideRow || position == noOtherSessionsRow || position == storedSessionsDetailRow) {
+            } else if (position == terminateAllSessionsDetailRow || position == otherSessionsTerminateDetail || position == passwordSessionsDetailRow || position == qrCodeDividerRow || position == ttlDivideRow || position == noOtherSessionsRow || position == storedSessionsDetailRow || position == remoteSessionsDetailRow) {
                 return VIEW_TYPE_INFO;
-            } else if (position == currentSessionSectionRow || position == otherSessionsSectionRow || position == passwordSessionsSectionRow || position == ttlHeaderRow || position == storedSessionsSectionRow) {
+            } else if (position == currentSessionSectionRow || position == otherSessionsSectionRow || position == passwordSessionsSectionRow || position == ttlHeaderRow || position == storedSessionsSectionRow || position == remoteSessionsSectionRow) {
                 return VIEW_TYPE_HEADER;
-            } else if (position == currentSessionRow || position >= otherSessionsStartRow && position < otherSessionsEndRow || position >= botSessionsStartRow && position < botSessionsEndRow || position >= passwordSessionsStartRow && position < passwordSessionsEndRow || (position >= storedSessionsStartRow && position < storedSessionsEndRow)) {
+            } else if (position == currentSessionRow || position >= otherSessionsStartRow && position < otherSessionsEndRow || position >= botSessionsStartRow && position < botSessionsEndRow || position >= passwordSessionsStartRow && position < passwordSessionsEndRow || (position >= storedSessionsStartRow && position < storedSessionsEndRow) || (position >= remoteSessionsStartRow && position < remoteSessionsEndRow)) {
                 return VIEW_TYPE_SESSION;
             } else if (position == qrCodeRow) {
                 return VIEW_TYPE_SCANQR;

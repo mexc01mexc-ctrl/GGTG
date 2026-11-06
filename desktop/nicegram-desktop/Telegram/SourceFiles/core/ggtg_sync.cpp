@@ -14,6 +14,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "core/ggtg_paths.h"
 #include "core/ggtg_chat_lists.h"
 #include "core/ggtg_sessions.h"
+#include "core/ggtg_session_catalog.h"
 #include "data/account_spam_status.h"
 #include "data/data_user.h"
 #include "data/scraped_members_db.h"
@@ -34,7 +35,10 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include <QtCore/QRandomGenerator>
 #include <QtCore/QSaveFile>
 
+#include <QtCore/QSysInfo>
+
 #include <map>
+#include <set>
 
 namespace Core::GgtgSync {
 namespace {
@@ -222,6 +226,98 @@ void SaveSettings(const Settings &settings) {
 		0);
 }
 
+namespace {
+
+[[nodiscard]] QString HostLabel() {
+	auto name = QSysInfo::machineHostName();
+	if (name.endsWith(u".local"_q)) {
+		name.chop(6);
+	}
+	return name;
+}
+
+// Every session this device knows, as records without keys (see core/ggtg_session_catalog.h).
+[[nodiscard]] std::vector<Core::GgtgSessionCatalog::Record> SessionRecords(
+		const Settings &settings) {
+	namespace Sessions = Core::GgtgSessions;
+	namespace Catalog = Core::GgtgSessionCatalog;
+	auto result = std::vector<Catalog::Record>();
+	const auto host = HostLabel();
+	const auto quarantine = Sessions::LoadQuarantine();
+	const auto now = QDateTime::currentSecsSinceEpoch();
+	auto userHasCurrent = std::set<QString>();
+	for (const auto &item : Sessions::LoadVault()) {
+		if (item.userId.isEmpty()) {
+			continue;
+		}
+		auto r = Catalog::Record();
+		r.id = item.id;
+		r.userId = item.userId;
+		r.phone = item.phone;
+		r.role = item.role;
+		r.note = item.note;
+		r.state = item.state;
+		r.platform = Sessions::Platform(item);
+		r.current = Sessions::IsCurrent(item);
+		r.held = Sessions::IsHeld(item);
+		r.createdAt = item.createdAt;
+		r.updatedAt = item.updatedAt;
+		r.hash = item.hash;
+		if (r.held) {
+			r.holderId = settings.deviceId;
+			r.holder = host;
+			r.holderKind = u"desktop"_q;
+			if (r.current) {
+				userHasCurrent.insert(item.userId);
+			}
+			const auto until = quarantine.value(item.userId).toObject()
+				.value("until").toString().toLongLong();
+			if (until > now && item.role == u"anti_theft_backup"_q) {
+				r.quarantineUntil = until;
+			}
+		}
+		result.push_back(std::move(r));
+	}
+	// The session each live account works on here has no vault entry: it is the born date plus a note.
+	for (const auto &account : Core::App().domain().orderedAccounts()) {
+		if (!Main::AccountIsLive(account)) {
+			continue;
+		}
+		const auto user = account->session().user();
+		const auto userId = QString::number(user->id.value);
+		if (userHasCurrent.contains(userId)) {
+			continue;
+		}
+		Sessions::NoteSessionBornIfNew(userId);
+		const auto born = Sessions::SessionBorn(userId);
+		const auto note = Sessions::SessionNote(userId);
+		auto r = Catalog::Record();
+		r.id = u"work-"_q + userId;
+		r.userId = userId;
+		r.phone = user->phone();
+		r.role = u"working"_q;
+		r.note = note.text;
+		r.state = u"ok"_q;
+		r.platform = u"desktop"_q;
+		r.current = true;
+		r.createdAt = born.at;
+		r.updatedAt = std::max(note.at, born.at);
+		r.holderId = settings.deviceId;
+		r.holder = host;
+		r.holderKind = u"desktop"_q;
+		result.push_back(std::move(r));
+	}
+	// Notes edited here about sessions of other devices go back to them.
+	for (auto r : Catalog::Load()) {
+		if (r.edited) {
+			result.push_back(std::move(r));
+		}
+	}
+	return result;
+}
+
+} // namespace
+
 Snapshot BuildSnapshot(const Settings &settings) {
 	auto bases = QJsonArray();
 	for (const auto &meta : Data::LoadScrapedGroupsIndex()) {
@@ -291,40 +387,15 @@ Snapshot BuildSnapshot(const Settings &settings) {
 		body.insert("proxy_pools", poolDoc.array());
 	}
 
-	auto sessionNotes = QJsonArray();
-	for (const auto &item : Core::GgtgSessions::LoadVault()) {
-		if (item.userId.isEmpty() && item.phone.isEmpty()) {
-			continue;
+	// Sessions without their keys: this device's own, and the notes edited here about other devices'.
+	{
+		auto records = QJsonArray();
+		for (const auto &r : SessionRecords(settings)) {
+			records.append(Core::GgtgSessionCatalog::ToJson(r));
 		}
-		if (item.note.isEmpty() && item.role.isEmpty()) {
-			continue;
+		if (!records.isEmpty()) {
+			body.insert("sessions", records);
 		}
-		auto obj = QJsonObject{
-			{ "id", item.id },
-			{ "userId", item.userId },
-			{ "phone", item.phone },
-			{ "role", item.role },
-			{ "note", item.note },
-		};
-		if (item.createdAt > 0) {
-			obj["createdAt"] = double(item.createdAt);
-		}
-		if (const auto platform = Core::GgtgSessions::Platform(item); !platform.isEmpty()) {
-			obj["platform"] = platform;
-		}
-		if (Core::GgtgSessions::IsCurrent(item)) {
-			obj["current"] = true;
-		}
-		if (item.hash) {
-			obj["hash"] = QString::number(item.hash);
-		}
-		if (!item.device.isEmpty()) {
-			obj["device"] = item.device;
-		}
-		sessionNotes.append(obj);
-	}
-	if (!sessionNotes.isEmpty()) {
-		body.insert("session_notes", sessionNotes);
 	}
 	// numbers that already failed in a registration: the other device must not pay for them again
 	if (!Core::GgtgBadNumbers::Set().isEmpty()) {
@@ -352,6 +423,11 @@ Snapshot BuildSnapshot(const Settings &settings) {
 		}
 		if (account->trashed()) {
 			entry["trashed"] = true;
+		}
+		if (const auto q = Core::GgtgSessions::QuarantineOf(key); q.at) {
+			entry["quarantineUntil"] = QString::number(q.until);
+			entry["quarantineAt"] = QString::number(q.at);
+			entry["quarantineBefore"] = q.before;
 		}
 		if (account->alwaysOffline()) {
 			entry["offline"] = true;
@@ -565,54 +641,17 @@ MergeResult MergeSnapshot(const QByteArray &json) {
 		Core::GgtgBadNumbers::Merge(root["bad_numbers"].toArray());
 	}
 
-	// Merge session notes & roles across devices
-	if (root.contains("session_notes")) {
-		for (const auto &val : root["session_notes"].toArray()) {
-			const auto obj = val.toObject();
-			const auto remoteId = obj["id"].toString();
-			const auto uId = obj["userId"].toString();
-			const auto phone = obj["phone"].toString();
-			const auto note = obj["note"].toString();
-			const auto role = obj["role"].toString();
-			const auto remoteHash = obj["hash"].toString().toULongLong();
-			if (note.isEmpty() && role.isEmpty()) {
-				continue;
-			}
-			auto matched = false;
-			for (const auto &item : Core::GgtgSessions::LoadVault()) {
-				if ((!remoteId.isEmpty() && item.id == remoteId)
-					|| (remoteHash && item.hash && item.hash == remoteHash)
-					|| ((!uId.isEmpty() && item.userId == uId) || (!phone.isEmpty() && item.phone == phone))) {
-					matched = true;
-					if (!note.isEmpty() && (item.note.isEmpty() || item.note != note)) {
-						Core::GgtgSessions::UpdateStoredNote(item.id, note);
-					}
-					if (!role.isEmpty() && item.role.isEmpty()) {
-						Core::GgtgSessions::UpdateStoredRole(item.id, role);
-					}
-					if (remoteHash && !item.hash) {
-						Core::GgtgSessions::UpdateStoredHash(item.id, remoteHash);
-					}
-				}
-			}
-			if (!matched && !uId.isEmpty()) {
-				auto entry = Core::GgtgSessions::StoredSession();
-				entry.id = remoteId;
-				entry.userId = uId;
-				entry.phone = phone;
-				entry.role = role.isEmpty() ? u"stored"_q : role;
-				entry.platform = obj["platform"].toString();
-				entry.current = obj["current"].toBool();
-				entry.source = u"sync"_q;
-				entry.note = note;
-				entry.createdAt = qint64(obj["createdAt"].toDouble());
-				entry.hash = remoteHash;
-				if (obj.contains("device")) {
-					entry.device = obj["device"].toObject();
-				}
-				Core::GgtgSessions::AddStored(entry);
-			}
+	// Sessions: one record per session, newest write wins (see core/ggtg_session_catalog.h).
+	if (root.contains("sessions")) {
+		auto records = std::vector<Core::GgtgSessionCatalog::Record>();
+		for (const auto &val : root["sessions"].toArray()) {
+			records.push_back(
+				Core::GgtgSessionCatalog::FromJson(val.toObject()));
 		}
+		Core::GgtgSessionCatalog::Merge(
+			records,
+			root["device"].toString(),
+			LoadSettings().deviceId);
 	}
 
 	// Merge account statuses across devices
@@ -630,7 +669,33 @@ MergeResult MergeSnapshot(const QByteArray &json) {
 				continue;
 			}
 			const auto entry = statuses[key].toObject();
-			if (account->folderTag().isEmpty() && entry.contains("folder")) {
+			// Quarantine (the anti-theft timer) follows the account: the newer state wins.
+			namespace Sessions = Core::GgtgSessions;
+			const auto remoteQAt = entry["quarantineAt"].toString().toLongLong();
+			if (remoteQAt > Sessions::QuarantineOf(key).at) {
+				const auto until = entry["quarantineUntil"].toString().toLongLong();
+				const auto before = entry["quarantineBefore"].toString();
+				if (until > 0) {
+					const auto now = account->folderTag();
+					Sessions::SetQuarantine(
+						key,
+						until,
+						(now == Sessions::QuarantineFolder()) ? before : now,
+						remoteQAt);
+					if (now != Sessions::QuarantineFolder()) {
+						account->setFolderTag(Sessions::QuarantineFolder());
+					}
+				} else {
+					const auto mine = Sessions::QuarantineOf(key);
+					Sessions::SetQuarantine(key, 0, mine.before, remoteQAt);
+					if (account->folderTag() == Sessions::QuarantineFolder()) {
+						account->setFolderTag(mine.before);
+					}
+				}
+			}
+			if (account->folderTag().isEmpty()
+				&& entry.contains("folder")
+				&& entry["folder"].toString() != Sessions::QuarantineFolder()) {
 				const auto folder = entry["folder"].toString();
 				if (!folder.isEmpty()) {
 					account->setFolderTag(folder);

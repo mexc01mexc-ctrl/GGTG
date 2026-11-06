@@ -109,6 +109,7 @@ public class SessionBottomSheet extends BottomSheet {
         long clientUserId = UserConfig.getInstance(parentFragment.getCurrentAccount()).getClientUserId();
         app.ggtg.GgtgSessions.StoredSession stored = app.ggtg.GgtgSessions.findMatching(clientUserId, session.hash, session.device_model);
         stringBuilder.append(app.ggtg.GgtgSessions.formatSessionSuffix(stored, isCurrentSession || session.hash == 0));
+        stringBuilder.append(app.ggtg.GgtgSessions.syncSuffix(clientUserId, session.hash)); // ggtg:
         nameView.setText(stringBuilder);
         setAnimation(session, imageView);
 

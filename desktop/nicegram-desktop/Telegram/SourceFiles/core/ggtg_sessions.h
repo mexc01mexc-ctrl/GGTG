@@ -316,6 +316,9 @@ struct StoredSession {
 	bool current = false;
 	qint64 createdAt = 0;
 	qint64 checkedAt = 0;
+	// Last time the user (or a sync) changed the note, role or state: the sync keeps the newer copy
+	// (see core/ggtg_session_catalog.h). 0 = never changed since it was made.
+	qint64 updatedAt = 0;
 	quint64 hash = 0;
 	// What is needed to bring the account back with this session.
 	QString phone;
@@ -352,6 +355,7 @@ struct StoredSession {
 		{ "current", entry.current },
 		{ "createdAt", double(entry.createdAt) },
 		{ "checkedAt", double(entry.checkedAt) },
+		{ "updatedAt", double(entry.updatedAt) },
 		{ "hash", QString::number(entry.hash) },
 		{ "phone", entry.phone },
 		{ "name", entry.name },
@@ -375,6 +379,7 @@ struct StoredSession {
 	result.current = object["current"].toBool();
 	result.createdAt = qint64(object["createdAt"].toDouble());
 	result.checkedAt = qint64(object["checkedAt"].toDouble());
+	result.updatedAt = qint64(object["updatedAt"].toDouble());
 	result.hash = object["hash"].toString().toULongLong();
 	result.phone = object["phone"].toString();
 	result.name = object["name"].toString();
@@ -623,6 +628,7 @@ inline void UpdateStoredRole(
 		if (entry.id == id) {
 			if (!role.isEmpty()) entry.role = role;
 			if (!note.isEmpty()) entry.note = note;
+			entry.updatedAt = QDateTime::currentSecsSinceEpoch();
 		}
 	}
 	SaveVault(entries);
@@ -665,16 +671,112 @@ inline void SetSessionBorn(const QString &userId, qint64 at, bool made) {
 		return;
 	}
 	auto all = LoadBorn();
-	all.insert(userId, QJsonObject{
-		{ "at", QString::number(at) },
-		{ "made", made },
-	});
+	auto object = all.value(userId).toObject(); // keeps the working session's own note
+	object.insert("at", QString::number(at));
+	object.insert("made", made);
+	all.insert(userId, object);
 	QDir().mkpath(QFileInfo(BornPath()).absolutePath());
 	auto file = QSaveFile(BornPath());
 	if (file.open(QIODevice::WriteOnly)) {
 		file.write(QJsonDocument(all).toJson(QJsonDocument::Compact));
 		file.commit();
 	}
+}
+
+// The note of the working session itself (the one the account runs on here): it has no entry in the vault,
+// so it lives next to its birth date. Edited from this device or from the other one (through the sync).
+struct WorkingNote {
+	QString text;
+	qint64 at = 0;
+};
+
+[[nodiscard]] inline WorkingNote SessionNote(const QString &userId) {
+	const auto entry = LoadBorn().value(userId).toObject();
+	return {
+		.text = entry.value("note").toString(),
+		.at = entry.value("noteAt").toString().toLongLong(),
+	};
+}
+
+inline void SetSessionNote(
+		const QString &userId,
+		const QString &note,
+		qint64 at = 0) {
+	if (userId.isEmpty()) {
+		return;
+	}
+	auto all = LoadBorn();
+	auto object = all.value(userId).toObject();
+	object.insert("note", note);
+	object.insert(
+		"noteAt",
+		QString::number(at ? at : QDateTime::currentSecsSinceEpoch()));
+	all.insert(userId, object);
+	QDir().mkpath(QFileInfo(BornPath()).absolutePath());
+	auto file = QSaveFile(BornPath());
+	if (file.open(QIODevice::WriteOnly)) {
+		file.write(QJsonDocument(all).toJson(QJsonDocument::Compact));
+		file.commit();
+	}
+}
+
+// ---- Quarantine of an account (the anti-theft timer), kept per account so it can follow the account to
+// the other device. `at` is when the state last changed: the newer one wins when two devices disagree.
+struct QuarantineInfo {
+	qint64 until = 0; // 0 = not in quarantine
+	qint64 at = 0;
+	QString before; // the folder the account had before
+};
+
+[[nodiscard]] inline QString QuarantinePath() {
+	return Core::GgtgPaths::DbDir() + u"session_quarantine.json"_q;
+}
+
+[[nodiscard]] inline QJsonObject LoadQuarantine() {
+	auto file = QFile(QuarantinePath());
+	if (!file.open(QIODevice::ReadOnly)) {
+		return QJsonObject();
+	}
+	return QJsonDocument::fromJson(file.readAll()).object();
+}
+
+[[nodiscard]] inline QuarantineInfo QuarantineOf(const QString &userId) {
+	const auto entry = LoadQuarantine().value(userId).toObject();
+	return {
+		.until = entry.value("until").toString().toLongLong(),
+		.at = entry.value("at").toString().toLongLong(),
+		.before = entry.value("before").toString(),
+	};
+}
+
+inline void SetQuarantine(
+		const QString &userId,
+		qint64 until,
+		const QString &before,
+		qint64 at = 0) {
+	if (userId.isEmpty()) {
+		return;
+	}
+	auto all = LoadQuarantine();
+	all.insert(userId, QJsonObject{
+		{ "until", QString::number(until) },
+		{ "at", QString::number(at ? at : QDateTime::currentSecsSinceEpoch()) },
+		{ "before", before },
+	});
+	QDir().mkpath(QFileInfo(QuarantinePath()).absolutePath());
+	auto file = QSaveFile(QuarantinePath());
+	if (file.open(QIODevice::WriteOnly)) {
+		file.write(QJsonDocument(all).toJson(QJsonDocument::Compact));
+		file.commit();
+	}
+}
+
+// Does this device hold the session's key (or run on it)? A note-only entry (the key left with an export)
+// is not held.
+[[nodiscard]] inline bool IsHeld(const StoredSession &entry) {
+	return entry.current
+		|| entry.note == QString::fromUtf8(kActiveNote)
+		|| QFileInfo::exists(VaultFolder(entry) + u"/tdata"_q);
 }
 
 inline void NoteSessionBornIfNew(const QString &userId) {
@@ -728,6 +830,7 @@ inline void UpdateStoredNote(const QString &id, const QString &note) {
 	for (auto &entry : entries) {
 		if (entry.id == id) {
 			entry.note = note;
+			entry.updatedAt = QDateTime::currentSecsSinceEpoch();
 		}
 	}
 	SaveVault(entries);
@@ -752,6 +855,7 @@ inline void UpdateStoredState(const QString &id, const QString &state) {
 		if (entry.id == id) {
 			entry.state = state;
 			entry.checkedAt = QDateTime::currentSecsSinceEpoch();
+			entry.updatedAt = entry.checkedAt;
 		}
 	}
 	SaveVault(entries);

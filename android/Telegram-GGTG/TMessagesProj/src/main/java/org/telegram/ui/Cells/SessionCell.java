@@ -228,7 +228,7 @@ public class SessionCell extends FrameLayout {
                 }
             }
             boolean isCurrent = (session.hash == 0);
-            String suffix = app.ggtg.GgtgSessions.formatSessionSuffix(stored, isCurrent);
+            String suffix = app.ggtg.GgtgSessions.formatSessionSuffix(stored, isCurrent) + app.ggtg.GgtgSessions.syncSuffix(clientUserId, session.hash); // ggtg:
             stringBuilder.append(suffix);
             nameTextView.setText(stringBuilder);
 
@@ -348,6 +348,23 @@ public class SessionCell extends FrameLayout {
         detailTextView.setText("Хранилище сессий GGTG · " + dateStr);
         if (detailExTextView != null) {
             detailExTextView.setText(app.ggtg.GgtgSessions.roleTitle(stored.getRole()) + (stored.getNote().isEmpty() ? "" : (" · " + stored.getNote())));
+        }
+    }
+
+    // ggtg: a session whose key is on the other device (phone / Desktop): read-only row, from the sync
+    public void setRemoteSession(app.ggtg.GgtgSessionCatalog.Record r, boolean needDivider) {
+        showStub = false;
+        this.needDivider = needDivider;
+        setWillNotDraw(!needDivider);
+        String kind = "android".equals(r.getHolderKind()) ? "android" : "desktop";
+        imageView.setImageDrawable(createDrawable(42, kind));
+        nameTextView.setText(app.ggtg.GgtgSessionCatalog.INSTANCE.holderTitle(r));
+        setTag(Theme.key_windowBackgroundWhiteGrayText3);
+        onlineTextView.setText("Только просмотр");
+        onlineTextView.setTextColor(Theme.getColor(Theme.key_windowBackgroundWhiteGrayText3));
+        detailTextView.setText("Ключ на другом устройстве · аккаунт +" + r.getPhone());
+        if (detailExTextView != null) {
+            detailExTextView.setText(app.ggtg.GgtgSessionCatalog.INSTANCE.labelTail(r));
         }
     }
 

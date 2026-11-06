@@ -53,6 +53,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "settings/ggtg_export.h"
 #include "settings/ggtg_session_json.h"
 #include "core/ggtg_sessions.h"
+#include "core/ggtg_session_catalog.h"
 #include "core/ggtg_sync_transport.h"
 #include "settings/ggtg_registration.h"
 #include "main/main_domain.h"
@@ -1156,6 +1157,20 @@ void EnterAntiTheftQuarantine(
 			break;
 		}
 	}
+	{
+		// ggtg: remembered per account so the sync carries it to the other device
+		const auto userId = QString::number(account->session().userId().bare);
+		auto until = qint64(0);
+		for (const auto &entry : Sessions::LoadVault()) {
+			if (entry.id == spareId) {
+				until = entry.createdAt + Sessions::kAntiTheftTrustCooldown;
+			}
+		}
+		const auto before = (account->folderTag() == Sessions::QuarantineFolder())
+			? Sessions::QuarantineOf(userId).before
+			: account->folderTag();
+		Sessions::SetQuarantine(userId, until, before);
+	}
 	if (account->folderTag() != Sessions::QuarantineFolder()) {
 		account->setFolderTag(Sessions::QuarantineFolder());
 	}
@@ -1171,6 +1186,12 @@ void LeaveAntiTheftQuarantine(
 	if (account->folderTag() == Sessions::QuarantineFolder()
 		&& folderBefore != Sessions::QuarantineFolder()) {
 		account->setFolderTag(folderBefore);
+	}
+	if (Main::AccountIsLive(account)) {
+		Sessions::SetQuarantine(
+			QString::number(account->session().userId().bare),
+			0,
+			folderBefore);
 	}
 }
 
@@ -8663,7 +8684,8 @@ void AddSessionsSection(
 			.confirmText = u"Переключить"_q,
 		}));
 	};
-	const auto editNote = [=](const Core::GgtgSessions::StoredSession &stored) {
+	// ggtg: one note dialog for every kind of session (kept here, working, or held by the other device)
+	const auto askNote = [=](QString current, Fn<void(QString)> save) {
 		box->uiShow()->showBox(Box([=](not_null<Ui::GenericBox*> editBox) {
 			editBox->setTitle(rpl::single(u"Подпись сессии"_q));
 			editBox->addRow(
@@ -8678,11 +8700,10 @@ void AddSessionsSection(
 					editBox,
 					st::defaultInputField,
 					rpl::single(u"Подпись"_q),
-					stored.note),
+					current),
 				st::boxRowPadding);
 			editBox->addButton(tr::lng_settings_save(), [=] {
-				const auto text = field->getLastText().trimmed();
-				Core::GgtgSessions::UpdateStoredNote(stored.id, text);
+				save(field->getLastText().trimmed());
 				editBox->closeBox();
 				if (Main::AccountIsLive(account)) {
 					(*fillAgain)();
@@ -8690,6 +8711,22 @@ void AddSessionsSection(
 			});
 			editBox->addButton(tr::lng_cancel(), [=] { editBox->closeBox(); });
 		}));
+	};
+	const auto editNote = [=](const Core::GgtgSessions::StoredSession &stored) {
+		askNote(stored.note, [id = stored.id](QString text) {
+			Core::GgtgSessions::UpdateStoredNote(id, text);
+		});
+	};
+	const auto editWorkingNote = [=] {
+		const auto uid = QString::number(account->session().userId().bare);
+		askNote(Core::GgtgSessions::SessionNote(uid).text, [uid](QString text) {
+			Core::GgtgSessions::SetSessionNote(uid, text);
+		});
+	};
+	const auto editRemoteNote = [=](const Core::GgtgSessionCatalog::Record &r) {
+		askNote(r.note, [holder = r.holderId, id = r.id](QString text) {
+			Core::GgtgSessionCatalog::EditNote(holder, id, text);
+		});
 	};
 	const auto fill = [=](const Api::Authorizations::List &list) {
 		const Ggtg::ScrollKeeper keepScroll(wrap);
@@ -8711,6 +8748,7 @@ void AddSessionsSection(
 			return;
 		}
 		namespace Sessions = Core::GgtgSessions;
+		namespace Catalog = Core::GgtgSessionCatalog;
 		const auto userId = QString::number(account->session().userId().bare);
 		auto stored = Sessions::StoredForUser(Sessions::LoadVault(), userId);
 
@@ -8831,6 +8869,9 @@ void AddSessionsSection(
 						? ((born.made ? u" · создана "_q : u" · добавлена в программу "_q)
 							+ QDateTime::fromSecsSinceEpoch(born.at).toString(u"dd.MM.yyyy hh:mm"_q))
 						: QString())
+					+ (Sessions::SessionNote(userId).text.isEmpty()
+						? QString()
+						: (u" · "_q + Sessions::SessionNote(userId).text))
 					+ u")"_q;
 			} else if (spare) {
 				const auto notePart = (!spare->note.isEmpty())
@@ -8841,6 +8882,10 @@ void AddSessionsSection(
 					+ u" · "_q + QDateTime::fromSecsSinceEpoch(
 						spare->createdAt).toString(u"dd.MM.yyyy"_q)
 					+ u")"_q;
+			}
+			// ggtg: the other device knows this session too (by Telegram's number): who holds it
+			if (const auto remote = Catalog::ByHash(userId, entry.hash)) {
+				suffix += u" ["_q + Catalog::Label(*remote) + u"]"_q;
 			}
 			if (entry.incomplete) {
 				suffix += u" · не подтверждена"_q;
@@ -8874,7 +8919,9 @@ void AddSessionsSection(
 						}) : Fn<void()>(),
 						spare ? Fn<void()>([=] {
 							editNote(storedSpare);
-						}) : Fn<void()>());
+						}) : (entry.hash == 0
+							? Fn<void()>([=] { editWorkingNote(); })
+							: Fn<void()>()));
 				},
 				hash
 					? Fn<void()>([=] { terminate(hash, device); })
@@ -8959,6 +9006,46 @@ void AddSessionsSection(
 				[=] {
 					(*confirmSwitch)(stored);
 				}));
+		}
+		// ggtg: sessions held by the other device (phone / Desktop), read-only; only the note is editable and
+		// the edit goes back through the sync. Those already shown above (same Telegram number) are skipped.
+		{
+			auto remoteRows = std::vector<Catalog::Record>();
+			for (const auto &r : Catalog::ForUser(userId)) {
+				const auto shown = r.hash && ranges::any_of(list, [&](
+						const Api::Authorizations::Entry &entry) {
+					return entry.hash == r.hash;
+				});
+				if (!shown) {
+					remoteRows.push_back(r);
+				}
+			}
+			if (!remoteRows.empty()) {
+				Ui::AddSkip(wrap);
+				Ui::AddSubsectionTitle(
+					wrap,
+					rpl::single(u"На других устройствах (%1)"_q.arg(remoteRows.size())));
+				for (const auto &r : remoteRows) {
+					Api::Authorizations::Entry synth;
+					synth.name = Catalog::HolderTitle(r);
+					synth.location = r.state == u"revoked"_q
+						? u"Завершена в Telegram"_q
+						: u"Ключ на другом устройстве, только просмотр"_q;
+					synth.activeTime = static_cast<TimeId>(r.createdAt);
+					synth.active = r.createdAt
+						? QDateTime::fromSecsSinceEpoch(r.createdAt).toString(u"dd.MM.yyyy hh:mm"_q)
+						: QString();
+					wrap->add(MakeSessionRow(
+						wrap,
+						synth,
+						(Catalog::Label(r).size() > Catalog::HolderTitle(r).size() + 3)
+							? (u" ("_q + Catalog::Label(r).mid(Catalog::HolderTitle(r).size() + 3) + u")"_q)
+							: QString(),
+						[=] { editRemoteNote(r); },
+						Fn<void()>(),
+						Fn<void()>()));
+				}
+			}
 		}
 		wrap->add(
 			object_ptr<Ui::LinkButton>(

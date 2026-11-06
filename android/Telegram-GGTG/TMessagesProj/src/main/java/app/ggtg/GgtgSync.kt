@@ -240,26 +240,13 @@ object GgtgSync {
                 body.put("proxy_pools", JSONArray(poolsStr))
             }
         }
-        val sessionNotes = JSONArray()
-        for (s in GgtgSessions.listAll()) {
-            if (s.userId == 0L && s.phone.isEmpty()) continue
-            if (s.note.isEmpty() && s.role.isEmpty()) continue
-            val obj = JSONObject().apply {
-                put("id", s.id)
-                put("userId", s.userId.toString())
-                if (s.phone.isNotEmpty()) put("phone", s.phone)
-                if (s.role.isNotEmpty()) put("role", s.role)
-                GgtgSessions.platformOf(s).takeIf { it.isNotEmpty() }?.let { put("platform", it) }
-                if (GgtgSessions.isCurrent(s)) put("current", true)
-                if (s.note.isNotEmpty()) put("note", s.note)
-                if (s.createdAt > 0L) put("createdAt", s.createdAt)
-                if (s.hash != 0L) put("hash", s.hash.toString())
-                if (s.device != null) put("device", s.device)
-            }
-            sessionNotes.put(obj)
+        // sessions without their keys: this device's own, and the notes edited here about other devices'
+        val sessionRecords = JSONArray()
+        for (r in GgtgSessionCatalog.localRecords(settings.deviceId, android.os.Build.MODEL.orEmpty())) {
+            sessionRecords.put(GgtgSessionCatalog.toJson(r))
         }
-        if (sessionNotes.length() > 0) {
-            body.put("session_notes", sessionNotes)
+        if (sessionRecords.length() > 0) {
+            body.put("sessions", sessionRecords)
         }
         // numbers that already failed in a registration: the other device must not pay for them again
         GgtgRegistration.allBadNumbers().takeIf { it.isNotEmpty() }?.let { body.put("bad_numbers", org.json.JSONArray(it.toList())) }
@@ -291,6 +278,9 @@ object GgtgSync {
             uc.currentUser?.phone?.takeIf { it.isNotEmpty() }?.let { obj.put("phone", it) }
             if (uc.ncgFolder.isNotEmpty()) obj.put("folder", uc.ncgFolder)
             if (GgtgAccounts.isTrashed(slot)) obj.put("trashed", true)
+            GgtgSessions.quarantineOf(uId).let { (until, at, before) ->
+                if (at > 0L) { obj.put("quarantineUntil", until.toString()); obj.put("quarantineAt", at.toString()); obj.put("quarantineBefore", before) }
+            }
             if (uc.ncgOffline) obj.put("offline", true)
             val sent = runCatching { GgtgSms.sentToday(slot) }.getOrDefault(0)
             if (sent > 0) obj.put("sentToday", sent)
@@ -485,53 +475,10 @@ object GgtgSync {
             GgtgRegistration.mergeBadNumbers((0 until arr.length()).map { arr.optString(it) })
         }
 
-        // merge session notes & roles across devices
-        root.optJSONArray("session_notes")?.let { notesArr ->
-            val all = GgtgSessions.listAll()
-            for (i in 0 until notesArr.length()) {
-                val obj = notesArr.optJSONObject(i) ?: continue
-                val remoteId = obj.optString("id")
-                val uId = obj.optString("userId").toLongOrNull() ?: 0L
-                val phone = obj.optString("phone")
-                val note = obj.optString("note")
-                val role = obj.optString("role")
-                val remoteHash = obj.optString("hash").toLongOrNull() ?: 0L
-                if (note.isEmpty() && role.isEmpty()) continue
-                var matched = false
-                for (item in all) {
-                    if ((remoteId.isNotEmpty() && item.id == remoteId) ||
-                        (remoteHash != 0L && item.hash == remoteHash) ||
-                        ((uId != 0L && item.userId == uId) || (phone.isNotEmpty() && item.phone == phone))) {
-                        matched = true
-                        if (note.isNotEmpty() && (item.note.isEmpty() || item.note != note)) {
-                            GgtgSessions.updateNote(item.id, note)
-                        }
-                        if (role.isNotEmpty() && item.role.isEmpty()) {
-                            GgtgSessions.updateRole(item.id, role)
-                        }
-                        if (remoteHash != 0L && item.hash == 0L) {
-                            GgtgSessions.updateHash(item.id, remoteHash)
-                        }
-                    }
-                }
-                if (!matched && uId != 0L) {
-                    val entry = GgtgSessions.StoredSession(
-                        id = if (remoteId.isNotEmpty()) remoteId else "${System.currentTimeMillis()}_${(1000..9999).random()}",
-                        userId = uId,
-                        role = role.ifEmpty { "stored" },
-                        platform = obj.optString("platform"),
-                        current = obj.optBoolean("current", false),
-                        source = "sync",
-                        note = note,
-                        state = "ok",
-                        createdAt = obj.optLong("createdAt", System.currentTimeMillis() / 1000),
-                        hash = remoteHash,
-                        phone = phone,
-                        device = obj.optJSONObject("device")
-                    )
-                    GgtgSessions.addStored(entry)
-                }
-            }
+        // sessions: one record per session, the newest write wins (GgtgSessionCatalog)
+        root.optJSONArray("sessions")?.let { arr ->
+            val records = (0 until arr.length()).mapNotNull { arr.optJSONObject(it)?.let(GgtgSessionCatalog::fromJson) }
+            GgtgSessionCatalog.merge(records, root.optString("device"), loadSettings().deviceId)
         }
 
         // merge account statuses across devices
@@ -553,8 +500,23 @@ object GgtgSync {
                 for (slot in 0 until UserConfig.MAX_ACCOUNT_COUNT) {
                     val uc = UserConfig.getInstance(slot)
                     if (!uc.isClientActivated || uc.clientUserId != uId) continue
+                    // quarantine (the anti-theft timer) follows the account: the newer state wins
+                    val remoteQAt = entry.optString("quarantineAt").toLongOrNull() ?: 0L
+                    if (remoteQAt > GgtgSessions.quarantineOf(uId).second) {
+                        val until = entry.optString("quarantineUntil").toLongOrNull() ?: 0L
+                        val before = entry.optString("quarantineBefore")
+                        val now = uc.ncgFolder.orEmpty()
+                        if (until > 0L) {
+                            GgtgSessions.setQuarantine(uId, until, if (now == GgtgSessions.QUARANTINE_FOLDER) before else now, remoteQAt)
+                            if (now != GgtgSessions.QUARANTINE_FOLDER) { uc.ncgFolder = GgtgSessions.QUARANTINE_FOLDER; uc.saveConfig(false) }
+                        } else {
+                            val mine = GgtgSessions.quarantineOf(uId).third
+                            GgtgSessions.setQuarantine(uId, 0L, mine, remoteQAt)
+                            if (now == GgtgSessions.QUARANTINE_FOLDER) { uc.ncgFolder = mine; uc.saveConfig(false) }
+                        }
+                    }
                     val folder = entry.optString("folder")
-                    if (folder.isNotEmpty() && uc.ncgFolder.isEmpty()) {
+                    if (folder.isNotEmpty() && uc.ncgFolder.isEmpty() && folder != GgtgSessions.QUARANTINE_FOLDER) {
                         uc.ncgFolder = folder
                         uc.saveConfig(false)
                     }

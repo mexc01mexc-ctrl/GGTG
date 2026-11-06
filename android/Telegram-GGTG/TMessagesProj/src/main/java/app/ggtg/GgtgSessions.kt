@@ -39,6 +39,7 @@ object GgtgSessions {
         var current: Boolean = false, // the session the account works on right now
         val createdAt: Long = System.currentTimeMillis() / 1000,
         val hash: Long = 0L,
+        var updatedAt: Long = 0L, // last change of note/role/state by the user or a sync; the sync keeps the newer (GgtgSessionCatalog)
         val phone: String = "",
         val name: String = "",
         val username: String = "",
@@ -99,6 +100,7 @@ object GgtgSessions {
                             current = obj.optBoolean("current", false),
                             createdAt = obj.optLong("createdAt", System.currentTimeMillis() / 1000),
                             hash = obj.optString("hash").toLongOrNull() ?: 0L,
+                            updatedAt = obj.optLong("updatedAt", 0L),
                             phone = obj.optString("phone"),
                             name = obj.optString("name"),
                             username = obj.optString("username"),
@@ -169,6 +171,8 @@ object GgtgSessions {
         val until = SimpleDateFormat("dd.MM.yyyy HH:mm", Locale.getDefault()).format(Date((spare.createdAt + TRUST_COOLDOWN) * 1000))
         updateNote(spare.id, "карантин (анти-угон) до $until")
         val uc = UserConfig.getInstance(slot)
+        val before = if (uc.ncgFolder == QUARANTINE_FOLDER) quarantineOf(uc.clientUserId).third else uc.ncgFolder.orEmpty()
+        setQuarantine(uc.clientUserId, spare.createdAt + TRUST_COOLDOWN, before)
         if (uc.ncgFolder != QUARANTINE_FOLDER) {
             uc.ncgFolder = QUARANTINE_FOLDER
             uc.saveConfig(false)
@@ -181,6 +185,7 @@ object GgtgSessions {
             uc.ncgFolder = folderBefore.orEmpty()
             uc.saveConfig(false)
         }
+        setQuarantine(uc.clientUserId, 0L, folderBefore.orEmpty())
     }
 
     @JvmStatic
@@ -272,6 +277,21 @@ object GgtgSessions {
         return " ($roleStr$noteStr$dateStr)"
     }
 
+    /** What a row of Telegram's own session list gets on top: the working session's born date and note, or who holds a session the other device knows. */
+    @JvmStatic
+    fun syncSuffix(userId: Long, hash: Long): String {
+        if (hash == 0L) {
+            val born = sessionBorn(userId)
+            val note = sessionNote(userId).first
+            val parts = ArrayList<String>()
+            if (born.first > 0L) parts.add((if (born.second) "создана " else "добавлена в программу ") + SimpleDateFormat("dd.MM.yyyy HH:mm", Locale.getDefault()).format(Date(born.first * 1000)))
+            if (note.isNotEmpty()) parts.add(note)
+            return if (parts.isEmpty()) "" else " [" + parts.joinToString(" · ") + "]"
+        }
+        val r = GgtgSessionCatalog.byHash(userId, hash) ?: return ""
+        return " [" + GgtgSessionCatalog.label(r) + "]"
+    }
+
     @JvmStatic
     fun hasKey(session: StoredSession): Boolean {
         if (session.keys.isNotEmpty()) return true
@@ -317,6 +337,7 @@ object GgtgSessions {
             val item = all.firstOrNull { it.id == id } ?: return
             item.role = newRole
             if (note.isNotEmpty()) item.note = note
+            item.updatedAt = System.currentTimeMillis() / 1000
             saveIndex(all)
         }
     }
@@ -327,9 +348,36 @@ object GgtgSessions {
             val all = listAll().toMutableList()
             val item = all.firstOrNull { it.id == id } ?: return
             item.note = note
+            item.updatedAt = System.currentTimeMillis() / 1000
             saveIndex(all)
         }
     }
+
+    /** Sync only: the note came from another device with its own time. */
+    fun setUpdatedAt(id: String, at: Long) {
+        synchronized(lock) {
+            val all = listAll().toMutableList()
+            val item = all.firstOrNull { it.id == id } ?: return
+            item.updatedAt = at
+            saveIndex(all)
+        }
+    }
+
+    /** State ("ok" / "revoked") follows Telegram's own list; the sync sees the change by updatedAt. */
+    fun updateState(id: String, state: String) {
+        synchronized(lock) {
+            val all = listAll().toMutableList()
+            val item = all.firstOrNull { it.id == id } ?: return
+            if (item.state == state) return
+            item.state = state
+            item.updatedAt = System.currentTimeMillis() / 1000
+            saveIndex(all)
+        }
+    }
+
+    /** Does this device hold the session's key (or run on it)? A note-only entry is not held. */
+    @JvmStatic
+    fun isHeld(s: StoredSession): Boolean = isCurrent(s) || hasKey(s)
 
     @JvmStatic
     fun createOrUpdateForAuth(userId: Long, hash: Long, deviceModel: String?, note: String): StoredSession {
@@ -436,6 +484,7 @@ object GgtgSessions {
                 if (item.current) put("current", true)
                 put("createdAt", item.createdAt)
                 put("hash", item.hash.toString())
+                if (item.updatedAt != 0L) put("updatedAt", item.updatedAt)
                 put("phone", item.phone)
                 put("name", item.name)
                 put("username", item.username)
@@ -642,11 +691,57 @@ object GgtgSessions {
     @Synchronized fun setSessionBorn(userId: Long, at: Long, made: Boolean) {
         if (userId == 0L || at <= 0L) return
         val all = loadBorn()
-        all.put(userId.toString(), JSONObject().put("at", at).put("made", made))
+        val o = all.optJSONObject(userId.toString()) ?: JSONObject() // keeps the working session's own note
+        all.put(userId.toString(), o.put("at", at).put("made", made))
         try {
             val tmp = File(bornFile().path + ".tmp")
             tmp.writeText(all.toString())
             tmp.renameTo(bornFile())
+        } catch (_: Throwable) { }
+    }
+
+    /** Note of the working session itself (it has no vault entry): text and when it was written. */
+    @Synchronized fun sessionNote(userId: Long): Pair<String, Long> {
+        val o = loadBorn().optJSONObject(userId.toString()) ?: return "" to 0L
+        return o.optString("note") to o.optLong("noteAt", 0L)
+    }
+
+    @Synchronized fun setSessionNote(userId: Long, note: String, at: Long = 0L) {
+        if (userId == 0L) return
+        val all = loadBorn()
+        val o = all.optJSONObject(userId.toString()) ?: JSONObject()
+        o.put("note", note).put("noteAt", if (at > 0L) at else System.currentTimeMillis() / 1000)
+        all.put(userId.toString(), o)
+        try {
+            val tmp = File(bornFile().path + ".tmp")
+            tmp.writeText(all.toString())
+            tmp.renameTo(bornFile())
+        } catch (_: Throwable) { }
+    }
+
+    // Quarantine of an account (the anti-theft timer), per account so the sync carries it to the other device.
+    // "at" = when the state last changed: the newer one wins. until = 0: not in quarantine.
+    private fun quarantineFile() = File(GgtgDb.dir(), "session_quarantine.json")
+
+    @Synchronized fun loadQuarantine(): JSONObject = try {
+        val f = quarantineFile()
+        if (f.exists()) JSONObject(f.readText()) else JSONObject()
+    } catch (_: Throwable) { JSONObject() }
+
+    /** (until, at, folder before) */
+    fun quarantineOf(userId: Long): Triple<Long, Long, String> {
+        val o = loadQuarantine().optJSONObject(userId.toString()) ?: return Triple(0L, 0L, "")
+        return Triple(o.optLong("until", 0L), o.optLong("at", 0L), o.optString("before"))
+    }
+
+    @Synchronized fun setQuarantine(userId: Long, until: Long, before: String, at: Long = 0L) {
+        if (userId == 0L) return
+        val all = loadQuarantine()
+        all.put(userId.toString(), JSONObject().put("until", until).put("at", if (at > 0L) at else System.currentTimeMillis() / 1000).put("before", before))
+        try {
+            val tmp = File(quarantineFile().path + ".tmp")
+            tmp.writeText(all.toString())
+            tmp.renameTo(quarantineFile())
         } catch (_: Throwable) { }
     }
 

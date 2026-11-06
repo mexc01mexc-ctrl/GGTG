@@ -78,7 +78,7 @@
   "files": { "ai_profile.json": { "mtime": "unix", "text": "…" }, "ai_knowledge/<id>.json": {…} },
   "account_statuses": { "<userId>": { "userId": "…", "phone": "…", "state": "clear|temporary|permanent", "until": "0", "checkedAt": "unix", "folder": "…", "trashed": false, "offline": false, "sentToday": 0 } },
   "bad_numbers": [ "79990000000", … ],
-  "session_notes": [ { "id": "…", "userId": 12345, "note": "…", "role": "…", "platform": "android", "current": true, "createdAt": 1790000000, "hash": "…", "device": {…} } ]
+  "sessions": [ { "id": "…", "userId": "12345", "phone": "…", "role": "backup", "note": "…", "state": "ok", "platform": "android", "holderId": "<device>", "holder": "Pixel 10a", "holderKind": "android", "current": false, "held": true, "createdAt": 1790000000, "updatedAt": 1790000500, "quarantineUntil": 0, "hash": "…" } ]
 }
 ```
 
@@ -102,9 +102,23 @@
 - `account_statuses`: вердикт SpamBot (`state`, `until`, `checkedAt`) обновляется у аккаунта, если удалённая проверка свежее локальной (`remote.checkedAt > local.checkedAt`). Для совпадающих активированных аккаунтов также передаются `folder` (если локально папка не назначена) и `trashed` (помещение в корзину).
 - `bad_numbers`: номера, которые уже не подошли в регистрации (заняты, заблокированы, код в приложение, платная SMS...);
   объединяются как множества (до 50000), чтобы второе устройство не платило за них снова.
-- `session_notes`: примечания и роли сохранённых сессий объединяются по идентификатору и userId.
-  `platform` (`desktop` / `android` / `ios`, необязательно) и `current` (сессия, на которой аккаунт работает сейчас,
-  необязательно) хранятся отдельными полями, а не в заметке.
+- `sessions`: по записи на каждую сессию, **без ключей**. Поля: `id`, `userId`, `phone`, `role`, `note`, `state` (ok/revoked),
+  `platform` (на какое семейство устройств сделана), `holderId`/`holder`/`holderKind` (устройство, где лежит ключ: id синхронизации,
+  имя, `desktop`/`android`), `current` (аккаунт работает на ней), `held` (false = только заметка о сессии, ключ ушёл), `createdAt`,
+  `updatedAt`, `quarantineUntil` (конец 25-часового таймера анти-угона у запасной), `hash` (номер сессии в Telegram).
+  Рабочая сессия аккаунта, у которой нет записи в хранилище, передаётся как `id="work-<userId>"`, `role="working"`,
+  `createdAt` = дата рождения сессии (`session_born.json`), `note` — подпись рядом с датой (`note`/`noteAt` там же).
+  Совпадение записей между устройствами: по `hash`, иначе по `userId` + `createdAt` (никогда по одному `userId`).
+  Слияние: побеждает запись с большим `updatedAt` (меняется при правке подписи, роли, состояния). Свою сессию
+  устройство читает только ради подписи; роль, ключ и состояние решает тот, у кого ключ.
+  Чужие сессии (`held`, другой `holderId`) лежат отдельно от хранилища ключей, в `remote_sessions.json`
+  (`GgtgDb.dir()` / `tdata/ggtg_db`), и показываются в окне сессий только для чтения: «на телефоне <имя>», «на Desktop <имя>»,
+  «карантин до …». Подпись можно править с любой стороны: правка помечается `edited`, уходит владельцу и побеждает по `updatedAt`.
+  Устройство — источник правды о том, что держит само: чего оно больше не перечисляет, того нет и в каталоге у остальных.
+  Старый блок `session_notes` больше не пишется и не читается (он затирал подписи всех сессий аккаунта).
+- `account_statuses[userId]` дополнительно: `quarantineUntil`, `quarantineAt`, `quarantineBefore` — аккаунт в папке «Карантин»
+  (анти-угон). Состояние хранится у каждого устройства в `session_quarantine.json`; побеждает больший `quarantineAt`,
+  `quarantineUntil = 0` означает выход из карантина (папка возвращается на `quarantineBefore`).
 
 ### Сессии: четыре вида (одинаково на Desktop и Android)
 
