@@ -3172,8 +3172,15 @@ void ShowBaseCleanupBox(
 		if (key.endsWith(u"bot"_q)) {
 			(*categories)[2].names.insert(key);
 		}
-		if (Data::LookupUserMeta(key).id == 0) {
-			++notChecked;
+		{
+			const auto meta = Data::LookupUserMeta(key);
+			if (meta.id == 0) {
+				++notChecked;
+			} else if (meta.lastseen == 0 && !key.endsWith(u"bot"_q)) {
+				// a loaded profile whose status is "was seen a long time ago" (Telegram's own value, no time
+				// known): counted as inactive without waiting for a campaign to mark it
+				(*categories)[0].names.insert(key);
+			}
 		}
 		if (const auto rec = Data::FindSmsSendRecord(key)) {
 			switch (rec->status) {

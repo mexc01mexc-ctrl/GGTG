@@ -264,6 +264,7 @@ class GgtgBaseActivity(private val baseId: Long) : BaseFragment() {
             if (GgtgDb.isBotUsername(key)) names[2].add(key)
             val lookedUp = GgtgDb.lookupUser(key)
             if (lookedUp == null || lookedUp.id == 0L) notChecked++
+            else if (lookedUp.lastSeenTime == 0L && !GgtgDb.isBotUsername(key)) names[0].add(key) // profile loaded, "was seen a long time ago"
             when (GgtgDb.findSmsRecord(key)?.status) {
                 GgtgDb.SmsStatus.LongAgo -> names[0].add(key)
                 GgtgDb.SmsStatus.NotFound -> names[1].add(key)
