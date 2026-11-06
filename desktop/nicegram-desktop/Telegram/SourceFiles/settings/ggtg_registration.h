@@ -3546,6 +3546,10 @@ private:
 				strong->_sendCodeTimer.stop();
 				strong->_sendCodeRequestId = 0;
 				if (strong->_cancelled) return;
+				// ggtg: Telegram has answered the request that carried this token: it is used up and must not go
+				// back to the reserve on "Отмена" (that was the case until now: it was reserved after a success of
+				// the request too)
+				strong->_tokenSpent = true;
 				strong->_captchaToken.clear();
 				strong->_captchaRetries = 0;
 				result.match([&](const MTPDauth_sentCode &data) {
@@ -3588,6 +3592,11 @@ private:
 				static const auto RecaptchaRegExp = QRegularExpression(
 					u"RECAPTCHA_CHECK_([a-zA-Z0-9]+)__([a-zA-Z0-9_\\-]+)"_q);
 				const auto captchaMatch = RecaptchaRegExp.match(fullErr);
+				if (!captchaMatch.hasMatch()) {
+					// any real answer of Telegram (a ban, a flood, a refusal...) used the token up; only a
+					// request for a captcha is retried with the same token
+					strong->_tokenSpent = true;
+				}
 				if (captchaMatch.hasMatch()) {
 					const auto action = captchaMatch.captured(1);
 					const auto keyId = captchaMatch.captured(2);
