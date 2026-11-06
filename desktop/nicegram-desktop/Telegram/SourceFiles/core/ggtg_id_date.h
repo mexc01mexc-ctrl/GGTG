@@ -107,6 +107,41 @@ struct IdPoint {
 	return result;
 }
 
+// The marked dates are only as exact as the month Telegram shows (the middle of the month is taken), and ids grow
+// with time, so two marks can disagree (a bigger id with an earlier month). Instead of throwing away the later one,
+// neighbours that contradict each other are AVERAGED into one point (isotonic regression, "pool adjacent
+// violators"): the curve stays monotone and every mark counts.
+[[nodiscard]] inline std::vector<std::pair<double, double>> PooledCalibration() {
+	auto points = std::vector<std::pair<double, double>>();
+	for (const auto &[id, time] : IdCalibrationList()) {
+		points.emplace_back(double(id), double(time));
+	}
+	std::sort(points.begin(), points.end());
+	struct Block {
+		double sumId = 0.;
+		double sumTime = 0.;
+		int count = 0;
+		[[nodiscard]] double time() const { return sumTime / count; }
+	};
+	auto blocks = std::vector<Block>();
+	for (const auto &[id, time] : points) {
+		blocks.push_back({ id, time, 1 });
+		while (blocks.size() >= 2
+			&& blocks[blocks.size() - 2].time() > blocks.back().time()) {
+			auto last = blocks.back();
+			blocks.pop_back();
+			blocks.back().sumId += last.sumId;
+			blocks.back().sumTime += last.sumTime;
+			blocks.back().count += last.count;
+		}
+	}
+	auto result = std::vector<std::pair<double, double>>();
+	for (const auto &block : blocks) {
+		result.emplace_back(block.sumId / block.count, block.sumTime / block.count);
+	}
+	return result;
+}
+
 // Anchors and exact points, sorted by id and kept monotone: an exact point wins over an anchor
 // that contradicts it.
 [[nodiscard]] inline std::vector<IdPoint> IdPoints() {
@@ -114,8 +149,8 @@ struct IdPoint {
 	for (const auto &anchor : IdDateAnchors()) {
 		all.push_back({ double(anchor.id), double(anchor.timestamp), false });
 	}
-	for (const auto &[id, time] : IdCalibrationList()) {
-		all.push_back({ double(id), double(time), true });
+	for (const auto &[id, time] : PooledCalibration()) {
+		all.push_back({ id, time, true });
 	}
 	std::sort(all.begin(), all.end(), [](const IdPoint &a, const IdPoint &b) {
 		return (a.id != b.id) ? (a.id < b.id) : (a.exact > b.exact);

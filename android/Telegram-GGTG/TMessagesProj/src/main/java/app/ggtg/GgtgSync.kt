@@ -345,6 +345,8 @@ object GgtgSync {
         }
         // always present, even empty: an empty list means "no accounts here", not "unchanged"
         body.put("available_accounts", availableAccounts)
+        // the marked registration dates (id -> month): both devices estimate from the same points
+        GgtgIdDate.calibrationJson().takeIf { it.length() > 0 }?.let { body.put("id_calibration", it) }
         // the arrangement of the accounts list (order, pinned): the device that changed it last wins
         body.put("layout", GgtgLayout.toJson())
 
@@ -376,6 +378,12 @@ object GgtgSync {
             }
         }
 
+        root.optJSONArray("id_calibration")?.let { arr ->
+            for (i in 0 until arr.length()) {
+                val o = arr.optJSONObject(i) ?: continue
+                GgtgIdDate.calibrate(o.optString("id").toLongOrNull() ?: 0L, o.optString("t").toLongOrNull() ?: 0L)
+            }
+        }
         root.optJSONObject("layout")?.let { GgtgLayout.apply(it) }
 
         // what was deleted on purpose, from both sides

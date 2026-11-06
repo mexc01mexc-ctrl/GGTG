@@ -23,6 +23,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "main/main_session.h"
 #include "mtproto/proxy_pool.h"
 #include "core/ggtg_layout.h"
+#include "core/ggtg_id_date.h"
 #include "core/core_settings.h"
 #include "base/flat_map.h"
 #include <range/v3/algorithm/contains.hpp>
@@ -401,6 +402,16 @@ Snapshot BuildSnapshot(const Settings &settings) {
 			body.insert("sessions", records);
 		}
 	}
+	// The marked registration dates (id -> month): both devices estimate the date of an account from the same points.
+	{
+		auto points = QJsonArray();
+		for (const auto &[id, time] : Ggtg::details::IdCalibrationList()) {
+			points.append(QJsonObject{ { "id", QString::number(id) }, { "t", QString::number(time) } });
+		}
+		if (!points.isEmpty()) {
+			body.insert("id_calibration", points);
+		}
+	}
 	// The arrangement of the accounts list: order (the folders follow it) and the pinned ones.
 	{
 		if (!Core::GgtgLayout::At()) {
@@ -691,6 +702,14 @@ MergeResult MergeSnapshot(const QByteArray &json) {
 
 	if (root.contains("bad_numbers")) {
 		Core::GgtgBadNumbers::Merge(root["bad_numbers"].toArray());
+	}
+
+	// The marked registration dates of the other device: the points of both are used together.
+	for (const auto &value : root["id_calibration"].toArray()) {
+		const auto object = value.toObject();
+		Ggtg::AddIdCalibration(
+			object["id"].toString().toULongLong(),
+			object["t"].toString().toLongLong());
 	}
 
 	// The arrangement of the accounts list: the device that changed it last wins.

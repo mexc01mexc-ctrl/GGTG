@@ -74,6 +74,13 @@ object GgtgIdDate {
     /** A fresh account: its id and the real time are an exact point for every other id. */
     @JvmStatic
     @Synchronized
+    /** The marked points as JSON, for the sync. */
+    fun calibrationJson(): org.json.JSONArray {
+        val array = org.json.JSONArray()
+        for ((id, t) in calibration) array.put(org.json.JSONObject().put("id", id.toString()).put("t", t.toString()))
+        return array
+    }
+
     fun calibrate(userId: Long, time: Long) {
         if (userId <= 0 || time <= 0 || calibration.any { it.first == userId }) return
         calibration.add(userId to time)
@@ -139,10 +146,28 @@ object GgtgIdDate {
 
     /** Anchors and exact points, sorted by id and kept monotone: an exact point wins over a contradicting anchor. */
     @Synchronized
+    /** The marked dates are only as exact as the month Telegram shows, and ids grow with time, so two marks can
+     *  disagree (a bigger id with an earlier month). Neighbours that contradict each other are AVERAGED into one
+     *  point (isotonic regression, "pool adjacent violators") instead of dropping the later one. */
+    private fun pooledCalibration(): List<Pair<Double, Double>> {
+        val sorted = calibration.sortedBy { it.first }
+        class Block(var sumId: Double, var sumTime: Double, var count: Int) { fun time() = sumTime / count }
+        val blocks = ArrayList<Block>()
+        for ((id, t) in sorted) {
+            blocks.add(Block(id.toDouble(), t.toDouble(), 1))
+            while (blocks.size >= 2 && blocks[blocks.size - 2].time() > blocks.last().time()) {
+                val last = blocks.removeAt(blocks.size - 1)
+                val prev = blocks.last()
+                prev.sumId += last.sumId; prev.sumTime += last.sumTime; prev.count += last.count
+            }
+        }
+        return blocks.map { it.sumId / it.count to it.sumTime / it.count }
+    }
+
     private fun points(): List<Point> {
         val all = ArrayList<Point>()
         for (a in anchors) all.add(Point(a.id.toDouble(), a.timestamp.toDouble(), false))
-        for ((id, t) in calibration) all.add(Point(id.toDouble(), t.toDouble(), true))
+        for ((id, t) in pooledCalibration()) all.add(Point(id, t, true))
         all.sortWith(compareBy<Point>({ it.id }, { if (it.exact) 0 else 1 }))
         val result = ArrayList<Point>()
         for (p in all) {
