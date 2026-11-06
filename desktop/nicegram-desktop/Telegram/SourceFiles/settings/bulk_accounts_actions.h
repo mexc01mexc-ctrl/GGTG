@@ -266,6 +266,14 @@ void StartBaseVerification(
 	const QString &title,
 	Fn<void()> onDone = nullptr);
 
+// One window to clean a base: tick what to remove (inactive, not found, bots, fakes, closed, already written),
+// see the count for each, confirm once.
+void ShowBaseCleanupBox(
+	std::shared_ptr<Ui::Show> show,
+	uint64 baseId,
+	const QString &title,
+	Fn<void()> onDone = nullptr);
+
 // The whole "pick accounts" block of a form: a select-all row, the folder
 // accordion and a "Выбрано аккаунтов: N" line. A form's own state derives
 // from this (so it keeps reading `selected`) and calls AddAccountPicker once.

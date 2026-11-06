@@ -184,7 +184,7 @@ class GgtgBasesActivity : BaseFragment() {
         }
         val isGroups = kind == GgtgDb.BaseKind.Groups
         // round icon badge
-        card.addView(GgtgUi.circleIcon(context, if (isGroups) R.drawable.msg_groups else R.drawable.msg_contact, 42f, color(Theme.key_windowBackgroundGray), GgtgUi.accent),
+        card.addView(GgtgUi.circleIcon(context, if (isGroups) R.drawable.msg_groups else if (meta.source == "squidward") R.drawable.msg_squidward else R.drawable.msg_contact, 42f, color(Theme.key_windowBackgroundGray), GgtgUi.accent),
             LinearLayout.LayoutParams(dp(42f), dp(42f)).apply { rightMargin = dp(12f) })
 
         val texts = LinearLayout(context).apply { orientation = LinearLayout.VERTICAL }

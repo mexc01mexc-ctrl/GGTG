@@ -2882,9 +2882,16 @@ void StartBaseVerification(
 			modeText,
 			st::boxDividerLabel));
 
+		box->addRow(object_ptr<Ui::FlatLabel>(
+			box,
+			u"Что это: для каждого человека из базы загружается профиль (имя, статус «был(а) давно», бот или нет). "
+				"По этим данным потом точнее работает очистка: неактивные, боты, фейки."_q,
+			st::boxDividerLabel));
+
 		const auto statusLabel = box->addRow(object_ptr<Ui::FlatLabel>(
 			box,
-			u"Проверено: 0 из "_q + QString::number(toCheck.size()),
+			u"Проверено: 0 из %1\nПрофилей загружено: 0\nНе найдено в Telegram: 0\nОсталось: %1"_q
+				.arg(toCheck.size()),
 			st::boxLabel));
 
 		const auto workerLabel = box->addRow(object_ptr<Ui::FlatLabel>(
@@ -2895,6 +2902,7 @@ void StartBaseVerification(
 		struct VerifyState {
 			int checkedCount = 0;
 			int resolvedCount = 0;
+			int missingCount = 0; // the username is not in Telegram (deleted / never existed)
 			int workerIdx = 0;
 			int batchCount = 0;
 			base::flat_map<not_null<Main::Account*>, crl::time> cooldownUntil;
@@ -2914,6 +2922,16 @@ void StartBaseVerification(
 		const auto weakWorker = QPointer<Ui::FlatLabel>(workerLabel);
 		const auto setStatus = [=](const QString &t) { if (weakStatus) weakStatus->setText(t); };
 		const auto setWorker = [=](const QString &t) { if (weakWorker) weakWorker->setText(t); };
+		// ggtg: plain numbers instead of a bare "(найдено: N)": what was checked, how many people were
+		// loaded, how many names do not exist, how many are left
+		const auto progressText = [=] {
+			return u"Проверено: %1 из %2\nПрофилей загружено: %3\nНе найдено в Telegram: %4\nОсталось: %5"_q
+				.arg(state->checkedCount)
+				.arg(toCheck.size())
+				.arg(state->resolvedCount)
+				.arg(state->missingCount)
+				.arg(int(toCheck.size()) - state->checkedCount);
+		};
 		// big randomised batches per account (trash accounts do nothing else), then the next account in turn
 		const auto newBatch = [=] {
 			state->maxBatch = usingTrash ? (15 + int(base::RandomIndex(16))) : 3;
@@ -3014,10 +3032,7 @@ void StartBaseVerification(
 				}
 				state->checkedCount++;
 				state->currentIndex++;
-				setStatus(
-					u"Проверено: "_q + QString::number(state->checkedCount)
-					+ u" из "_q + QString::number(toCheck.size())
-					+ u" (найдено: "_q + QString::number(state->resolvedCount) + u")"_q);
+				setStatus(progressText());
 				if (state->currentIndex < toCheck.size()) {
 					state->stepTimer.callOnce(250);
 				} else {
@@ -3067,18 +3082,18 @@ void StartBaseVerification(
 					state->stepTimer.callOnce(int(std::min<crl::time>(std::max<crl::time>(restMs, 600), 15000)));
 					return;
 				}
+				if (type == u"USERNAME_NOT_OCCUPIED"_q || type == u"USERNAME_INVALID"_q) {
+					++state->missingCount;
+				}
 				state->batchCount++;
-								if (state->batchCount >= state->maxBatch) {
+				if (state->batchCount >= state->maxBatch) {
 					state->batchCount = 0;
 					newBatch();
 					state->workerIdx = (state->workerIdx + 1) % int(workers.size());
 				}
 				state->checkedCount++;
 				state->currentIndex++;
-				setStatus(
-					u"Проверено: "_q + QString::number(state->checkedCount)
-					+ u" из "_q + QString::number(toCheck.size())
-					+ u" (найдено: "_q + QString::number(state->resolvedCount) + u")"_q);
+				setStatus(progressText());
 				if (state->currentIndex < toCheck.size()) {
 					state->stepTimer.callOnce(250);
 				} else {
@@ -3106,6 +3121,231 @@ void StartBaseVerification(
 		box->addLeftButton(rpl::single(u"В фоне"_q), [=] {
 			box->closeBox();
 		});
+	}));
+}
+
+// ggtg: ONE window for cleaning a base: tick what to remove (several at once), see how many each takes out,
+// confirm once. Bases collected through Squidward are the ones that need it (their data is a guess); a base
+// taken from an open group is real people, so nothing is ticked for it.
+void ShowBaseCleanupBox(
+		std::shared_ptr<Ui::Show> show,
+		uint64 baseId,
+		const QString &title,
+		Fn<void()> onDone) {
+	const auto usernames = Data::LoadScrapedGroupUsernames(baseId);
+	if (usernames.isEmpty()) {
+		show->showToast(u"В этой базе нет пользователей"_q);
+		return;
+	}
+	auto fromSquidward = false;
+	auto sourceTitle = QString();
+	for (const auto &meta : Data::LoadScrapedGroupsIndex()) {
+		if (meta.id == baseId) {
+			fromSquidward = (meta.source == u"squidward"_q);
+			sourceTitle = Data::BaseSourceTitle(meta.source);
+			break;
+		}
+	}
+
+	struct Category {
+		QString label;
+		QString hint;
+		QSet<QString> names;
+		bool chosenByDefault = false;
+	};
+	const auto norm = [](const QString &u) {
+		return u.trimmed().remove('@').toLower();
+	};
+	auto categories = std::make_shared<std::vector<Category>>(6);
+	(*categories)[0] = { u"Неактивные («был(а) давно»)"_q, u"Давно не заходили в Telegram: писать им бессмысленно."_q, {}, fromSquidward };
+	(*categories)[1] = { u"Не найденные в Telegram"_q, u"Такого юзернейма уже нет (аккаунт удалён или имя сменили)."_q, {}, fromSquidward };
+	(*categories)[2] = { u"Боты"_q, u"Юзернейм заканчивается на «bot»."_q, {}, fromSquidward };
+	(*categories)[3] = { u"Фейки и подозрительные"_q, u"Определяются по имени и профилю (порог 60%, стандартный)."_q, {}, fromSquidward };
+	(*categories)[4] = { u"Закрытые для сообщений"_q, u"Запретили писать или заблокировали нас."_q, {}, false };
+	(*categories)[5] = { u"Уже написанные (статус OK)"_q, u"Им уже отправляли сообщение, повторно писать не нужно."_q, {}, false };
+	auto notChecked = 0;
+	for (const auto &u : usernames) {
+		const auto key = norm(u);
+		if (key.isEmpty()) {
+			continue;
+		}
+		if (key.endsWith(u"bot"_q)) {
+			(*categories)[2].names.insert(key);
+		}
+		if (Data::LookupUserMeta(key).id == 0) {
+			++notChecked;
+		}
+		if (const auto rec = Data::FindSmsSendRecord(key)) {
+			switch (rec->status) {
+			case Data::SmsSendStatus::LongAgo:
+				(*categories)[0].names.insert(key);
+				break;
+			case Data::SmsSendStatus::NotFound:
+				(*categories)[1].names.insert(key);
+				break;
+			case Data::SmsSendStatus::Restricted:
+				(*categories)[4].names.insert(key);
+				break;
+			case Data::SmsSendStatus::Sent:
+				(*categories)[5].names.insert(key);
+				break;
+			case Data::SmsSendStatus::SuspectedFake:
+				(*categories)[3].names.insert(key);
+				break;
+			default:
+				break;
+			}
+		}
+	}
+	for (const auto &fake : Ggtg::FakeDetector::FilterUsernames(usernames, 60).fakes) {
+		(*categories)[3].names.insert(norm(fake));
+	}
+
+	struct State {
+		std::vector<bool> chosen;
+		rpl::variable<int> total = 0;
+	};
+	const auto state = std::make_shared<State>();
+	for (const auto &category : *categories) {
+		state->chosen.push_back(category.chosenByDefault);
+	}
+	const auto unionOfChosen = [=] {
+		auto result = QSet<QString>();
+		for (auto i = size_t(0); i != categories->size(); ++i) {
+			if (state->chosen[i]) {
+				result.unite((*categories)[i].names);
+			}
+		}
+		return result;
+	};
+	state->total = unionOfChosen().size();
+
+	show->showBox(Box([=](not_null<Ui::GenericBox*> box) {
+		box->setWidth(st::accountsBoxWidth);
+		box->setTitle(rpl::single(u"Очистка базы: "_q + title));
+
+		box->addRow(
+			object_ptr<Ui::FlatLabel>(
+				box,
+				(fromSquidward
+					? u"База собрана через Сквидвард: данные в ней могли быть неточными, поэтому очистка рекомендуется. Ниже уже отмечено то, что обычно убирают."_q
+					: u"Источник: "_q + sourceTitle
+						+ u". Из открытой группы приходят реальные люди, такую базу обычно чистить не нужно. Отметьте только то, что нужно убрать."_q),
+				st::boxDividerLabel),
+			st::boxRowPadding);
+
+		Ui::AddSkip(box->verticalLayout());
+		Ui::AddSubsectionTitle(
+			box->verticalLayout(),
+			rpl::single(u"Что убрать из базы"_q));
+		for (auto i = size_t(0); i != categories->size(); ++i) {
+			const auto &category = (*categories)[i];
+			const auto checkbox = box->addRow(
+				object_ptr<Ui::Checkbox>(
+					box,
+					category.label + u" — "_q + QString::number(category.names.size()),
+					state->chosen[i],
+					st::defaultCheckbox),
+				st::ggtgChoiceRowPadding);
+			checkbox->checkedChanges(
+			) | rpl::on_next([=](bool checked) {
+				state->chosen[i] = checked;
+				state->total = unionOfChosen().size();
+			}, checkbox->lifetime());
+			box->addRow(
+				object_ptr<Ui::FlatLabel>(
+					box,
+					category.hint,
+					st::boxDividerLabel),
+				style::margins(
+					style::ConvertScale(48),
+					0,
+					style::ConvertScale(24),
+					style::ConvertScale(6)));
+		}
+
+		Ui::AddSkip(box->verticalLayout());
+		Ui::AddSubsectionTitle(
+			box->verticalLayout(),
+			rpl::single(u"Профили"_q));
+		box->addRow(
+			object_ptr<Ui::FlatLabel>(
+				box,
+				(notChecked > 0
+					? (u"Профили не загружены у "_q + QString::number(notChecked) + u" человек. "_q)
+					: u"Профили загружены у всех. "_q)
+					+ u"Проверка загружает имя, статус и признак бота: после неё фейки и «был(а) давно» определяются точнее."_q,
+				st::boxDividerLabel),
+			st::boxRowPadding);
+		if (notChecked > 0) {
+			const auto weak = QPointer<Ui::GenericBox>(box.get());
+			box->addRow(object_ptr<Ui::SettingsButton>(
+				box,
+				rpl::single(u"Проверить профили…"_q),
+				st::settingsButton)
+			)->setClickedCallback([=] {
+				if (const auto strong = weak.data()) {
+					strong->closeBox();
+				}
+				StartBaseVerification(show, baseId, title, [=] {
+					ShowBaseCleanupBox(show, baseId, title, onDone);
+				});
+			});
+		}
+
+		box->addButton(
+			state->total.value() | rpl::map([](int count) {
+				return count
+					? u"Очистить (%1)"_q.arg(count)
+					: u"Очистить"_q;
+			}),
+			[=] {
+				if (!Core::GuardAllows(show, Core::GuardedAction::EditBases)) {
+					return;
+				}
+				const auto remove = unionOfChosen();
+				if (remove.isEmpty()) {
+					Ggtg::Notice(show, u"Ничего не отмечено или нечего убирать"_q);
+					return;
+				}
+				auto lines = QStringList();
+				for (auto i = size_t(0); i != categories->size(); ++i) {
+					if (state->chosen[i] && !(*categories)[i].names.isEmpty()) {
+						lines.push_back(u"• "_q + (*categories)[i].label
+							+ u": "_q + QString::number((*categories)[i].names.size()));
+					}
+				}
+				const auto weak = QPointer<Ui::GenericBox>(box.get());
+				show->show(Ui::MakeConfirmBox({
+					.text = u"Удалить из базы «"_q + title + u"»:\n"_q
+						+ lines.join('\n')
+						+ u"\n\nВсего человек (без повторов): "_q
+						+ QString::number(remove.size())
+						+ u". Список изменится насовсем."_q,
+					.confirmed = [=](Fn<void()> &&close) {
+						close();
+						const auto current = Data::LoadScrapedGroupUsernames(baseId);
+						auto kept = QStringList();
+						for (const auto &u : current) {
+							if (!remove.contains(norm(u))) {
+								kept.push_back(u);
+							}
+						}
+						Data::SaveScrapedGroupUsernames(baseId, title, kept);
+						Ggtg::Notice(show, u"Убрано из базы: "_q
+							+ QString::number(int(current.size() - kept.size()))
+							+ u", осталось: "_q + QString::number(int(kept.size())));
+						if (const auto strong = weak.data()) {
+							strong->closeBox();
+						}
+						if (onDone) {
+							onDone();
+						}
+					},
+					.confirmText = u"Удалить"_q,
+				}));
+			});
+		box->addButton(tr::lng_cancel(), [=] { box->closeBox(); });
 	}));
 }
 
@@ -4069,85 +4309,8 @@ void ShowEditBaseBox(
 							+ QString::number(usernames.size()));
 					});
 			});
-			addOp(u"Очистить от неактивных («был(а) давно»)..."_q, [=] {
-				if (!Core::GuardAllows(show, Core::GuardedAction::EditBases)) {
-					return;
-				}
-				const auto currentList = Data::LoadScrapedGroupUsernames(id);
-				auto kept = QStringList();
-				auto removed = 0;
-				for (const auto &u : currentList) {
-					const auto norm = u.trimmed().remove('@').toLower();
-					const auto rec = Data::FindSmsSendRecord(norm);
-					if (rec && rec->status == Data::SmsSendStatus::LongAgo) {
-						++removed;
-					} else {
-						kept.push_back(u);
-					}
-				}
-				if (!removed) {
-					Ggtg::Notice(show, u"Неактивных («был(а) давно») в базе нет"_q);
-					return;
-				}
-				show->show(Ui::MakeConfirmBox({
-					.text = u"Удалить из списка неактивных («был(а) давно»): "_q
-						+ QString::number(removed)
-						+ u"? Список изменится насовсем."_q,
-					.confirmed = [=](Fn<void()> &&close) {
-						close();
-						Data::SaveScrapedGroupUsernames(id, title, kept);
-						if (const auto field = state->list.data()) {
-							field->setText(kept.join('\n'));
-						}
-						Ggtg::Notice(show, u"Удалено неактивных: "_q + QString::number(removed));
-						reopen();
-					},
-					.confirmText = u"Удалить"_q,
-				}));
-			});
-			addOp(u"Удалить уже написанных (статус OK)..."_q, [=] {
-				if (!Core::GuardAllows(show, Core::GuardedAction::EditBases)) {
-					return;
-				}
-				const auto currentList = Data::LoadScrapedGroupUsernames(id);
-				auto kept = QStringList();
-				auto removed = 0;
-				for (const auto &u : currentList) {
-					const auto norm = u.trimmed().remove('@').toLower();
-					const auto rec = Data::FindSmsSendRecord(norm);
-					if (rec && rec->status == Data::SmsSendStatus::Sent) {
-						++removed;
-					} else {
-						kept.push_back(u);
-					}
-				}
-				if (!removed) {
-					Ggtg::Notice(show, u"Написанных (OK) в базе нет"_q);
-					return;
-				}
-				show->show(Ui::MakeConfirmBox({
-					.text = u"Удалить из списка уже написанных (OK): "_q
-						+ QString::number(removed)
-						+ u"? Список изменится насовсем."_q,
-					.confirmed = [=](Fn<void()> &&close) {
-						close();
-						Data::SaveScrapedGroupUsernames(id, title, kept);
-						if (const auto field = state->list.data()) {
-							field->setText(kept.join('\n'));
-						}
-						Ggtg::Notice(show, u"Удалено написанных: "_q + QString::number(removed));
-						reopen();
-					},
-					.confirmText = u"Удалить"_q,
-				}));
-			});
-			addOp(u"Проверить базу (загрузить профили через корзину / ротацию)…"_q, [=] {
-				StartBaseVerification(show, id, title, [=] {
-					reopen();
-				});
-			});
-			addOp(u"Очистить от фейков и ботов…"_q, [=] {
-				Ggtg::FakeDetector::ShowCleanBaseBox(show, id, title, [=] {
+			addOp(u"Очистка базы…"_q, [=] {
+				ShowBaseCleanupBox(show, id, title, [=] {
 					reopen();
 				});
 			});
@@ -5326,12 +5489,8 @@ object_ptr<Ui::BoxContent> MakeScrapedGroupsDbBox(
 				}
 				if (users) {
 					(*menu)->addAction(
-						u"Проверить базу…"_q,
-						[=] { StartBaseVerification(show, meta.id, meta.title); },
-						&st::menuIconFactcheck);
-					(*menu)->addAction(
-						u"Очистить от фейков и ботов…"_q,
-						[=] { Ggtg::FakeDetector::ShowCleanBaseBox(show, meta.id, meta.title); },
+						u"Очистка базы…"_q,
+						[=] { ShowBaseCleanupBox(show, meta.id, meta.title, nullptr); },
 						&st::menuIconCancel);
 				}
 				(*menu)->addAction(
@@ -5427,6 +5586,9 @@ object_ptr<Ui::BoxContent> MakeScrapedGroupsDbBox(
 							: u"нет доступных"_q,
 						.chipGood = (stats.remaining == 0
 							&& stats.sent >= stats.total),
+						.badge = (meta.source == u"squidward"_q)
+							? &st::menuIconSquidward
+							: nullptr,
 					};
 				};
 				const auto openUsers = [=] {

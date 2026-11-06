@@ -348,6 +348,8 @@ struct InfoRowData {
 	QString subtitle;
 	QString chip;
 	bool chipGood = false; // green (done) instead of the accent color
+	// A small icon before the title (e.g. the Squidward octopus on a base collected through Squidward).
+	const style::icon *badge = nullptr;
 };
 
 // A list row for GGTG screens (bases, records...): replaces a one-line
@@ -428,7 +430,10 @@ protected:
 			p.drawText(chipRect, Qt::AlignCenter, _data.chip);
 			right = chipRect.left() - pad;
 		}
-		const auto left = pad + _textInset;
+		const auto badgeInset = _data.badge
+			? (_data.badge->width() + style::ConvertScale(10))
+			: 0;
+		const auto left = pad + _textInset + badgeInset;
 		const auto available = std::max(right - left, 0);
 		const auto titleFont = st::semiboldFont;
 		const auto subFont = st::normalFont;
@@ -439,6 +444,13 @@ protected:
 			+ subFont->height * int(subLines.size())
 			+ gap;
 		auto top = (height() - total) / 2;
+		if (_data.badge) {
+			_data.badge->paint(
+				p,
+				pad + _textInset,
+				(height() - _data.badge->height()) / 2,
+				width());
+		}
 		p.setPen(st::windowBoldFg);
 		p.setFont(titleFont);
 		for (const auto &line : titleLines) {
@@ -465,7 +477,10 @@ private:
 				+ 2 * chipPad
 				+ pad;
 		}
-		return std::max(right - (pad + _textInset), 0);
+		const auto badgeInset = _data.badge
+			? (_data.badge->width() + style::ConvertScale(10))
+			: 0;
+		return std::max(right - (pad + _textInset + badgeInset), 0);
 	}
 
 	void refit() {

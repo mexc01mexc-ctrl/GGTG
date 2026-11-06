@@ -129,12 +129,7 @@ class GgtgBaseActivity(private val baseId: Long) : BaseFragment() {
         }
         actionRow(main, R.drawable.msg_viewchats, "Открыть списком (кликабельно)", chevron = true) { presentFragment(GgtgBaseListActivity(baseId, isGroups)) }
         if (!isGroups) {
-            actionRow(main, R.drawable.msg_contacts, "Проверить базу (загрузить профили через корзину / ротацию)", chevron = true) {
-                val ctx = context ?: parentActivity
-                if (ctx != null) {
-                    GgtgBaseChecker.checkBase(ctx, baseId, meta?.title ?: "База") { reload() }
-                }
-            }
+            actionRow(main, R.drawable.msg_clear, "Очистка базы…", chevron = true) { cleanup() }
         }
         root.addView(main)
 
@@ -143,14 +138,6 @@ class GgtgBaseActivity(private val baseId: Long) : BaseFragment() {
         val ops = card(context)
         actionRow(ops, R.drawable.msg_forward, "Экспорт в файл (txt / csv)…") { chooseExport() }
         if (!isGroups) {
-            actionRow(ops, R.drawable.msg_clear, "Удалить неактивных («был(а) давно»)…") { removeInactive() }
-            actionRow(ops, R.drawable.msg_select, "Удалить написанных (статус OK)…") { removeSent() }
-            actionRow(ops, R.drawable.msg_bots, "Очистить от фейков и ботов…") {
-                val ctx = context ?: parentActivity
-                if (ctx != null) {
-                    GgtgFakeDetector.showCleanBaseDialog(ctx, baseId, meta?.title ?: "База") { reload() }
-                }
-            }
             actionRow(ops, R.drawable.msg_addcontact, "Объединить") { merge() }
             actionRow(ops, R.drawable.msg_reorder, "Разбить на части…") { split() }
         }
@@ -250,6 +237,101 @@ class GgtgBaseActivity(private val baseId: Long) : BaseFragment() {
         GgtgDb.saveUsernames(baseId, title, parsed.valid)
         toast("Сохранено: ${parsed.valid.size}" + if (parsed.rejected.isNotEmpty()) ", не распознано строк: ${parsed.rejected.size}" else "")
         reload()
+    }
+
+    /** One window to clean a base: tick what to remove (several at once), see the count for each, confirm once. */
+    private fun cleanup() {
+        val ctx = context ?: parentActivity ?: return
+        val title = meta?.title ?: return
+        val fromSquidward = meta?.source == "squidward"
+        val list = GgtgDb.loadUsernames(baseId)
+        if (list.isEmpty()) { toast("В этой базе нет пользователей"); return }
+        fun norm(u: String) = u.trim().removePrefix("@").lowercase()
+        val names = Array(6) { HashSet<String>() }
+        var notChecked = 0
+        for (u in list) {
+            val key = norm(u)
+            if (key.isEmpty()) continue
+            if (GgtgDb.isBotUsername(key)) names[2].add(key)
+            val lookedUp = GgtgDb.lookupUser(key)
+            if (lookedUp == null || lookedUp.id == 0L) notChecked++
+            when (GgtgDb.findSmsRecord(key)?.status) {
+                GgtgDb.SmsStatus.LongAgo -> names[0].add(key)
+                GgtgDb.SmsStatus.NotFound -> names[1].add(key)
+                GgtgDb.SmsStatus.SuspectedFake -> names[3].add(key)
+                GgtgDb.SmsStatus.Restricted -> names[4].add(key)
+                GgtgDb.SmsStatus.Sent -> names[5].add(key)
+                else -> {}
+            }
+        }
+        GgtgFakeDetector.filterUsernames(list, 60).second.forEach { names[3].add(norm(it)) }
+        val labels = arrayOf(
+            "Неактивные («был(а) давно»)", "Не найденные в Telegram", "Боты",
+            "Фейки и подозрительные", "Закрытые для сообщений", "Уже написанные (статус OK)"
+        )
+        val hints = arrayOf(
+            "Давно не заходили в Telegram", "Юзернейма уже нет", "Юзернейм заканчивается на «bot»",
+            "По имени и профилю, порог 60%", "Запретили писать или заблокировали нас", "Им уже отправляли сообщение"
+        )
+        val chosen = BooleanArray(6) { fromSquidward && it in 0..3 }
+
+        val column = LinearLayout(ctx).apply { orientation = LinearLayout.VERTICAL; setPadding(dp(20f), dp(8f), dp(20f), dp(4f)) }
+        column.addView(TextView(ctx).apply {
+            text = if (fromSquidward) "База собрана через Сквидвард: данные могли быть неточными, очистка рекомендуется."
+            else "Источник: ${GgtgDb.sourceTitle(meta?.source.orEmpty())}. Из открытой группы приходят реальные люди, такую базу обычно чистить не нужно."
+            textSize = 13f
+            setTextColor(color(Theme.key_windowBackgroundWhiteGrayText))
+            setPadding(0, 0, 0, dp(8f))
+        })
+        for (i in labels.indices) {
+            column.addView(android.widget.CheckBox(ctx).apply {
+                text = "${labels[i]} — ${names[i].size}"
+                isChecked = chosen[i]
+                setTextColor(color(Theme.key_windowBackgroundWhiteBlackText))
+                setOnCheckedChangeListener { _, checked -> chosen[i] = checked }
+            })
+            column.addView(TextView(ctx).apply {
+                text = hints[i]
+                textSize = 12f
+                setTextColor(color(Theme.key_windowBackgroundWhiteGrayText))
+                setPadding(dp(32f), 0, 0, dp(6f))
+            })
+        }
+        column.addView(TextView(ctx).apply {
+            text = (if (notChecked > 0) "Профили не загружены у $notChecked человек. " else "Профили загружены у всех. ") +
+                "Проверка загружает имя, статус и признак бота: после неё очистка точнее."
+            textSize = 12f
+            setTextColor(color(Theme.key_windowBackgroundWhiteGrayText))
+            setPadding(0, dp(8f), 0, 0)
+        })
+        val scroll = ScrollView(ctx).apply { addView(column) }
+        val builder = org.telegram.ui.ActionBar.AlertDialog.Builder(ctx)
+            .setTitle("Очистка базы: $title")
+            .setView(scroll)
+            .setPositiveButton("Очистить") { _, _ ->
+                val remove = HashSet<String>()
+                val lines = ArrayList<String>()
+                for (i in labels.indices) if (chosen[i]) { remove.addAll(names[i]); if (names[i].isNotEmpty()) lines.add("• ${labels[i]}: ${names[i].size}") }
+                if (remove.isEmpty()) { toast("Ничего не отмечено или нечего убирать"); return@setPositiveButton }
+                org.telegram.ui.ActionBar.AlertDialog.Builder(ctx)
+                    .setTitle("Удалить из базы «$title»")
+                    .setMessage(lines.joinToString("\n") + "\n\nВсего человек (без повторов): ${remove.size}. Список изменится насовсем.")
+                    .setPositiveButton("Удалить") { _, _ ->
+                        val current = GgtgDb.loadUsernames(baseId)
+                        val kept = current.filter { norm(it) !in remove }
+                        GgtgDb.saveUsernames(baseId, title, kept)
+                        toast("Убрано из базы: ${current.size - kept.size}, осталось: ${kept.size}")
+                        reload()
+                    }
+                    .setNegativeButton("Отмена", null).show()
+            }
+            .setNegativeButton("Отмена", null)
+        if (notChecked > 0) {
+            builder.setNeutralButton("Проверить профили") { _, _ ->
+                GgtgBaseChecker.checkBase(ctx, baseId, title) { reload() }
+            }
+        }
+        builder.show()
     }
 
     private fun removeInactive() {
