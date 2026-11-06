@@ -3417,7 +3417,7 @@ void ShowClickableUsernamesBox(
 				detailsLabel->setAttribute(Qt::WA_TransparentForMouseEvents);
 
 				const auto changeBtn = Ui::CreateChild<Ui::LinkButton>(card, u"Сменить"_q);
-				const auto verifyBtn = (baseId != 0) ? Ui::CreateChild<Ui::LinkButton>(card, u"Проверить базу"_q) : nullptr;
+				const auto verifyBtn = (baseId != 0) ? Ui::CreateChild<Ui::LinkButton>(card, u"Загрузить профили"_q) : nullptr;
 
 				const auto updateCard = [=] {
 					if (!weakBox) {
@@ -3974,7 +3974,10 @@ void ShowClickableUsernamesBox(
 					}
 				});
 
-				if (button->needsResolution()) {
+				// ggtg: opening a list of PEOPLE no longer looks every one of them up (that used an account and ended in
+				// flood): the rows show what is already saved; "Загрузить профили" in the base's window does the
+				// looking up, one account after another, on its own button. Lists of groups keep their lookup.
+				if (isGroupList && button->needsResolution()) {
 					resolveQueue->push_back({ username, QPointer<UsernameRow>(button) });
 					if (!resolveTimer->isActive() && !*resolveActive) {
 						resolveTimer->callOnce(100);
@@ -3982,18 +3985,50 @@ void ShowClickableUsernamesBox(
 				}
 			};
 
+			// ggtg: the footer under the list: "Показано N из M" and the buttons that take the next 100 / all of them.
+			// It does not depend on scroll events (which stopped after the first portion on a big list).
+			const auto footer = box->addRow(object_ptr<Ui::RpWidget>(box), st::boxRowPadding);
+			const auto footerText = Ui::CreateChild<Ui::FlatLabel>(footer, QString(), st::boxDividerLabel);
+			const auto moreBtn = Ui::CreateChild<Ui::LinkButton>(footer, u"Показать ещё 100"_q);
+			const auto allBtn = Ui::CreateChild<Ui::LinkButton>(footer, u"Показать все"_q);
+			const auto relayoutFooter = [=] {
+				footerText->moveToLeft(0, 0);
+				const auto h = std::max(footerText->height(), moreBtn->height());
+				allBtn->moveToRight(0, (h - allBtn->height()) / 2);
+				moreBtn->moveToRight(allBtn->width() + style::ConvertScale(14), (h - moreBtn->height()) / 2);
+				footer->resize(footer->width(), h);
+			};
+			footer->widthValue() | rpl::on_next([=](int) { relayoutFooter(); }, footer->lifetime());
+
 			const auto appendChunk = std::make_shared<Fn<void()>>();
-			*appendChunk = [=] {
-				if (*renderedCount >= allUsernames->size()) {
-					return;
-				}
+			const auto appendMany = std::make_shared<Fn<void(int)>>();
+			const auto refreshFooter = [=] {
+				const auto total = int(allUsernames->size());
+				const auto left = total - *renderedCount;
+				footerText->setText(left > 0
+					? (u"Показано "_q + QString::number(*renderedCount) + u" из "_q + QString::number(total))
+					: (u"Показан весь список: "_q + QString::number(total)));
+				moreBtn->setVisible(left > 0);
+				allBtn->setVisible(left > 0);
+				relayoutFooter();
+			};
+			*appendMany = [=](int count) {
 				const auto from = *renderedCount;
-				const auto to = std::min(from + kChunkSize, int(allUsernames->size()));
+				const auto to = std::min(from + count, int(allUsernames->size()));
 				for (auto i = from; i < to; ++i) {
 					addUser((*allUsernames)[i]);
 				}
 				*renderedCount = to;
+				refreshFooter();
 			};
+			*appendChunk = [=] {
+				if (*renderedCount >= allUsernames->size()) {
+					return;
+				}
+				(*appendMany)(kChunkSize);
+			};
+			moreBtn->setClickedCallback([=] { (*appendMany)(100); });
+			allBtn->setClickedCallback([=] { (*appendMany)(int(allUsernames->size())); });
 
 			*rebuild = [=] {
 				resolveQueue->clear();
@@ -4031,6 +4066,7 @@ void ShowClickableUsernamesBox(
 					!extraMark);
 				*renderedCount = 0;
 				(*appendChunk)();
+				refreshFooter();
 				if (q.isEmpty()) {
 					countLabel->setText(QString::number(usernames.size()) + unitWord(usernames.size()));
 				} else {
@@ -4041,7 +4077,7 @@ void ShowClickableUsernamesBox(
 			(*rebuild)();
 
 			box->scrolls() | rpl::on_next([=] {
-				if (box->scrollTop() + box->scrollHeight() + 300 >= box->verticalLayout()->height()) {
+				if (box->scrollTop() + box->scrollHeight() + 600 >= box->verticalLayout()->height()) {
 					(*appendChunk)();
 				}
 			}, box->lifetime());
@@ -4128,6 +4164,15 @@ void ShowEditBaseBox(
 			) | rpl::on_next([=] {
 				statsLabel->setText(describe());
 			}, box->lifetime());
+			// ggtg: names and "last seen" of the people are loaded on THIS button (one account after another, big
+			// batches, flood-safe, can run in the background), never by opening the list
+			AddIconRowButton(
+				box,
+				u"Загрузить профили (имя, когда был в сети)…"_q,
+				st::ggtgProfilesButton
+			)->setClickedCallback([=] {
+				StartBaseVerification(show, id, title, nullptr);
+			});
 			AddOpenListButton(box)->setClickedCallback([=] {
 				// "✕" in that list removes a user from the stored base right
 				// away (no confirmation, no need to have written to them) and

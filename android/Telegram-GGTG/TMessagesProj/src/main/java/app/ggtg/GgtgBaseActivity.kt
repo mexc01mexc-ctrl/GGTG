@@ -127,6 +127,15 @@ class GgtgBaseActivity(private val baseId: Long) : BaseFragment() {
         if (!isGroups) {
             actionRow(main, R.drawable.msg_saved, "Сохранить изменения") { save() }
         }
+        if (!isGroups) {
+            // names and "last seen" are loaded on THIS button (one account after another, flood-safe), never by opening the list
+            actionRow(main, R.drawable.msg_contacts, "Загрузить профили (имя, когда был в сети)…", chevron = true) {
+                val ctx = context ?: parentActivity
+                if (ctx != null) {
+                    GgtgBaseChecker.checkBase(ctx, baseId, meta?.title ?: "База") { reload() }
+                }
+            }
+        }
         actionRow(main, R.drawable.msg_viewchats, "Открыть списком (кликабельно)", chevron = true) { presentFragment(GgtgBaseListActivity(baseId, isGroups)) }
         if (!isGroups) {
             actionRow(main, R.drawable.msg_clear, "Очистка базы…", chevron = true) { cleanup() }

@@ -124,6 +124,17 @@ ggtgEyeButton: IconButton {
 	rippleAreaSize: 32px;
 	ripple: defaultRippleAnimation;
 }
+// "Загрузить профили" row: a person with a check (names and "last seen" are fetched on this button only).
+ggtgProfilesButton: IconButton {
+	width: 32px;
+	height: 32px;
+	icon: icon {{ "menu/factcheck", menuIconFg }};
+	iconOver: icon {{ "menu/factcheck", menuIconFgOver }};
+	iconPosition: point(-1px, -1px);
+	rippleAreaPosition: point(0px, 0px);
+	rippleAreaSize: 32px;
+	ripple: defaultRippleAnimation;
+}
 ggtgSendButton: IconButton {
 	width: 32px;
 	height: 32px;

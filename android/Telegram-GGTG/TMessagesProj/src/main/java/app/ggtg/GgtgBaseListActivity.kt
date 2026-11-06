@@ -184,7 +184,9 @@ class GgtgBaseListActivity(private val baseId: Long, private val isGroups: Boole
         } else {
             "${rows.size} из $totalCount"
         }
-        startBackgroundResolving()
+        // ggtg: opening a list of PEOPLE does not look every one of them up any more (it used an account and ended
+        // in flood): "Загрузить профили" does that, on its own button. Lists of groups keep their lookup.
+        if (isGroups) startBackgroundResolving()
     }
 
     private fun startBackgroundResolving() {
@@ -471,7 +473,7 @@ class GgtgBaseListActivity(private val baseId: Long, private val isGroups: Boole
 
         if (!isGroups) {
             val checkBtn = TextView(context).apply {
-                text = "Проверить базу (загрузить профили через корзину / ротацию)"
+                text = "Загрузить профили (имя, когда был в сети)"
                 textSize = 13f
                 setTypeface(null, Typeface.BOLD)
                 setTextColor(Theme.getColor(Theme.key_windowBackgroundWhiteBlueText))
