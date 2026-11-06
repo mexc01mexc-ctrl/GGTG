@@ -20,8 +20,23 @@ For license and exceptions, see https://github.com/telegramdesktop/tdesktop/blob
 #include <QtCore/QSaveFile>
 
 #include <algorithm>
+#include <functional>
+
+namespace Main {
+class Account;
+} // namespace Main
 
 namespace Core::GgtgSessions {
+
+// Set by settings/bulk_accounts_actions.cpp. Main::Account calls it when the
+// server answers 401 on the main DC, BEFORE the account is logged out and
+// wiped: true = the hook took over (a session this app has just switched the
+// account onto was already dead, and the previous one is being put back).
+[[nodiscard]] inline std::function<bool(Main::Account*, const QString &)>
+&SwapRescueHook() {
+	static auto hook = std::function<bool(Main::Account*, const QString &)>();
+	return hook;
+}
 
 // Journal of accounts whose session the server (or someone) ended while the
 // app was running: tdata/ggtg_db/sessions.json. The app logs such

@@ -744,6 +744,12 @@ void Account::startMtp(std::unique_ptr<MTP::Config> config) {
 	_mtp->setGlobalFailHandler([=](
 			const MTP::Error &error,
 			const MTP::Response &) {
+		if (error.code() == 401) {
+			if (const auto &hook = Core::GgtgSessions::SwapRescueHook()
+				; hook && hook(this, error.type())) {
+				return;
+			}
+		}
 		if (const auto session = maybeSession()) {
 			// The server rejected the main-DC authorization; the app then
 			// logs this account out and wipes its local data. Say why.

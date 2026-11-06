@@ -11838,6 +11838,11 @@ void CreateBackupSessionWith(
 			return;
 		}
 		Sessions::WriteSessionVaultSidecar(entry);
+		// ggtg: a spare that nobody uses for a while is ended by Telegram once the account's "terminate inactive
+		// sessions" period passes: stretch it to the longest one so stored sessions stay alive.
+		if (weak->sessionExists()) {
+			weak->session().api().authorizations().updateTTL(365);
+		}
 		Core::GgtgLog::Info(
 			u"Сессии"_q,
 			u"Создана %1 сессия: +%2 %3"_q
@@ -12141,6 +12146,100 @@ void SwitchAccountToFolder(
 		targetDevice);
 }
 
+namespace {
+
+// ggtg: a session the app has just switched an account onto may turn out to be dead (Telegram ended it while
+// it sat in the vault: an inactive session expires after the account's "terminate inactive sessions" period).
+// The 401 that follows used to log the account out and wipe it; now the previous session, kept in the vault
+// just before the switch, is put back and the dead one is marked "revoked".
+struct SwapGuard {
+	QString targetId;
+	QString oldId;
+	qint64 at = 0;
+	bool rescuing = false;
+};
+
+[[nodiscard]] std::map<QString, SwapGuard> &SwapGuards() {
+	static auto result = std::map<QString, SwapGuard>();
+	return result;
+}
+
+[[nodiscard]] bool RescueFailedSwap(Main::Account *account, const QString &reason) {
+	namespace Sessions = Core::GgtgSessions;
+	if (!account || !account->sessionExists()) {
+		return false;
+	}
+	const auto userId = QString::number(account->session().userId().bare);
+	auto &guards = SwapGuards();
+	const auto i = guards.find(userId);
+	if (i == guards.end()) {
+		return false;
+	}
+	if (base::unixtime::now() - i->second.at > 15 * 60) {
+		guards.erase(i);
+		return false;
+	}
+	if (i->second.rescuing) {
+		return true;
+	}
+	const auto guard = i->second;
+	const auto old = FindStored(guard.oldId);
+	if (!old
+		|| !Sessions::HasKey(*old)
+		|| !QDir(Sessions::VaultFolder(*old) + u"/tdata"_q).exists()) {
+		guards.erase(userId);
+		return false;
+	}
+	i->second.rescuing = true;
+	const auto oldEntry = *old;
+	Sessions::UpdateStoredState(guard.targetId, u"revoked"_q);
+	Core::GgtgLog::Error(
+		u"Сессии"_q,
+		u"Резервная сессия оказалась разорвана ("_q + reason
+			+ u"), возвращаем прежнюю: +"_q + oldEntry.phone);
+	const auto weak = base::make_weak(account);
+	base::call_delayed(300, [=] {
+		const auto alive = weak.get();
+		if (!alive) {
+			SwapGuards().erase(userId);
+			return;
+		}
+		const auto proxy = (!oldEntry.proxy.isEmpty())
+			? std::make_optional(ProxyFromObject(oldEntry.proxy))
+			: std::nullopt;
+		const auto device = (!oldEntry.device.isEmpty())
+			? std::make_optional(DeviceOverrideFromJson(oldEntry.device))
+			: std::nullopt;
+		SwitchAccountToFolderTracked(
+			alive,
+			Sessions::VaultFolder(oldEntry),
+			QString(),
+			[=](QString error) {
+				SwapGuards().erase(userId);
+				if (error.isEmpty()) {
+					Sessions::MarkCurrent(oldEntry.id);
+					Core::GgtgLog::Info(
+						u"Сессии"_q,
+						u"Прежняя сессия возвращена: +"_q + oldEntry.phone);
+				} else {
+					Core::GgtgLog::Error(
+						u"Сессии"_q,
+						u"Не удалось вернуть прежнюю сессию: "_q + error);
+				}
+			},
+			proxy,
+			device);
+	});
+	return true;
+}
+
+const auto kSwapRescueInstalled = [] {
+	Core::GgtgSessions::SwapRescueHook() = RescueFailedSwap;
+	return true;
+}();
+
+} // namespace
+
 void SwapToStoredSession(
 		not_null<Main::Account*> account,
 		const QString &id,
@@ -12201,6 +12300,11 @@ void SwapToStoredSession(
 				// Mark target session as active in vault, never remove it.
 				Sessions::MarkCurrent(targetId);
 				Sessions::PruneFormer(target->userId, oldId);
+				SwapGuards()[userId] = {
+					.targetId = targetId,
+					.oldId = oldId,
+					.at = qint64(base::unixtime::now()),
+				};
 			} else if (const auto alive = weak.get()
 				; alive && Main::AccountIsLive(alive)) {
 				// Still running on it: no need for the copy. (If the
