@@ -3041,7 +3041,7 @@ void FillGgtgShell(
 		.label = rpl::single(u"Синхронизация"_q),
 		.title = u"Синхронизация"_q,
 		.subtitle = u"Общие данные с GGTG на Android."_q,
-		.description = u"Базы, «уже написали», шаблоны и память ИИ сами переходят между Mac и телефоном. Телефон подключается по QR-коду."_q,
+		.description = u"Базы, «уже написали», шаблоны и память ИИ сами переходят между Desktop и телефоном. Телефон подключается по QR-коду."_q,
 		.makeBox = [=](not_null<Ui::SeparatePanel*>) {
 			return Settings::MakeGgtgSyncBox(controller);
 		},

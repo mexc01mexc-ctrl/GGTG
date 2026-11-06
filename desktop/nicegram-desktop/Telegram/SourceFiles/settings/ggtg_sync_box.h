@@ -452,7 +452,7 @@ inline void ShowPeerAccountsFromAndroidBox(
 				details.append(u"прокси: "_q + proxy.host);
 			}
 			if (alreadyOnMac) {
-				details.append(u"[Уже на Mac]"_q);
+				details.append(u"[Уже на Desktop]"_q);
 			}
 
 			const auto rowText = title + (details.isEmpty() ? QString() : (u"\n"_q + details.join(u" · "_q)));
@@ -788,7 +788,7 @@ inline void FillGgtgSyncBox(
 	box->addRow(
 		object_ptr<Ui::FlatLabel>(
 			box,
-			u"Список активных аккаунтов синхронизируется через облако без отправки файлов. Выберите нужный аккаунт, чтобы создать для него сессию на этом Mac."_q,
+			u"Список активных аккаунтов синхронизируется через облако без отправки файлов. Выберите нужный аккаунт, чтобы создать для него сессию на этом Desktop."_q,
 			st::boxDividerLabel),
 		st::boxRowPadding);
 
@@ -805,7 +805,7 @@ inline void FillGgtgSyncBox(
 	box->addRow(
 		object_ptr<Ui::FlatLabel>(
 			box,
-			u"Аккаунты с этого Mac автоматически доступны в списке на телефоне («Синхронизация аккаунтов»). Сессии создаются независимо на каждом устройстве и работают одновременно."_q,
+			u"Аккаунты с этого Desktop автоматически доступны в списке на телефоне («Синхронизация аккаунтов»). Сессии создаются независимо на каждом устройстве и работают одновременно."_q,
 			st::boxDividerLabel),
 		st::boxRowPadding);
 

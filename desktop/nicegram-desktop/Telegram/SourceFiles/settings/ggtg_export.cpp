@@ -1098,7 +1098,7 @@ Fn<std::optional<TdataExportOptions>()> AddTdataExportChoices(
 	radio(content, formatGroup, kFormatTdata, u"TData (папка Telegram Desktop)"_q);
 	radio(content, formatGroup, kFormatSessionJson, u"Сессия + JSON (Telethon / Pyrogram / софт)"_q);
 	if (withAndroid) {
-		radio(content, formatGroup, kFormatAndroid, u"Архив .ggtg (для GGTG на телефоне и Mac, много аккаунтов)"_q);
+		radio(content, formatGroup, kFormatAndroid, u"Архив .ggtg (для GGTG на телефоне и Desktop, много аккаунтов)"_q);
 	}
 
 	const auto sessionWrap = section();
