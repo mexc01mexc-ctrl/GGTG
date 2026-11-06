@@ -132,7 +132,7 @@ class GgtgBaseActivity(private val baseId: Long) : BaseFragment() {
             actionRow(main, R.drawable.msg_contacts, "Загрузить профили (имя, когда был в сети)…", chevron = true) {
                 val ctx = context ?: parentActivity
                 if (ctx != null) {
-                    GgtgBaseChecker.checkBase(ctx, baseId, meta?.title ?: "База") { reload() }
+                    GgtgBaseChecker.chooseAndCheck(ctx, baseId, meta?.title ?: "База") { reload() }
                 }
             }
         }
@@ -338,7 +338,7 @@ class GgtgBaseActivity(private val baseId: Long) : BaseFragment() {
             .setNegativeButton("Отмена", null)
         if (notChecked > 0) {
             builder.setNeutralButton("Проверить профили") { _, _ ->
-                GgtgBaseChecker.checkBase(ctx, baseId, title) { reload() }
+                GgtgBaseChecker.chooseAndCheck(ctx, baseId, title) { reload() }
             }
         }
         builder.show()

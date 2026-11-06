@@ -20,11 +20,41 @@ object GgtgBaseChecker {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
     private var checkJob: Job? = null
 
+    /** Asks which profiles to load (missing ones / all again), with the counts, then runs [checkBase]. */
+    @JvmStatic
+    fun chooseAndCheck(context: Context, baseId: Long, title: String, onDone: (() -> Unit)? = null) {
+        val usernames = GgtgDb.loadUsernames(baseId)
+        if (usernames.isEmpty()) { Toast.makeText(context, "База пуста", Toast.LENGTH_SHORT).show(); return }
+        val now = System.currentTimeMillis() / 1000
+        var without = 0; var missing = 0; var unknownAge = 0; var stale = 0; var fresh = 0
+        for (u in usernames) {
+            val m = GgtgDb.lookupUser(u)
+            when {
+                m?.missing == true -> missing++
+                m == null || m.id == 0L -> without++
+                m.loadedAt == 0L -> unknownAge++
+                now - m.loadedAt > 3 * 24 * 3600 -> stale++
+                else -> fresh++
+            }
+        }
+        val msg = "Для каждого человека загружается профиль: имя, статус «был(а) в сети», бот или нет. Загруженный профиль со временем устаревает.\n\n" +
+            "Всего в базе: ${usernames.size}\nПрофиль свежий (до 3 дней): $fresh\nПрофиль старше 3 дней: $stale\n" +
+            "Профиль загружен давно, время неизвестно: $unknownAge\nПрофиля нет: $without\nTelegram ответил «такого юзернейма нет»: $missing"
+        val b = org.telegram.ui.ActionBar.AlertDialog.Builder(context)
+            .setTitle("Загрузить профили: $title")
+            .setMessage(msg)
+            .setNegativeButton("Отмена", null)
+            .setNeutralButton("Обновить всех (${usernames.size})") { _, _ -> checkBase(context, baseId, title, onDone, refreshAll = true) }
+        if (without > 0) b.setPositiveButton("Недостающие ($without)") { _, _ -> checkBase(context, baseId, title, onDone) }
+        b.show()
+    }
+
     fun checkBase(
         context: Context,
         baseId: Long,
         title: String,
-        onDone: (() -> Unit)? = null
+        onDone: (() -> Unit)? = null,
+        refreshAll: Boolean = false
     ) {
         val usernames = GgtgDb.loadUsernames(baseId)
         if (usernames.isEmpty()) {
@@ -33,10 +63,10 @@ object GgtgBaseChecker {
         }
         val toCheck = usernames.filter { u ->
             val meta = GgtgDb.lookupUser(u)
-            meta == null || meta.id == 0L
+            refreshAll || ((meta == null || meta.id == 0L) && meta?.missing != true)
         }
         if (toCheck.isEmpty()) {
-            Toast.makeText(context, "Все пользователи в базе уже проверены", Toast.LENGTH_SHORT).show()
+            Toast.makeText(context, "У всех есть профиль или Telegram ответил, что такого юзернейма нет. Чтобы обновить всех, выберите «Обновить все»", Toast.LENGTH_LONG).show()
             onDone?.invoke()
             return
         }
@@ -172,6 +202,7 @@ object GgtgBaseChecker {
                                 delay(GgtgRegistration.jitter(600))
                                 continue
                             }
+                            if (errText == "USERNAME_NOT_OCCUPIED" || errText == "USERNAME_INVALID") GgtgDb.rememberMissing(username)
                             val res = pair?.first as? TLRPC.TL_contacts_resolvedPeer
                             if (res != null) {
                                 val user = res.users.firstOrNull()
@@ -210,7 +241,7 @@ object GgtgBaseChecker {
                     checkedCount++
                     withContext(Dispatchers.Main) {
                         progress.progress = checkedCount
-                        statusTv.text = "Проверено: $checkedCount из ${toCheck.size} (найдено: $resolvedCount)"
+                        statusTv.text = "Проверено: $checkedCount из ${toCheck.size}\nПрофилей загружено: $resolvedCount\nОсталось: ${toCheck.size - checkedCount}"
                     }
                     delay(GgtgRegistration.jitter(450))
                 }

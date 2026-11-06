@@ -260,7 +260,17 @@ void ShowSingleAccountPicker(
 	Main::Account *currentAccount,
 	Fn<void(not_null<Main::Account*>)> onChosen);
 
+// refreshAll: load every profile again (old ones are saved without a time and go stale); otherwise only the
+// people without a saved profile that Telegram did not already answer "no such username" about.
 void StartBaseVerification(
+	std::shared_ptr<Ui::Show> show,
+	uint64 baseId,
+	const QString &title,
+	Fn<void()> onDone = nullptr,
+	bool refreshAll = false);
+
+// Asks which profiles to load (missing ones / all again), with the counts, then runs StartBaseVerification.
+void ShowProfilesLoadChoice(
 	std::shared_ptr<Ui::Show> show,
 	uint64 baseId,
 	const QString &title,

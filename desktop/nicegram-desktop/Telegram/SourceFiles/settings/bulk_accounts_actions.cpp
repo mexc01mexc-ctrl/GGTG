@@ -2815,7 +2815,8 @@ void StartBaseVerification(
 		std::shared_ptr<Ui::Show> show,
 		uint64 baseId,
 		const QString &title,
-		Fn<void()> onDone) {
+		Fn<void()> onDone,
+		bool refreshAll) {
 	const auto allUsernames = Data::LoadScrapedGroupUsernames(baseId);
 	if (allUsernames.isEmpty()) {
 		show->showToast(u"База пуста"_q);
@@ -2828,12 +2829,12 @@ void StartBaseVerification(
 			continue;
 		}
 		const auto meta = Data::LookupUserMeta(key);
-		if (meta.id == 0) {
+		if (refreshAll || (meta.id == 0 && !meta.missing)) {
 			toCheck.push_back(key);
 		}
 	}
 	if (toCheck.isEmpty()) {
-		show->showToast(u"Все пользователи в базе уже проверены"_q);
+		show->showToast(u"У всех есть профиль или Telegram ответил, что такого юзернейма нет. Чтобы обновить всех, выберите «Обновить все»"_q);
 		if (onDone) {
 			onDone();
 		}
@@ -3058,6 +3059,14 @@ void StartBaseVerification(
 					return;
 				}
 				const auto type = error.type();
+				if (type == u"USERNAME_NOT_OCCUPIED"_q || type == u"USERNAME_INVALID"_q) {
+					// ggtg: Telegram says there is no such username - remembered, so the next run does not ask
+					// about the same names again (before, the same 26 came back every time)
+					auto meta = Data::UserMeta();
+					meta.missing = true;
+					meta.loadedAt = qint64(base::unixtime::now());
+					Data::RememberUserMeta(username, meta);
+				}
 				if (type.startsWith(u"FLOOD_WAIT"_q)) {
 					// this account rests for as long as Telegram says (not a fixed minute), and the SAME person is
 					// asked again through the next account: before, the person was skipped and counted as checked,
@@ -3174,7 +3183,9 @@ void ShowBaseCleanupBox(
 		}
 		{
 			const auto meta = Data::LookupUserMeta(key);
-			if (meta.id == 0) {
+			if (meta.missing) {
+				(*categories)[1].names.insert(key);
+			} else if (meta.id == 0) {
 				++notChecked;
 			} else if (meta.lastseen == 0 && !key.endsWith(u"bot"_q)) {
 				// a loaded profile whose status is "was seen a long time ago" (Telegram's own value, no time
@@ -3294,7 +3305,7 @@ void ShowBaseCleanupBox(
 				if (const auto strong = weak.data()) {
 					strong->closeBox();
 				}
-				StartBaseVerification(show, baseId, title, [=] {
+				ShowProfilesLoadChoice(show, baseId, title, [=] {
 					ShowBaseCleanupBox(show, baseId, title, onDone);
 				});
 			});
@@ -3353,6 +3364,80 @@ void ShowBaseCleanupBox(
 				}));
 			});
 		box->addButton(tr::lng_cancel(), [=] { box->closeBox(); });
+	}));
+}
+
+void ShowProfilesLoadChoice(
+		std::shared_ptr<Ui::Show> show,
+		uint64 baseId,
+		const QString &title,
+		Fn<void()> onDone) {
+	const auto usernames = Data::LoadScrapedGroupUsernames(baseId);
+	if (usernames.isEmpty()) {
+		show->showToast(u"База пуста"_q);
+		return;
+	}
+	auto total = 0, without = 0, missing = 0, unknownAge = 0, stale = 0, fresh = 0;
+	const auto now = qint64(base::unixtime::now());
+	constexpr auto kFresh = qint64(3 * 24 * 3600);
+	for (const auto &u : usernames) {
+		const auto key = u.trimmed().remove('@');
+		if (key.isEmpty()) {
+			continue;
+		}
+		++total;
+		const auto meta = Data::LookupUserMeta(key);
+		if (meta.missing) {
+			++missing;
+		} else if (meta.id == 0) {
+			++without;
+		} else if (!meta.loadedAt) {
+			++unknownAge;
+		} else if (now - meta.loadedAt > kFresh) {
+			++stale;
+		} else {
+			++fresh;
+		}
+	}
+	show->showBox(Box([=](not_null<Ui::GenericBox*> box) {
+		box->setWidth(st::accountsBoxWidth);
+		box->setTitle(rpl::single(u"Загрузить профили: "_q + title));
+		box->addRow(
+			object_ptr<Ui::FlatLabel>(
+				box,
+				u"Для каждого человека загружается профиль: имя, статус «был(а) в сети», бот или нет. "
+					"Загруженный профиль со временем устаревает, поэтому для каждого записано, когда он был загружен."_q,
+				st::boxDividerLabel),
+			st::boxRowPadding);
+		Ui::AddSkip(box->verticalLayout());
+		box->addRow(
+			object_ptr<Ui::FlatLabel>(
+				box,
+				u"Всего в базе: %1\n"
+					"Профиль свежий (до 3 дней): %2\n"
+					"Профиль старше 3 дней: %3\n"
+					"Профиль загружен давно, время неизвестно: %4\n"
+					"Профиля нет: %5\n"
+					"Telegram ответил «такого юзернейма нет»: %6"_q
+					.arg(total).arg(fresh).arg(stale).arg(unknownAge).arg(without).arg(missing),
+				st::boxLabel),
+			st::boxRowPadding);
+		const auto close = [=] { box->closeBox(); };
+		if (without > 0) {
+			box->addButton(
+				rpl::single(u"Недостающие (%1)"_q.arg(without)),
+				[=] {
+					close();
+					StartBaseVerification(show, baseId, title, onDone, false);
+				});
+		}
+		box->addButton(
+			rpl::single(u"Обновить всех (%1)"_q.arg(total)),
+			[=] {
+				close();
+				StartBaseVerification(show, baseId, title, onDone, true);
+			});
+		box->addLeftButton(tr::lng_cancel(), close);
 	}));
 }
 
@@ -3484,7 +3569,7 @@ void ShowClickableUsernamesBox(
 				});
 				if (verifyBtn) {
 					verifyBtn->setClickedCallback([=] {
-						StartBaseVerification(show, baseId, title, [=] {
+						ShowProfilesLoadChoice(show, baseId, title, [=] {
 							(*rebuild)();
 						});
 					});
@@ -4178,7 +4263,7 @@ void ShowEditBaseBox(
 				u"Загрузить профили (имя, когда был в сети)…"_q,
 				st::ggtgProfilesButton
 			)->setClickedCallback([=] {
-				StartBaseVerification(show, id, title, nullptr);
+				ShowProfilesLoadChoice(show, id, title, nullptr);
 			});
 			AddOpenListButton(box)->setClickedCallback([=] {
 				// "✕" in that list removes a user from the stored base right

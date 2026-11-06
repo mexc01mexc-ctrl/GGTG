@@ -479,7 +479,7 @@ class GgtgBaseListActivity(private val baseId: Long, private val isGroups: Boole
                 setTextColor(Theme.getColor(Theme.key_windowBackgroundWhiteBlueText))
                 setPadding(AndroidUtilities.dp(4f), AndroidUtilities.dp(6f), AndroidUtilities.dp(4f), AndroidUtilities.dp(2f))
                 setOnClickListener {
-                    GgtgBaseChecker.checkBase(context, baseId, meta?.title ?: "База") {
+                    GgtgBaseChecker.chooseAndCheck(context, baseId, meta?.title ?: "База") {
                         reloadRows()
                     }
                 }

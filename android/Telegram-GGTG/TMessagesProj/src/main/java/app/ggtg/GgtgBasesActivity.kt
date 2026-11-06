@@ -214,7 +214,7 @@ class GgtgBasesActivity : BaseFragment() {
             GgtgUi.menu(context, meta.title, listOfNotNull(
                 GgtgUi.MenuItem("Открыть списком (кликабельно)", R.drawable.msg_viewchats) { presentFragment(GgtgBaseListActivity(meta.id, isGroups)) },
                 if (isGroups) null else GgtgUi.MenuItem("Проверить базу…", R.drawable.msg_contacts) {
-                    GgtgBaseChecker.checkBase(context, meta.id, meta.title) { rebuildLists() }
+                    GgtgBaseChecker.chooseAndCheck(context, meta.id, meta.title) { rebuildLists() }
                 },
                 if (isGroups) null else GgtgUi.MenuItem("Очистить от фейков и ботов…", R.drawable.msg_bots) {
                     GgtgFakeDetector.showCleanBaseDialog(context, meta.id, meta.title) { rebuildLists() }

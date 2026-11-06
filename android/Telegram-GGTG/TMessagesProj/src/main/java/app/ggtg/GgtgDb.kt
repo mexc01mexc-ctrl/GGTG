@@ -59,7 +59,9 @@ object GgtgDb {
         val id: Long = 0,
         val name: String = "",
         val lastSeenTime: Long = 0,
-        val lastSeenText: String = ""
+        val lastSeenText: String = "",
+        val loadedAt: Long = 0, // when this profile was loaded from Telegram (0 = unknown, an older saved one)
+        val missing: Boolean = false // Telegram answered "no such username" at loadedAt
     )
 
     private val lock = Any()
@@ -89,7 +91,9 @@ object GgtgDb {
                         id = u.optLong("id", 0L),
                         name = u.optString("name", ""),
                         lastSeenTime = u.optLong("lastseen", 0L),
-                        lastSeenText = u.optString("lastseenText", "")
+                        lastSeenText = u.optString("lastseenText", ""),
+                        loadedAt = u.optLong("loadedAt", 0L),
+                        missing = u.optBoolean("missing", false)
                     )
                 }
             } catch (_: Throwable) {}
@@ -106,6 +110,8 @@ object GgtgDb {
                 put("id", v.id)
                 put("lastseen", v.lastSeenTime)
                 put("lastseenText", v.lastSeenText)
+                put("loadedAt", v.loadedAt)
+                put("missing", v.missing)
             }
             obj.put(k, u)
         }
@@ -137,8 +143,18 @@ object GgtgDb {
             id = user.id,
             name = name,
             lastSeenTime = lastSeen,
-            lastSeenText = text
+            lastSeenText = text,
+            loadedAt = now
         )
+        saveUsersMeta(map)
+    }
+
+    /** Telegram answered "no such username": remembered, so the next run does not ask about it again. */
+    fun rememberMissing(username: String) = synchronized(lock) {
+        val u = username.trim().removePrefix("@").lowercase()
+        if (u.isEmpty()) return
+        val map = loadUsersMeta()
+        map[u] = UserMeta(username = u, missing = true, loadedAt = System.currentTimeMillis() / 1000)
         saveUsersMeta(map)
     }
 

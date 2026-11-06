@@ -416,6 +416,8 @@ struct UserMeta {
 	uint64 id = 0;
 	qint64 lastseen = 0; // SortByOnlineValue or unix seconds
 	QString lastseenText;
+	qint64 loadedAt = 0; // when this profile was loaded from Telegram (0 = unknown, an older saved one)
+	bool missing = false; // Telegram answered "no such username" at loadedAt
 };
 
 [[nodiscard]] UserMeta LookupUserMeta(const QString &username);

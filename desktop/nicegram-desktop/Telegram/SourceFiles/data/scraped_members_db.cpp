@@ -162,6 +162,8 @@ void WriteJson(const QString &path, const QJsonDocument &document) {
 				.id = userObj.value(u"id"_q).toString().toULongLong(),
 				.lastseen = userObj.value(u"lastseen"_q).toVariant().toLongLong(),
 				.lastseenText = userObj.value(u"lastseenText"_q).toString(),
+				.loadedAt = userObj.value(u"loadedAt"_q).toVariant().toLongLong(),
+				.missing = userObj.value(u"missing"_q).toBool(),
 			});
 		}
 		return map;
@@ -185,6 +187,8 @@ void SaveUsersMetaNow() {
 			{ u"id"_q, QString::number(meta.id) },
 			{ u"lastseen"_q, qint64(meta.lastseen) },
 			{ u"lastseenText"_q, meta.lastseenText },
+			{ u"loadedAt"_q, qint64(meta.loadedAt) },
+			{ u"missing"_q, meta.missing },
 		});
 	}
 	WriteJson(UsersMetaPath(), QJsonDocument(object));
@@ -2477,6 +2481,9 @@ void RememberUserMeta(const QString &username, const UserMeta &meta) {
 	}
 	auto &cache = UsersMetaCache();
 	cache[key] = meta;
+	if (!cache[key].loadedAt) {
+		cache[key].loadedAt = qint64(base::unixtime::now());
+	}
 	if (!meta.name.isEmpty()) {
 		RememberName(key, meta.name);
 	}
