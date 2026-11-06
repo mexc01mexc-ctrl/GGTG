@@ -8,8 +8,10 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "mtproto/proxy_pool.h"
 
 #include "core/ggtg_log.h"
+#include "data/scraped_members_db.h"
 #include "settings.h"
 
+#include <algorithm>
 #include <QtCore/QDir>
 #include <QtCore/QFile>
 #include <QtCore/QFileInfo>
@@ -23,6 +25,32 @@ namespace {
 
 [[nodiscard]] QString PoolFilePath() {
 	return cWorkingDir() + u"tdata/proxy_pool.json"_q;
+}
+
+[[nodiscard]] QString EntryKey(const ProxyData &proxy) {
+	return proxy.host + ':' + QString::number(proxy.port) + ':' + proxy.user;
+}
+
+[[nodiscard]] QString EntryKey(
+		const QString &host,
+		quint16 port,
+		const QString &user) {
+	return host + ':' + QString::number(port) + ':' + user;
+}
+
+[[nodiscard]] qint64 At(
+		const std::map<QString, qint64> &map,
+		const QString &key) {
+	const auto i = map.find(key);
+	return (i != map.end()) ? i->second : 0;
+}
+
+// Deleted on some device after it was last added anywhere.
+[[nodiscard]] bool EntryRemoved(
+		const std::map<QString, qint64> &tomb,
+		const QString &key) {
+	const auto removed = At(tomb, u"proxy:"_q + key);
+	return removed && removed >= At(tomb, u"proxyadd:"_q + key);
 }
 
 } // namespace
@@ -70,6 +98,10 @@ void ProxyPool::removeList(int listIndex) {
 		u"Удалён список \""_q + _lists[listIndex].name + u"\" ("_q
 			+ QString::number(_lists[listIndex].entries.size())
 			+ u" прокси)"_q);
+	Data::NoteDeleted(u"proxylist:"_q + _lists[listIndex].name.toLower());
+	for (const auto &entry : _lists[listIndex].entries) {
+		Data::NoteDeleted(u"proxy:"_q + EntryKey(entry));
+	}
 	_lists.erase(_lists.begin() + listIndex);
 	save();
 }
@@ -104,6 +136,7 @@ int ProxyPool::addLines(int listIndex, const QString &text) {
 			entry.password = QStringList(parts.mid(3)).join(':').trimmed();
 		}
 		entries.push_back(entry);
+		Data::NoteDeleted(u"proxyadd:"_q + EntryKey(entry));
 		++added;
 	}
 	if (added > 0) {
@@ -129,6 +162,7 @@ void ProxyPool::removeEntry(int listIndex, int entryIndex) {
 		u"Удалён прокси "_q + entries[entryIndex].host + ':'
 			+ QString::number(entries[entryIndex].port) + u" из \""_q
 			+ _lists[listIndex].name + '"');
+	Data::NoteDeleted(u"proxy:"_q + EntryKey(entries[entryIndex]));
 	entries.erase(entries.begin() + entryIndex);
 	save();
 }
@@ -147,6 +181,7 @@ std::optional<ProxyData> ProxyPool::take(int listIndex) {
 		u"Взят прокси "_q + result.host + ':' + QString::number(result.port)
 			+ u" из \""_q + _lists[listIndex].name + u"\" (осталось "_q
 			+ QString::number(entries.size() - 1) + ')');
+	Data::NoteDeleted(u"proxy:"_q + EntryKey(result));
 	entries.erase(entries.begin());
 	save();
 	return result;
@@ -172,6 +207,7 @@ bool ProxyPool::removeMatching(const ProxyData &proxy) {
 					u"Использованный прокси "_q + i->host + ':'
 						+ QString::number(i->port) + u" убран из \""_q
 						+ list.name + '"');
+				Data::NoteDeleted(u"proxy:"_q + EntryKey(*i));
 				list.entries.erase(i);
 				save();
 				return true;
@@ -294,6 +330,7 @@ int ProxyPool::mergeJson(const QByteArray &data) {
 		return 0;
 	}
 	auto addedCount = 0;
+	const auto tomb = Data::LoadTombstones();
 	for (const auto &lVal : doc.array()) {
 		const auto lObj = lVal.toObject();
 		const auto name = lObj.value("name").toString().trimmed();
@@ -303,6 +340,10 @@ int ProxyPool::mergeJson(const QByteArray &data) {
 		auto listIt = std::find_if(_lists.begin(), _lists.end(), [&](const ProxyList &l) {
 			return l.name.compare(name, Qt::CaseInsensitive) == 0;
 		});
+		if (listIt == _lists.end()
+			&& At(tomb, u"proxylist:"_q + name.toLower())) {
+			continue; // the list was deleted on purpose
+		}
 		if (listIt == _lists.end()) {
 			_lists.push_back({ .name = name });
 			listIt = _lists.end() - 1;
@@ -314,6 +355,9 @@ int ProxyPool::mergeJson(const QByteArray &data) {
 			const auto user = item.value("user").toString();
 			const auto pass = item.value("password").toString();
 			if (host.isEmpty() || !port) {
+				continue;
+			}
+			if (EntryRemoved(tomb, EntryKey(host, port, user))) {
 				continue;
 			}
 			const auto exists = std::any_of(listIt->entries.begin(), listIt->entries.end(), [&](const ProxyData &p) {
@@ -335,6 +379,33 @@ int ProxyPool::mergeJson(const QByteArray &data) {
 		save();
 	}
 	return addedCount;
+}
+
+int ProxyPool::applyTombstones(const std::map<QString, qint64> &tomb) {
+	auto removed = 0;
+	for (auto &list : _lists) {
+		const auto was = list.entries.size();
+		list.entries.erase(std::remove_if(
+			list.entries.begin(),
+			list.entries.end(),
+			[&](const ProxyData &p) {
+				return EntryRemoved(tomb, EntryKey(p));
+			}), list.entries.end());
+		removed += int(was - list.entries.size());
+	}
+	const auto lists = _lists.size();
+	_lists.erase(std::remove_if(
+		_lists.begin(),
+		_lists.end(),
+		[&](const ProxyList &list) {
+			return At(tomb, u"proxylist:"_q + list.name.toLower())
+				&& list.entries.empty();
+		}), _lists.end());
+	removed += int(lists - _lists.size());
+	if (removed > 0) {
+		save();
+	}
+	return removed;
 }
 
 ProxyPool &GlobalProxyPool() {

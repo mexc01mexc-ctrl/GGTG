@@ -9,6 +9,8 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 
 #include "mtproto/mtproto_proxy_data.h"
 
+#include <map>
+
 #include <rpl/event_stream.h>
 
 namespace MTP {
@@ -61,6 +63,11 @@ public:
 
 	[[nodiscard]] QByteArray toJson() const;
 	int mergeJson(const QByteArray &data);
+
+	// What was deleted/taken/re-added (the sync tombstones: "proxy:<host>:<port>:<login>",
+	// "proxyadd:...", "proxylist:<name>"): drops from here what another device
+	// deleted, so a deletion is not undone by the next sync.
+	int applyTombstones(const std::map<QString, qint64> &tombstones);
 
 private:
 	void load();

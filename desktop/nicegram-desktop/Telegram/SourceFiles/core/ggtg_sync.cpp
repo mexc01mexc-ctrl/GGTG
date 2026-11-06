@@ -441,6 +441,7 @@ MergeResult MergeSnapshot(const QByteArray &json) {
 	}
 	Data::MergeTombstones(remoteTomb);
 	const auto tomb = Data::LoadTombstones();
+	MTP::GlobalProxyPool().applyTombstones(tomb);
 	const auto deletedAfter = [&](const QString &key, qint64 at) {
 		const auto i = tomb.find(key);
 		return (i != tomb.end()) && (i->second >= at);

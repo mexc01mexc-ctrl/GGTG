@@ -1827,6 +1827,10 @@ std::map<QString, qint64> LoadTombstones() {
 	return TombstoneCache();
 }
 
+void NoteDeleted(const QString &key) {
+	NoteDeletedKey(key);
+}
+
 void MergeTombstones(const std::map<QString, qint64> &other) {
 	auto changed = false;
 	auto &mine = TombstoneCache();

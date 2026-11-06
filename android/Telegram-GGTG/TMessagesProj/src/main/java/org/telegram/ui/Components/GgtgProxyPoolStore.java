@@ -53,6 +53,44 @@ public class GgtgProxyPoolStore {
         return ApplicationLoader.applicationContext.getSharedPreferences(PREFS, Context.MODE_PRIVATE);
     }
 
+    // ggtg: deletions travel with the sync as tombstones ("proxy:<host>:<port>:<login>", "proxyadd:...",
+    // "proxylist:<name>"), so a proxy deleted on one device is not brought back by the other one.
+    private static String entryKey(String host, int port, String user) {
+        return host + ":" + port + ":" + (user == null ? "" : user);
+    }
+
+    private static void noteRemoved(Entry e) {
+        if (e != null) app.ggtg.GgtgDb.INSTANCE.noteDeleted("proxy:" + entryKey(e.host, e.port, e.username));
+    }
+
+    private static boolean entryRemoved(java.util.Map<String, Long> tomb, String key) {
+        Long removed = tomb.get("proxy:" + key);
+        if (removed == null || removed == 0L) return false;
+        Long added = tomb.get("proxyadd:" + key);
+        return removed >= (added == null ? 0L : added);
+    }
+
+    /** Drops what another device deleted; [tomb] is the merged tombstone map. */
+    public static synchronized int applyTombstones(java.util.Map<String, Long> tomb) {
+        int removed = 0;
+        for (String name : getListNames()) {
+            List<String> lines = rawLines(name);
+            List<String> kept = new ArrayList<>();
+            for (String line : lines) {
+                Entry e = Entry.parse(line);
+                if (e != null && entryRemoved(tomb, entryKey(e.host, e.port, e.username))) { removed++; continue; }
+                kept.add(line);
+            }
+            if (kept.size() != lines.size()) saveLines(name, kept);
+            Long listGone = tomb.get("proxylist:" + name.toLowerCase());
+            if (listGone != null && listGone != 0L && kept.isEmpty()) {
+                deleteListQuiet(name);
+                removed++;
+            }
+        }
+        return removed;
+    }
+
     public static List<String> getListNames() {
         return new ArrayList<>(new LinkedHashSet<>(prefs().getStringSet("names", Collections.emptySet())));
     }
@@ -71,6 +109,10 @@ public class GgtgProxyPoolStore {
     }
 
     public static void addProxiesToList(String name, String rawPastedText) {
+        addProxies(name, rawPastedText, true);
+    }
+
+    private static void addProxies(String name, String rawPastedText, boolean noteAdded) {
         Set<String> names = new LinkedHashSet<>(prefs().getStringSet("names", Collections.emptySet()));
         names.add(name);
         prefs().edit().putStringSet("names", names).apply();
@@ -81,6 +123,7 @@ public class GgtgProxyPoolStore {
             Entry entry = Entry.parse(raw);
             if (entry != null) {
                 lines.add(entry.serialize());
+                if (noteAdded) app.ggtg.GgtgDb.INSTANCE.noteDeleted("proxyadd:" + entryKey(entry.host, entry.port, entry.username));
             }
         }
         saveLines(name, lines);
@@ -101,7 +144,9 @@ public class GgtgProxyPoolStore {
         if (lines.isEmpty()) return null;
         String first = lines.remove(0);
         saveLines(name, lines);
-        return Entry.parse(first);
+        Entry popped = Entry.parse(first);
+        noteRemoved(popped);
+        return popped;
     }
 
     // ggtg: a popped proxy that no account ended up using
@@ -109,6 +154,7 @@ public class GgtgProxyPoolStore {
         List<String> lines = rawLines(name);
         lines.add(0, entry.serialize());
         saveLines(name, lines);
+        app.ggtg.GgtgDb.INSTANCE.noteDeleted("proxyadd:" + entryKey(entry.host, entry.port, entry.username));
     }
 
     // ng: list management for the GGTG "Прокси" section (GGTG Desktop's proxy list editor)
@@ -157,7 +203,7 @@ public class GgtgProxyPoolStore {
         if (newName.isEmpty() || newName.equals(oldName)) return;
         String text = getListText(oldName);
         String country = getCountry(oldName);
-        deleteList(oldName);
+        deleteListQuiet(oldName);
         replaceList(newName, text);
         if (!country.isEmpty()) {
             setCountry(newName, country);
@@ -183,6 +229,7 @@ public class GgtgProxyPoolStore {
             if (e != null && e.host.equalsIgnoreCase(host) && e.port == port) {
                 lines.remove(i);
                 saveLines(name, lines);
+                noteRemoved(e);
                 return true;
             }
         }
@@ -190,6 +237,12 @@ public class GgtgProxyPoolStore {
     }
 
     public static void deleteList(String name) {
+        for (String line : rawLines(name)) noteRemoved(Entry.parse(line));
+        app.ggtg.GgtgDb.INSTANCE.noteDeleted("proxylist:" + name.toLowerCase());
+        deleteListQuiet(name);
+    }
+
+    private static void deleteListQuiet(String name) {
         Set<String> names = new LinkedHashSet<>(prefs().getStringSet("names", Collections.emptySet()));
         names.remove(name);
         prefs().edit().putStringSet("names", names).remove("list_" + name).remove("country_" + name).apply();
@@ -223,6 +276,7 @@ public class GgtgProxyPoolStore {
 
     public static synchronized int mergeJson(String jsonStr) {
         int addedCount = 0;
+        java.util.Map<String, Long> tomb = app.ggtg.GgtgDb.INSTANCE.loadTombstones();
         try {
             org.json.JSONArray array = new org.json.JSONArray(jsonStr);
             for (int i = 0; i < array.length(); i++) {
@@ -231,6 +285,7 @@ public class GgtgProxyPoolStore {
                 if (name.isEmpty()) continue;
                 org.json.JSONArray entries = listObj.optJSONArray("entries");
                 if (entries == null) continue;
+                if (!getListNames().contains(name) && tomb.get("proxylist:" + name.toLowerCase()) != null) continue;
 
                 StringBuilder sb = new StringBuilder();
                 List<String> existing = rawLines(name);
@@ -246,6 +301,7 @@ public class GgtgProxyPoolStore {
                     String user = item.optString("user");
                     String pass = item.optString("password");
                     String key = host + ":" + port + ":" + user + ":" + pass;
+                    if (entryRemoved(tomb, entryKey(host, port, user))) continue;
                     if (!keys.contains(key) && !host.isEmpty() && port > 0) {
                         keys.add(key);
                         sb.append(key).append("\n");
@@ -253,7 +309,7 @@ public class GgtgProxyPoolStore {
                     }
                 }
                 if (sb.length() > 0) {
-                    addProxiesToList(name, sb.toString());
+                    addProxies(name, sb.toString(), false);
                 } else if (!getListNames().contains(name)) {
                     Set<String> names = new LinkedHashSet<>(prefs().getStringSet("names", Collections.emptySet()));
                     names.add(name);

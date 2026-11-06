@@ -386,6 +386,7 @@ object GgtgSync {
         root.optJSONObject("tomb")?.let { o -> for (k in o.keys()) remoteTomb[k] = long(o, k) }
         GgtgDb.mergeTombstones(remoteTomb)
         val tomb = GgtgDb.loadTombstones()
+        org.telegram.ui.Components.GgtgProxyPoolStore.applyTombstones(tomb)
         fun deletedAfter(key: String, at: Long) = (tomb[key] ?: Long.MIN_VALUE) >= at
 
         // the registry of who was written to

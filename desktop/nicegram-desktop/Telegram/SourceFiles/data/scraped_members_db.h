@@ -349,6 +349,8 @@ struct BaseStats {
 // not undone by the other device's older copy.
 [[nodiscard]] std::map<QString, qint64> LoadTombstones();
 void MergeTombstones(const std::map<QString, qint64> &other);
+// Notes that `key` was deleted (or, for the "proxyadd:" keys, re-added) just now.
+void NoteDeleted(const QString &key);
 // Puts a base in as it is: keeps `meta.savedAt`, replaces its contents, no
 // cross-base dedupe (the other device already did it).
 void ImportBase(
