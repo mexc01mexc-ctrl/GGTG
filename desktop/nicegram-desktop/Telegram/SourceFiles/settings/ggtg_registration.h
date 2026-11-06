@@ -3822,7 +3822,16 @@ private:
 			};
 			auto line = u"Ответ Telegram на запрос кода: способ - "_q + typeName(codeType);
 			if (const auto next = data.vnext_type()) {
-				line += u"; если не придёт, дальше - "_q + typeName(*next);
+				line += u"; если не придёт, дальше - "_q + [&] {
+					switch (next->type()) {
+					case mtpc_auth_codeTypeSms: return u"SMS"_q;
+					case mtpc_auth_codeTypeCall: return u"голосовой звонок"_q;
+					case mtpc_auth_codeTypeFlashCall: return u"flash-звонок"_q;
+					case mtpc_auth_codeTypeMissedCall: return u"пропущенный звонок"_q;
+					case mtpc_auth_codeTypeFragmentSms: return u"SMS через Fragment"_q;
+					}
+					return u"неизвестный тип "_q + QString::number(next->type());
+				}();
 			} else {
 				line += u"; следующего способа Telegram не предлагает"_q;
 			}
