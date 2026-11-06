@@ -1,0 +1,21 @@
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="24dp"
+    android:height="24dp"
+    android:viewportWidth="72"
+    android:viewportHeight="72">
+    <!-- ggtg: two people (accounts) in the same bold, rounded style as the other main-tab icons -->
+    <path
+        android:fillColor="#00000000"
+        android:pathData="M28,31A10.5,10.5 0 1 0 28,10A10.5,10.5 0 0 0 28,31ZM8,60C8,48.5 16,41.5 28,41.5C40,41.5 48,48.5 48,60"
+        android:strokeColor="#FFFFFF"
+        android:strokeWidth="5.5"
+        android:strokeLineCap="round"
+        android:strokeLineJoin="round" />
+    <path
+        android:fillColor="#00000000"
+        android:pathData="M50,28A8.5,8.5 0 1 0 50,11A8.5,8.5 0 0 0 50,28ZM54,41.5C62,43 65,49 65,56"
+        android:strokeColor="#FFFFFF"
+        android:strokeWidth="5.5"
+        android:strokeLineCap="round"
+        android:strokeLineJoin="round" />
+</vector>

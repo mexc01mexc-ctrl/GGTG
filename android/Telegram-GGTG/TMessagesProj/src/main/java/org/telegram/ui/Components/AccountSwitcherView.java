@@ -78,8 +78,20 @@ public class AccountSwitcherView extends FrameLayout {
     private final List<Integer> accounts;
     private final List<Item> items = new ArrayList<>();
 
+    private boolean fullHeight;
+
+    /** ggtg: the same list as a whole page (the "Аккаунты" tab) instead of a popup: it fills its parent. */
+    public AccountSwitcherView(Context context, List<Integer> accountNumbers, int currentAccount, OnAccountSelected listener, boolean fullHeight) {
+        this(context, accountNumbers, currentAccount, listener, fullHeight, true);
+    }
+
     public AccountSwitcherView(Context context, List<Integer> accountNumbers, int currentAccount, OnAccountSelected listener) {
+        this(context, accountNumbers, currentAccount, listener, false, true);
+    }
+
+    private AccountSwitcherView(Context context, List<Integer> accountNumbers, int currentAccount, OnAccountSelected listener, boolean fullHeight, boolean unused) {
         super(context);
+        this.fullHeight = fullHeight;
 
         accounts = new ArrayList<>(accountNumbers);
         rebuildItems();
@@ -116,7 +128,18 @@ public class AccountSwitcherView extends FrameLayout {
         touchHelper.attachToRecyclerView(listView);
         adapter.touchHelper = touchHelper;
 
-        addView(listView, LayoutHelper.createFrame(LayoutHelper.MATCH_PARENT, ROW_HEIGHT_DP * Math.min(items.size(), MAX_VISIBLE_ROWS)));
+        addView(listView, LayoutHelper.createFrame(LayoutHelper.MATCH_PARENT, fullHeight ? LayoutHelper.MATCH_PARENT : ROW_HEIGHT_DP * Math.min(items.size(), MAX_VISIBLE_ROWS)));
+        if (fullHeight) {
+            listView.setClipToPadding(false);
+            listView.setPadding(0, 0, 0, dp(104)); // room under the list for the floating tab bar
+        }
+    }
+
+    /** ggtg: rebuilds the list from the accounts there are now (called when the page comes back / accounts change). */
+    public void refreshAccounts(List<Integer> accountNumbers) {
+        accounts.clear();
+        accounts.addAll(accountNumbers);
+        refresh();
     }
 
     /** ng: the popup sizes itself once at construction time (its containing ItemOptions measures
@@ -124,6 +147,9 @@ public class AccountSwitcherView extends FrameLayout {
      * are afterward, so the container needs to be told to re-measure each time or extra rows just
      * render into space that was never allocated. */
     private void updateHeight() {
+        if (fullHeight) {
+            return;
+        }
         ViewGroup.LayoutParams params = listView.getLayoutParams();
         params.height = dp(ROW_HEIGHT_DP) * Math.min(items.size(), MAX_VISIBLE_ROWS);
         listView.setLayoutParams(params);

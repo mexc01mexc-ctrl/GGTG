@@ -10616,6 +10616,7 @@
 
     <string name="MainTabsContacts">Contacts</string>
     <string name="MainTabsGgtg">GGTG</string>
+    <string name="MainTabsAccounts">Аккаунты</string>
     <string name="MainTabsCalls">Calls</string>
     <string name="MainTabsChats">Chats</string>
     <string name="MainTabsProfile">Profile</string>
