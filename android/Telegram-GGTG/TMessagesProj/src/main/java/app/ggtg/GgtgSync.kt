@@ -458,7 +458,13 @@ object GgtgSync {
                             checked = e.optBoolean("checked")
                         ))
                     } else {
-                        items.optString(j).takeIf { it.isNotEmpty() }?.let { names.add(it) }
+                        items.optString(j).takeIf { it.isNotEmpty() }?.let { name ->
+                            // someone removed on this device after the other copy was made stays removed
+                            val lower = name.lowercase()
+                            val removedAt = tomb["member:$lower"]
+                            val addedAt = tomb["memberadd:$lower"]
+                            if (removedAt == null || (addedAt != null && addedAt >= removedAt)) names.add(name)
+                        }
                     }
                 }
                 GgtgDb.importBase(id, kind, o.optString("title"), savedAt, names, entries, o.optString("source"))

@@ -1337,6 +1337,33 @@ void SaveScrapedGroupUsernames(
 			u"Не добавлено, уже есть в другой базе: "_q
 				+ QString::number(dropped));
 	}
+	// ggtg: remember who was REMOVED from the base (deleted by hand, cleaned out, pruned after a write) and who was put
+	// back, so that a copy of this base on another device - which still holds the removed people - cannot bring them
+	// back at the next sync ("member:<name>" = removed at, "memberadd:<name>" = put back at; the later one wins).
+	// A person who just moved to another base is not a removal.
+	{
+		const auto old = LoadScrapedGroupUsernames(id);
+		auto now = base::flat_set<QString>();
+		for (const auto &name : normalized) {
+			now.emplace(name.toLower());
+		}
+		const auto others = NamesInOtherBases(id, BaseKind::Users);
+		auto removed = 0;
+		for (const auto &name : old) {
+			const auto lower = name.toLower();
+			if (!now.contains(lower) && !others.contains(lower) && removed < 5000) {
+				NoteDeletedKey(u"member:"_q + lower);
+				++removed;
+			}
+		}
+		const auto &tomb = TombstoneCache();
+		for (const auto &name : normalized) {
+			const auto lower = name.toLower();
+			if (tomb.find(u"member:"_q + lower) != tomb.end()) {
+				NoteDeletedKey(u"memberadd:"_q + lower);
+			}
+		}
+	}
 	WriteUsernamesBase(id, title, normalized, source);
 }
 

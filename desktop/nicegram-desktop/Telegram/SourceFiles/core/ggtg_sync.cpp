@@ -658,7 +658,18 @@ MergeResult MergeSnapshot(const QByteArray &json) {
 					.checked = entry["checked"].toBool(),
 				});
 			} else {
-				names.push_back(item.toString());
+				// ggtg: someone removed on this device after the other copy was made stays removed
+				const auto name = item.toString();
+				const auto lower = name.toLower();
+				const auto removed = tomb.find(u"member:"_q + lower);
+				if (removed != tomb.end()) {
+					const auto added = tomb.find(u"memberadd:"_q + lower);
+					if (added == tomb.end() || removed->second > added->second) {
+						++result.sentRemoved;
+						continue;
+					}
+				}
+				names.push_back(name);
 			}
 		}
 		Data::ImportBase(meta, names, entries);

@@ -260,6 +260,27 @@ object GgtgDb {
             val others = namesInOtherBases(id, BaseKind.Users)
             normalized.removeAll { others.contains(it.lowercase()) }
         }
+        // ggtg: remember who was REMOVED from the base (deleted by hand, cleaned out, pruned after a write) and who was
+        // put back, so that a copy of this base on another device - which still holds the removed people - cannot
+        // bring them back at the next sync ("member:<name>" = removed at, "memberadd:<name>" = put back at; the later
+        // one wins). A person who just moved to another base is not a removal.
+        run {
+            val old = loadUsernames(id)
+            val now = HashSet<String>(); normalized.forEach { now.add(it.lowercase()) }
+            val others = namesInOtherBases(id, BaseKind.Users)
+            val stamp = System.currentTimeMillis() / 1000
+            val map = tombs()
+            var removed = 0
+            for (name in old) {
+                val lower = name.lowercase()
+                if (lower !in now && lower !in others && removed < 5000) { map["member:$lower"] = stamp; removed++ }
+            }
+            for (name in normalized) {
+                val lower = name.lowercase()
+                if (map.containsKey("member:$lower")) map["memberadd:$lower"] = stamp
+            }
+            if (removed > 0 || normalized.any { map.containsKey("memberadd:" + it.lowercase()) }) saveTombs()
+        }
         val array = JSONArray()
         normalized.forEach { array.put(it) }
         writeJson(groupPath(id), array.toString())
