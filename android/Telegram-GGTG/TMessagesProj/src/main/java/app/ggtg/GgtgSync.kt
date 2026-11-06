@@ -343,15 +343,16 @@ object GgtgSync {
             }
             availableAccounts.put(accObj)
         }
-        if (availableAccounts.length() > 0) {
-            body.put("available_accounts", availableAccounts)
-        }
+        // always present, even empty: an empty list means "no accounts here", not "unchanged"
+        body.put("available_accounts", availableAccounts)
 
         // the hash covers the contents only, not who made it and when
         val hash = MessageDigest.getInstance("SHA-256").digest(body.toString().toByteArray(Charsets.UTF_8))
             .joinToString("") { "%02x".format(it) }
         body.put("device", settings.deviceId)
-        body.put("deviceName", "Android")
+        body.put("deviceName", android.os.Build.MODEL.orEmpty().ifEmpty { "Android" })
+        body.put("deviceId", settings.deviceId)
+        body.put("snapshotAt", (System.currentTimeMillis() / 1000).toString())
         body.put("createdAt", (System.currentTimeMillis() / 1000).toString())
         return Snapshot(body.toString().toByteArray(Charsets.UTF_8), hash)
     }
@@ -368,7 +369,9 @@ object GgtgSync {
 
         if (root.has("available_accounts")) {
             val dev = root.optString("deviceName").ifEmpty { "Desktop" }
-            root.optJSONArray("available_accounts")?.let { savePeerAccounts(it, dev) }
+            root.optJSONArray("available_accounts")?.let {
+                savePeerAccounts(it, dev, root.optString("deviceId"), root.optString("snapshotAt").toLongOrNull() ?: 0L)
+            }
         }
 
         // what was deleted on purpose, from both sides
@@ -632,9 +635,14 @@ object GgtgSync {
 
     fun peerAccountsFile() = File(GgtgDb.dir(), "peer_accounts.json")
 
-    fun savePeerAccounts(accounts: JSONArray, device: String) = synchronized(lock) {
+    fun savePeerAccounts(accounts: JSONArray, device: String, deviceId: String = "", snapshotAt: Long = 0L) = synchronized(lock) {
+        // only the NEWEST snapshot counts: an older one (a device that was reinstalled leaves one behind) never overwrites it
+        val oldAt = runCatching { JSONObject(peerAccountsFile().readText()).optString("snapshotAt").toLongOrNull() ?: 0L }.getOrDefault(0L)
+        if (oldAt > 0L && snapshotAt < oldAt) return@synchronized
         val root = JSONObject().apply {
             put("device", device.ifEmpty { "Desktop" })
+            put("deviceId", deviceId)
+            put("snapshotAt", snapshotAt.toString())
             put("updatedAt", System.currentTimeMillis() / 1000)
             put("accounts", accounts)
         }

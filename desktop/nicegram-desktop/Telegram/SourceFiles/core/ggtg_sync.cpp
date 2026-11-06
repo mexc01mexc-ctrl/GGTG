@@ -473,7 +473,8 @@ Snapshot BuildSnapshot(const Settings &settings) {
 		}
 		availableAccounts.append(entry);
 	}
-	if (!availableAccounts.isEmpty()) {
+	{
+		// always present, even empty: an empty list means "no accounts here", not "unchanged"
 		body.insert("available_accounts", availableAccounts);
 	}
 
@@ -483,7 +484,9 @@ Snapshot BuildSnapshot(const Settings &settings) {
 		QJsonDocument(body).toJson(QJsonDocument::Compact),
 		QCryptographicHash::Sha256).toHex());
 	body.insert("device", settings.deviceId);
-	body.insert("deviceName", u"Mac"_q);
+	body.insert("deviceName", u"Desktop"_q);
+	body.insert("deviceId", LoadSettings().deviceId);
+	body.insert("snapshotAt", QString::number(base::unixtime::now()));
 	body.insert("createdAt", QString::number(base::unixtime::now()));
 	result.json = QJsonDocument(body).toJson(QJsonDocument::Compact);
 	return result;
@@ -506,7 +509,11 @@ MergeResult MergeSnapshot(const QByteArray &json) {
 
 	if (root.contains("available_accounts")) {
 		const auto device = root.value("deviceName").toString();
-		SavePeerAccounts(root.value("available_accounts").toArray(), device);
+		SavePeerAccounts(
+			root.value("available_accounts").toArray(),
+			device,
+			root.value("deviceId").toString(),
+			root.value("snapshotAt").toString().toLongLong());
 	}
 
 	// What was deleted on purpose, from both sides.
@@ -776,16 +783,39 @@ QString PairingText(const Settings &settings) {
 				| QByteArray::OmitTrailingEquals));
 }
 
-void SavePeerAccounts(const QJsonArray &accounts, const QString &device) {
+void SavePeerAccounts(
+		const QJsonArray &accounts,
+		const QString &device,
+		const QString &deviceId,
+		qint64 snapshotAt) {
+	// ggtg: several snapshots can be read in one round (a phone that was reinstalled leaves an old one behind,
+	// with another device id): only the NEWEST snapshot counts, an older one never overwrites it
+	const auto path = GgtgPaths::DbDir() + u"peer_accounts.json"_q;
+	const auto old = QJsonDocument::fromJson(ReadAll(path)).object();
+	const auto oldAt = old["snapshotAt"].toString().toLongLong();
+	if (oldAt > 0 && snapshotAt < oldAt) {
+		return;
+	}
 	auto root = QJsonObject{
 		{ "device", device.isEmpty() ? u"Android"_q : device },
+		{ "deviceId", deviceId },
+		{ "snapshotAt", QString::number(snapshotAt) },
 		{ "updatedAt", QString::number(base::unixtime::now()) },
 		{ "accounts", accounts },
 	};
 	WriteAtomic(
-		GgtgPaths::DbDir() + u"peer_accounts.json"_q,
+		path,
 		QJsonDocument(root).toJson(QJsonDocument::Compact),
 		0);
+}
+
+PeerSource PeerAccountsSource() {
+	const auto doc = QJsonDocument::fromJson(ReadAll(GgtgPaths::DbDir() + u"peer_accounts.json"_q));
+	const auto root = doc.object();
+	return {
+		.device = root["device"].toString(),
+		.snapshotAt = root["snapshotAt"].toString().toLongLong(),
+	};
 }
 
 std::vector<PeerAccount> PeerAccounts() {

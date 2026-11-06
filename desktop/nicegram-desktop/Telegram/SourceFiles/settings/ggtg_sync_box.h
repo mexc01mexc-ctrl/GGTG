@@ -422,6 +422,17 @@ inline void ShowPeerAccountsFromAndroidBox(
 				u"Аккаунты, активные на подключённом телефоне. Выберите аккаунт: Desktop создаст для него свою сессию, вход по QR подтвердится на телефоне сам."_q,
 				st::boxDividerLabel),
 			st::boxRowPadding);
+		{
+			// where this list came from: a stale list from a device that is gone is easy to tell apart
+			const auto source = Core::GgtgSync::PeerAccountsSource();
+			auto text = u"Данные от: "_q + (source.device.isEmpty() ? u"телефон"_q : source.device);
+			text += source.snapshotAt
+				? (u" · "_q + QDateTime::fromSecsSinceEpoch(source.snapshotAt).toString(u"dd.MM.yyyy hh:mm"_q))
+				: u" · время неизвестно (старая версия приложения на телефоне)"_q;
+			box->addRow(
+				object_ptr<Ui::FlatLabel>(box, text, st::boxDividerLabel),
+				st::boxRowPadding);
+		}
 
 		// grouped by folder (the trash last), like the other account lists
 		const auto folderOf = [](const Core::GgtgSync::PeerAccount &acc) {

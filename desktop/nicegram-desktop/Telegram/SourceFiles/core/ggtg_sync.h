@@ -101,6 +101,17 @@ struct PeerAccount {
 };
 
 [[nodiscard]] std::vector<PeerAccount> PeerAccounts();
-void SavePeerAccounts(const QJsonArray &accounts, const QString &device);
+void SavePeerAccounts(
+	const QJsonArray &accounts,
+	const QString &device,
+	const QString &deviceId = QString(),
+	qint64 snapshotAt = 0);
+
+// Who the stored list of the other device's accounts came from and when that snapshot was made.
+struct PeerSource {
+	QString device;
+	qint64 snapshotAt = 0;
+};
+[[nodiscard]] PeerSource PeerAccountsSource();
 
 } // namespace Core::GgtgSync
