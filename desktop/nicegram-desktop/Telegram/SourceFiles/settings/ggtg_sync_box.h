@@ -398,7 +398,11 @@ inline void ShowPeerAccountsFromAndroidBox(
 		box->setTitle(rpl::single(u"Аккаунты с телефона Android"_q));
 		auto accounts = Core::GgtgSync::PeerAccounts();
 		std::stable_sort(accounts.begin(), accounts.end(), [](const auto &a, const auto &b) {
-			return !a.trashed && b.trashed; // ggtg: the trash goes last
+			// ggtg: grouped by folder, the trash goes last
+			if (a.trashed != b.trashed) {
+				return !a.trashed;
+			}
+			return a.folder.compare(b.folder, Qt::CaseInsensitive) < 0;
 		});
 		if (accounts.empty()) {
 			box->addRow(
@@ -411,14 +415,36 @@ inline void ShowPeerAccountsFromAndroidBox(
 			return;
 		}
 
+		box->setWidth(st::accountsBoxWidth);
 		box->addRow(
 			object_ptr<Ui::FlatLabel>(
 				box,
-				u"Аккаунты, активные на подключённом телефоне. Выберите аккаунт: вход по QR подтвердится на телефоне сам."_q,
+				u"Аккаунты, активные на подключённом телефоне. Выберите аккаунт: Desktop создаст для него свою сессию, вход по QR подтвердится на телефоне сам."_q,
 				st::boxDividerLabel),
 			st::boxRowPadding);
 
+		// grouped by folder (the trash last), like the other account lists
+		const auto folderOf = [](const Core::GgtgSync::PeerAccount &acc) {
+			return acc.trashed
+				? u"Корзина"_q
+				: (acc.folder.isEmpty() ? u"Без папки"_q : acc.folder);
+		};
+		auto lastFolder = QString();
 		for (const auto &acc : accounts) {
+			const auto folderName = folderOf(acc);
+			if (folderName != lastFolder) {
+				lastFolder = folderName;
+				auto count = 0;
+				for (const auto &other : accounts) {
+					if (folderOf(other) == folderName) {
+						++count;
+					}
+				}
+				Ui::AddSkip(box->verticalLayout());
+				Ui::AddSubsectionTitle(
+					box->verticalLayout(),
+					rpl::single(folderName + u" · "_q + QString::number(count)));
+			}
 			auto alreadyOnMac = false;
 			for (const auto &[index, account] : Core::App().domain().accounts()) {
 				if (account->sessionExists()) {
@@ -439,28 +465,22 @@ inline void ShowPeerAccountsFromAndroidBox(
 				title = u"Аккаунт "_q + QString::number(acc.userId);
 			}
 
-			auto details = QStringList();
-			if (!acc.phone.isEmpty()) details.append(u"+"_q + acc.phone);
-			if (!acc.username.isEmpty()) details.append(u"@"_q + acc.username);
-			if (acc.trashed) {
-				details.append(u"Корзина"_q); // ggtg:
-			} else if (!acc.folder.isEmpty()) {
-				details.append(acc.folder);
-			}
+			auto second = QStringList();
+			if (!acc.phone.isEmpty()) second.append(u"+"_q + acc.phone);
+			if (!acc.username.isEmpty()) second.append(u"@"_q + acc.username);
 			const auto proxy = ProxyFromJsonObject(acc.proxy);
-			if (proxy.type != MTP::ProxyData::Type::None) {
-				details.append(u"прокси: "_q + proxy.host);
-			}
-			if (alreadyOnMac) {
-				details.append(u"[Уже на Desktop]"_q);
-			}
-
-			const auto rowText = title + (details.isEmpty() ? QString() : (u"\n"_q + details.join(u" · "_q)));
+			const auto third = (proxy.type != MTP::ProxyData::Type::None)
+				? (u"прокси: "_q + proxy.host)
+				: QString();
 			const auto row = box->addRow(
-				object_ptr<Ggtg::ActionRow>(
+				object_ptr<Ggtg::PeerAccountRow>(
 					box,
-					rpl::single(rowText),
-					alreadyOnMac ? QString() : u"Войти по QR"_q),
+					title,
+					second.join(u" · "_q),
+					third,
+					alreadyOnMac ? u"Уже на Desktop"_q : u"Войти по QR"_q,
+					!alreadyOnMac,
+					uint64(acc.userId)),
 				st::boxRowPadding);
 
 			if (!alreadyOnMac) {

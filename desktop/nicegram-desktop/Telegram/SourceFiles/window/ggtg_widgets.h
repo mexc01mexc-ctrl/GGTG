@@ -9,6 +9,7 @@ For license and exceptions, see https://github.com/telegramdesktop/tdesktop/blob
 #include "data/data_user.h"
 #include "main/main_session.h"
 #include "ui/abstract_button.h"
+#include "ui/empty_userpic.h"
 #include "ui/unread_badge.h"
 #include "styles/style_dialogs.h"
 #include "styles/style_menu_icons.h"
@@ -663,6 +664,99 @@ private:
 	const style::icon *_icon = nullptr;
 	UserData *_premiumUser = nullptr;
 	Ui::PeerBadge _premiumBadge;
+
+};
+
+
+// A row for an account that lives on another device (the phone): a round initials userpic, the name, then
+// "+phone · @username" and "folder · proxy" in the muted colour, and the state on the right ("Войти по QR" in
+// the accent colour, or a muted "Уже на Desktop"). Nothing is cut off mid-word: each line is elided on its own.
+class PeerAccountRow final : public Ui::AbstractButton {
+public:
+	PeerAccountRow(
+		not_null<QWidget*> parent,
+		const QString &title,
+		const QString &line2,
+		const QString &line3,
+		const QString &state,
+		bool actionable,
+		uint64 colorSeed)
+	: AbstractButton(parent.get())
+	, _title(title)
+	, _line2(line2)
+	, _line3(line3)
+	, _state(state)
+	, _actionable(actionable)
+	, _userpic(
+		Ui::EmptyUserpic::UserpicColor(Ui::EmptyUserpic::ColorIndex(colorSeed)),
+		title) {
+		resize(width(), style::ConvertScale(64));
+		if (_actionable) {
+			setCursor(style::cur_pointer);
+		}
+	}
+
+protected:
+	void paintEvent(QPaintEvent *e) override {
+		auto p = Painter(this);
+		auto hq = PainterHighQualityEnabler(p);
+		const auto radius = style::ConvertScale(10);
+		if (_actionable && (isOver() || isDown())) {
+			p.setPen(Qt::NoPen);
+			p.setBrush(st::windowBgOver);
+			p.drawRoundedRect(rect(), radius, radius);
+		}
+		const auto pad = style::ConvertScale(12);
+		const auto size = style::ConvertScale(42);
+		_userpic.paintCircle(p, pad, (height() - size) / 2, width(), size);
+
+		const auto textLeft = pad + size + style::ConvertScale(12);
+		const auto stateWidth = _state.isEmpty()
+			? 0
+			: (st::normalFont->width(_state) + style::ConvertScale(8));
+		const auto available = std::max(
+			width() - textLeft - stateWidth - pad,
+			0);
+		const auto lineHeight = st::normalFont->height;
+		const auto block = lineHeight * (_line3.isEmpty() ? 2 : 3);
+		auto top = (height() - block) / 2;
+		p.setFont(st::semiboldFont);
+		p.setPen(st::windowBoldFg);
+		p.drawText(
+			textLeft,
+			top + st::semiboldFont->ascent,
+			st::semiboldFont->elided(_title, available));
+		top += lineHeight;
+		p.setFont(st::normalFont);
+		p.setPen(st::windowSubTextFg);
+		p.drawText(
+			textLeft,
+			top + st::normalFont->ascent,
+			st::normalFont->elided(_line2, available));
+		if (!_line3.isEmpty()) {
+			top += lineHeight;
+			p.drawText(
+				textLeft,
+				top + st::normalFont->ascent,
+				st::normalFont->elided(_line3, available));
+		}
+		if (!_state.isEmpty()) {
+			p.setFont(st::semiboldFont);
+			p.setPen(_actionable ? st::windowActiveTextFg : st::windowSubTextFg);
+			p.drawText(
+				QRect(width() - pad - stateWidth, 0, stateWidth, height()),
+				Qt::AlignRight | Qt::AlignVCenter,
+				_state);
+		}
+	}
+
+private:
+	QString _title;
+	QString _line2;
+	QString _line3;
+	QString _state;
+	bool _actionable = false;
+	Ui::EmptyUserpic _userpic;
 
 };
 
