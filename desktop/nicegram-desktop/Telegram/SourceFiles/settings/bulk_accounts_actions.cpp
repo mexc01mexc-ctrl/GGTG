@@ -9027,6 +9027,7 @@ void AddSessionsSection(
 			Core::GgtgSessionCatalog::EditNote(holder, id, text);
 		});
 	};
+	const auto showDead = box->lifetime().make_state<bool>(false);
 	const auto fill = [=](const Api::Authorizations::List &list) {
 		const Ggtg::ScrollKeeper keepScroll(wrap);
 		wrap->clear();
@@ -9137,6 +9138,29 @@ void AddSessionsSection(
 			return baseRole
 				+ ((number > 1) ? (u" "_q + QString::number(number)) : QString());
 		};
+		// ggtg: what a stored session IS, in plain words: where its key lives and what can be done with it
+		const auto describeStored = [&](const Sessions::StoredSession &item) {
+			const auto kind = Sessions::Kind(item.role);
+			auto text = QString();
+			if (item.state == u"revoked"_q) {
+				text = u"Уже завершена в Telegram, остался только след в программе"_q;
+			} else if (kind == u"original"_q) {
+				text = u"Оригинал (как была куплена или добавлена): ключ хранится в программе"_q;
+			} else if (kind == u"handed"_q) {
+				text = (Sessions::Platform(item) == u"android"_q)
+					? u"Передана на телефон: ключ у телефона, здесь только запись. Переключаться на неё не нужно"_q
+					: u"Передана другому устройству: ключ у него, здесь только запись"_q;
+			} else if (kind == u"former"_q) {
+				text = u"Бывшая рабочая: ключ хранится в программе, можно вернуться на неё"_q;
+			} else {
+				text = u"Запасная: ключ хранится в программе, можно переключиться"_q;
+			}
+			text += u" · создана "_q + QDateTime::fromSecsSinceEpoch(item.createdAt).toString(u"dd.MM.yyyy hh:mm"_q);
+			if (!item.note.isEmpty()) {
+				text += u" · подпись: "_q + item.note;
+			}
+			return text;
+		};
 		const auto storedByHash = [&](uint64 hash, const QString &devName)
 				-> const Sessions::StoredSession* {
 			if (hash) {
@@ -9173,14 +9197,7 @@ void AddSessionsSection(
 						: (u" · "_q + Sessions::SessionNote(userId).text))
 					+ u")"_q;
 			} else if (spare) {
-				const auto notePart = (!spare->note.isEmpty())
-					? (u" · "_q + spare->note)
-					: QString();
-				suffix = u" ("_q + titleOf(*spare)
-					+ notePart
-					+ u" · "_q + QDateTime::fromSecsSinceEpoch(
-						spare->createdAt).toString(u"dd.MM.yyyy"_q)
-					+ u")"_q;
+				suffix = u" ("_q + describeStored(*spare) + u")"_q;
 			}
 			// ggtg: the other device knows this session too (by Telegram's number): who holds it
 			if (const auto remote = Catalog::ByHash(userId, entry.hash)) {
@@ -9196,6 +9213,7 @@ void AddSessionsSection(
 			const auto hash = entry.hash;
 			const auto device = entry.name;
 			const auto canSwitch = (spare && spare->state != u"revoked"_q
+				&& Sessions::Kind(spare->role) != u"handed"_q // the key of a handed-out session is not here to run
 				&& Sessions::HasKey(*spare)
 				&& QDir(Sessions::VaultFolder(*spare) + u"/tdata"_q).exists());
 			const auto storedSpare = spare ? *spare : Sessions::StoredSession();
@@ -9246,6 +9264,7 @@ void AddSessionsSection(
 
 		// Stored vault sessions not matched to an active session above:
 		// still switchable and removable from here.
+		auto deadCount = 0;
 		for (const auto &item : stored) {
 			if (!Sessions::HasKey(item)
 				|| !QDir(Sessions::VaultFolder(item) + u"/tdata"_q).exists()) {
@@ -9258,24 +9277,30 @@ void AddSessionsSection(
 			if (matchedAbove) {
 				continue;
 			}
+			// ggtg: a session Telegram no longer lists is dead: it is not shown among the working ones, only in a
+			// folded block below ("Завершены в Telegram"), where it can be deleted
+			const auto dead = (item.state == u"revoked"_q)
+				|| (item.hash && !list.empty());
+			if (dead && !*showDead) {
+				++deadCount;
+				continue;
+			}
 			const auto stored = item;
 			Api::Authorizations::Entry synth;
 			synth.name = titleOf(item);
 			synth.platform = item.device.value(u"systemVersion"_q).toString();
 			synth.system = synth.platform;
 			synth.info = item.device.value(u"appVersion"_q).toString();
-			synth.location = (item.state == u"revoked"_q)
+			synth.location = dead
 				? u"Завершена в Telegram (запись можно удалить)"_q
-				: u"Сохранена в программе"_q;
+				: u"Хранится в программе"_q;
 			synth.activeTime = static_cast<TimeId>(item.createdAt);
 			const auto createdDt = QDateTime::fromSecsSinceEpoch(item.createdAt);
 			synth.active = createdDt.toString(u"dd.MM.yyyy hh:mm"_q);
 			wrap->add(MakeSessionRow(
 				wrap,
 				synth,
-				u" ("_q + Sessions::SessionTitle(item)
-					+ (item.note.isEmpty() ? QString() : (u" · "_q + item.note))
-					+ u" · "_q + createdDt.toString(u"dd.MM.yyyy"_q) + u")"_q,
+				u" ("_q + describeStored(item) + u")"_q,
 				[=] {
 					ShowSessionInfo(
 						box->uiShow(),
@@ -9306,6 +9331,26 @@ void AddSessionsSection(
 					(*confirmSwitch)(stored);
 				}));
 		}
+		if (deadCount > 0 || *showDead) {
+			Ui::AddSkip(wrap);
+			wrap->add(
+				object_ptr<Ui::LinkButton>(
+					wrap,
+					*showDead
+						? u"Скрыть завершённые в Telegram"_q
+						: (u"Завершены в Telegram (%1): показать"_q.arg(deadCount))),
+				style::margins(
+					st::boxRowPadding.left(),
+					st::defaultVerticalListSkip,
+					st::boxRowPadding.right(),
+					st::defaultVerticalListSkip)
+			)->setClickedCallback([=] {
+				*showDead = !*showDead;
+				if (Main::AccountIsLive(account)) {
+					(*fillAgain)();
+				}
+			});
+		}
 		// ggtg: sessions held by the other device (phone / Desktop), read-only; only the note is editable and
 		// the edit goes back through the sync. Those already shown above (same Telegram number) are skipped.
 		{
@@ -9325,11 +9370,20 @@ void AddSessionsSection(
 					return item.hash == entry.hash;
 				});
 			};
+			// a session this Desktop handed to a phone is the one the phone reports about itself
+			const auto handedToPhone = ranges::any_of(stored, [&](
+					const Sessions::StoredSession &item) {
+				return Sessions::Kind(item.role) == u"handed"_q
+					&& Sessions::Platform(item) == u"android"_q;
+			});
 			for (const auto &r : Catalog::ForUser(userId)) {
 				auto shown = r.hash && ranges::any_of(list, [&](
 						const Api::Authorizations::Entry &entry) {
 					return entry.hash == r.hash;
 				});
+				if (!shown && !r.hash && handedToPhone && r.holderKind == u"android"_q) {
+					shown = true;
+				}
 				if (!shown && !r.hash && r.current) {
 					auto candidates = 0;
 					for (const auto &entry : list) {
