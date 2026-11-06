@@ -137,6 +137,9 @@ public class SessionsActivity extends BaseFragment implements NotificationCenter
     private int ttlDivideRow;
     private ArrayList<app.ggtg.GgtgSessions.StoredSession> unmatchedStoredSessions = new ArrayList<>();
     private int syncFromDesktopRow = -1;
+    private int deadToggleRow = -1; // ggtg: "Завершены в Telegram (N): показать"
+    private boolean showDeadSessions = false;
+    private int deadSessionsCount = 0;
     private int storedSessionsSectionRow = -1;
     private int storedSessionsStartRow = -1;
     private int storedSessionsEndRow = -1;
@@ -265,7 +268,11 @@ public class SessionsActivity extends BaseFragment implements NotificationCenter
         itemAnimator.setTranslationInterpolator(CubicBezierInterpolator.DEFAULT);
         listView.setItemAnimator(itemAnimator);
         listView.setOnItemClickListener((view, position) -> {
-            if (position == syncFromDesktopRow) {
+            if (position == deadToggleRow) {
+                showDeadSessions = !showDeadSessions;
+                updateRows();
+                return;
+            } else if (position == syncFromDesktopRow) {
                 receiveFromDesktop();
                 return;
             } else if (position >= storedSessionsStartRow && position < storedSessionsEndRow) {
@@ -980,6 +987,8 @@ public class SessionsActivity extends BaseFragment implements NotificationCenter
         remoteSessionsEndRow = -1;
         remoteSessionsDetailRow = -1;
         syncFromDesktopRow = -1;
+        deadToggleRow = -1;
+        deadSessionsCount = 0;
 
         if (currentType == 0 && getMessagesController().qrLoginCamera) {
             qrCodeRow = rowCount++;
@@ -1063,10 +1072,25 @@ public class SessionsActivity extends BaseFragment implements NotificationCenter
                         }
                     }
                     if (!matched) {
-                        unmatchedStoredSessions.add(s);
+                        // ggtg: a session Telegram no longer lists is dead: only in a folded block, not among the working ones
+                        boolean live = false;
+                        if (currentSession != null && s.getHash() != 0 && s.getHash() == currentSession.hash) live = true;
+                        for (TLObject obj : sessions) {
+                            if (obj instanceof TLRPC.TL_authorization && s.getHash() != 0 && s.getHash() == ((TLRPC.TL_authorization) obj).hash) live = true;
+                        }
+                        boolean dead = "revoked".equals(s.getState()) || (s.getHash() != 0 && !live && !sessions.isEmpty());
+                        if (dead && !showDeadSessions) {
+                            deadSessionsCount++;
+                        } else {
+                            unmatchedStoredSessions.add(s);
+                        }
                     }
                 }
             }
+        }
+
+        if (deadSessionsCount > 0 || showDeadSessions) {
+            deadToggleRow = rowCount++;
         }
 
         if (!unmatchedStoredSessions.isEmpty()) {
@@ -1089,6 +1113,22 @@ public class SessionsActivity extends BaseFragment implements NotificationCenter
                                 break;
                             }
                         }
+                    }
+                    // the other device cannot read its OWN session's number (Telegram lists it as "this device"), so the
+                    // record it sends about itself has none; this phone sees that very session in Telegram's list under
+                    // a number. Such a record is the one live session no local vault entry owns: not shown twice.
+                    if (!shown && r.getHash() == 0 && r.getCurrent()) {
+                        int candidates = 0;
+                        for (TLObject obj : sessions) {
+                            if (!(obj instanceof TLRPC.TL_authorization)) continue;
+                            long h = ((TLRPC.TL_authorization) obj).hash;
+                            boolean ownedHere = false;
+                            for (app.ggtg.GgtgSessions.StoredSession st : app.ggtg.GgtgSessions.INSTANCE.listForUser(remoteUser)) {
+                                if (st.getHash() == h) { ownedHere = true; break; }
+                            }
+                            if (!ownedHere) candidates++;
+                        }
+                        shown = candidates == 1;
                     }
                     if (!shown) remoteSessions.add(r);
                 }
@@ -1132,7 +1172,7 @@ public class SessionsActivity extends BaseFragment implements NotificationCenter
         @Override
         public boolean isEnabled(RecyclerView.ViewHolder holder) {
             int position = holder.getAdapterPosition();
-            return position == syncFromDesktopRow || position == terminateAllSessionsRow || position >= otherSessionsStartRow && position < otherSessionsEndRow || position >= botSessionsStartRow && position < botSessionsEndRow || position >= passwordSessionsStartRow && position < passwordSessionsEndRow || position == currentSessionRow || position == ttlRow || (position >= storedSessionsStartRow && position < storedSessionsEndRow) || (position >= remoteSessionsStartRow && position < remoteSessionsEndRow);
+            return position == deadToggleRow || position == syncFromDesktopRow || position == terminateAllSessionsRow || position >= otherSessionsStartRow && position < otherSessionsEndRow || position >= botSessionsStartRow && position < botSessionsEndRow || position >= passwordSessionsStartRow && position < passwordSessionsEndRow || position == currentSessionRow || position == ttlRow || (position >= storedSessionsStartRow && position < storedSessionsEndRow) || (position >= remoteSessionsStartRow && position < remoteSessionsEndRow);
         }
 
         @Override
@@ -1208,7 +1248,7 @@ public class SessionsActivity extends BaseFragment implements NotificationCenter
                     } else if (position == passwordSessionsDetailRow) {
                         privacyCell.setText(getString(R.string.LoginAttemptsInfo));
                     } else if (position == storedSessionsDetailRow) {
-                        privacyCell.setText("Сессии из локального хранилища аккаунта. Вы можете переключиться на любую из них или подписать её.");
+                        privacyCell.setText("Запасные сессии этого аккаунта лежат в программе. Нажмите на сессию: можно переключиться на неё, подписать или удалить запись.");
                     } else if (position == remoteSessionsDetailRow) {
                         privacyCell.setText("Сессии, ключи которых лежат на другом устройстве (телефон или Desktop). Их можно только подписать: подпись уйдёт владельцу сессии.");
                     } else if (position == qrCodeDividerRow || position == ttlDivideRow || position == noOtherSessionsRow) {
@@ -1231,7 +1271,7 @@ public class SessionsActivity extends BaseFragment implements NotificationCenter
                     } else if (position == ttlHeaderRow) {
                         headerCell.setText(getString(R.string.TerminateOldSessionHeader));
                     } else if (position == storedSessionsSectionRow) {
-                        headerCell.setText("Сохранённые сессии (хранилище)");
+                        headerCell.setText("Хранятся в программе");
                     } else if (position == remoteSessionsSectionRow) {
                         headerCell.setText("На других устройствах");
                     }
@@ -1240,7 +1280,9 @@ public class SessionsActivity extends BaseFragment implements NotificationCenter
                     break;
                 case VIEW_TYPE_SETTINGS:
                     TextSettingsCell textSettingsCell = (TextSettingsCell) holder.itemView;
-                    if (position == syncFromDesktopRow) {
+                    if (position == deadToggleRow) {
+                        textSettingsCell.setTextAndValue(showDeadSessions ? "Скрыть завершённые в Telegram" : "Завершены в Telegram (" + deadSessionsCount + ")", showDeadSessions ? "" : "показать", false, true);
+                    } else if (position == syncFromDesktopRow) {
                         textSettingsCell.setTextAndValue("Принять сессию с Desktop…", "Синхронизация GGTG", false, true);
                     } else {
                         String value;
@@ -1351,7 +1393,7 @@ public class SessionsActivity extends BaseFragment implements NotificationCenter
                 return VIEW_TYPE_SESSION;
             } else if (position == qrCodeRow) {
                 return VIEW_TYPE_SCANQR;
-            } else if (position == ttlRow || position == syncFromDesktopRow) {
+            } else if (position == ttlRow || position == syncFromDesktopRow || position == deadToggleRow) {
                 return VIEW_TYPE_SETTINGS;
             }
             return VIEW_TYPE_TEXT;

@@ -269,12 +269,22 @@ object GgtgSessions {
             return " (основная · эта сессия)"
         }
         if (stored == null) return ""
-        val roleStr = sessionTitle(stored).lowercase(Locale.getDefault())
-        val noteStr = if (stored.note.isNotEmpty()) " · ${stored.note}" else ""
-        val dateStr = if (stored.createdAt > 0L) {
-            " · " + SimpleDateFormat("dd.MM.yyyy", Locale.getDefault()).format(Date(stored.createdAt * 1000))
-        } else ""
-        return " ($roleStr$noteStr$dateStr)"
+        return " (" + describeStored(stored) + ")"
+    }
+
+    /** What a stored session IS, in plain words: where its key lives and what can be done with it. */
+    @JvmStatic
+    fun describeStored(s: StoredSession): String {
+        var text = when {
+            s.state == "revoked" -> "Уже завершена в Telegram, остался только след в программе"
+            s.role in listOf("purchased", "imported") -> "Оригинал (как была куплена или добавлена): ключ хранится в программе"
+            s.role in listOf("exported", "android") -> "Передана другому устройству: ключ у него, здесь только запись. Переключаться на неё не нужно"
+            s.role == "previous" -> "Бывшая рабочая: ключ хранится в программе, можно вернуться на неё"
+            else -> "Запасная: ключ хранится в программе, можно переключиться"
+        }
+        if (s.createdAt > 0L) text += " · создана " + SimpleDateFormat("dd.MM.yyyy HH:mm", Locale.getDefault()).format(Date(s.createdAt * 1000))
+        if (s.note.isNotEmpty()) text += " · подпись: ${s.note}"
+        return text
     }
 
     /** What a row of Telegram's own session list gets on top: the working session's born date and note, or who holds a session the other device knows. */
