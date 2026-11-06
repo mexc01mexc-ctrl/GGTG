@@ -9173,11 +9173,39 @@ void AddSessionsSection(
 		// the edit goes back through the sync. Those already shown above (same Telegram number) are skipped.
 		{
 			auto remoteRows = std::vector<Catalog::Record>();
+			// A device cannot read its OWN session's number (Telegram lists it as "this device", number 0), so
+			// the record the phone sends about itself has none, while this Desktop sees that very session in
+			// Telegram's list under a number. Such a record is the same session as the one live entry of its
+			// platform that no local vault entry owns: it is not shown a second time.
+			const auto isAndroidEntry = [](const Api::Authorizations::Entry &entry) {
+				return entry.platform.contains(u"Android"_q, Qt::CaseInsensitive)
+					|| entry.system.contains(u"Android"_q, Qt::CaseInsensitive)
+					|| entry.info.contains(u"Android"_q, Qt::CaseInsensitive);
+			};
+			const auto ownedLocally = [&](const Api::Authorizations::Entry &entry) {
+				return entry.hash == 0 || ranges::any_of(stored, [&](
+						const Sessions::StoredSession &item) {
+					return item.hash == entry.hash;
+				});
+			};
 			for (const auto &r : Catalog::ForUser(userId)) {
-				const auto shown = r.hash && ranges::any_of(list, [&](
+				auto shown = r.hash && ranges::any_of(list, [&](
 						const Api::Authorizations::Entry &entry) {
 					return entry.hash == r.hash;
 				});
+				if (!shown && !r.hash && r.current) {
+					auto candidates = 0;
+					for (const auto &entry : list) {
+						if (ownedLocally(entry)) {
+							continue;
+						}
+						const auto android = isAndroidEntry(entry);
+						if (android == (r.holderKind == u"android"_q)) {
+							++candidates;
+						}
+					}
+					shown = (candidates == 1);
+				}
 				if (!shown) {
 					remoteRows.push_back(r);
 				}
