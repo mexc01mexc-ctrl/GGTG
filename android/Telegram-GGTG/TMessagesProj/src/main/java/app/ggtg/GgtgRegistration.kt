@@ -847,6 +847,19 @@ object GgtgRegistration {
             return fetchApiGet(url)
         }
 
+        if (config.serviceId == "onlinesim") {
+            // OnlineSIM's own API: no "cancel", an operation is closed with setOperationOk (tzid, apikey); with no SMS
+            // it closes as failed and the money returns (not before the 120 s protective interval). The old
+            // stubs/handler_api.php?action=setStatus&status=8 answers with an empty body and returns nothing.
+            if (status == 8 || status == -1 || status == 6) {
+                return fetchApiGet("https://onlinesim.io/api/setOperationOk.php?apikey=$key&tzid=$activationId&lang=en")
+            }
+            if (status == 3) {
+                return fetchApiGet("https://onlinesim.io/api/setOperationRevise.php?apikey=$key&tzid=$activationId&lang=en")
+            }
+            return Result.success("OK")
+        }
+
         if (config.serviceId == "smspool") {
             if (status == 8 || status == -1) {
                 val url = "https://api.smspool.net/sms/cancel?key=$key&orderid=$activationId"

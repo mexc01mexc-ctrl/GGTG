@@ -9,6 +9,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #pragma once
 
 #include <QtWidgets/QTextEdit>
+#include <QtWidgets/QScrollBar>
 #include <QtNetwork/QTcpSocket>
 #include <QRandomGenerator>
 #include "apiwrap.h"
@@ -1855,6 +1856,38 @@ inline void SetSmsStatus(
 		return;
 	}
 
+	if (data.serviceId == u"onlinesim"_q) {
+		// ggtg: OnlineSIM's own API (onlinesim.io/openapi_docs): there is no "cancel" - an operation is closed with
+		// setOperationOk (tzid = the operation id, apikey = the key). With no SMS received the operation closes as
+		// failed and the money comes back; before the protective interval (120 s) it answers with an error.
+		// The old sms-activate style call (stubs/handler_api.php?action=setStatus&status=8) answers with an
+		// empty body and returns nothing.
+		if (status == 8 || status == -1 || status == 6) {
+			const auto url = QUrl(u"https://onlinesim.io/api/setOperationOk.php?apikey="_q + key
+				+ u"&tzid="_q + activationId + u"&lang=en"_q);
+			SendApiGet(url, [=](const QString &resp, const QString &err) {
+				if (done) {
+					done(err.isEmpty(), resp, err);
+				}
+			});
+			return;
+		}
+		if (status == 3) { // next SMS from the queue
+			const auto url = QUrl(u"https://onlinesim.io/api/setOperationRevise.php?apikey="_q + key
+				+ u"&tzid="_q + activationId + u"&lang=en"_q);
+			SendApiGet(url, [=](const QString &resp, const QString &err) {
+				if (done) {
+					done(err.isEmpty(), resp, err);
+				}
+			});
+			return;
+		}
+		if (done) {
+			done(true, u"OK"_q, QString());
+		}
+		return;
+	}
+
 	if (data.serviceId == u"smspool"_q) {
 		if (status == 8 || status == -1) { // Cancel
 			const auto url = QUrl(u"https://api.smspool.net/sms/cancel?key="_q + key + u"&orderid="_q + activationId);
@@ -2011,6 +2044,7 @@ inline void StartRefundSupervisor() {
 
 				SetSmsStatus(task.settings, actId, 8, [=](bool ok, QString resp, QString err) {
 					if (resp == u"ACCESS_CANCEL"_q || resp == u"ACCESS_CANCEL_ALREADY"_q || resp == u"STATUS_CANCEL"_q
+						|| resp.contains(u"OPERATION_CLOSED"_q) || resp.contains(u"ALREADY_CLOSED"_q)
 						|| resp.contains(u"\"success\":1"_q) || resp.contains(u"\"success\": 1"_q) || resp.contains(u"\"success\":true"_q)
 						|| resp.contains(u"\"response\":\"1\""_q) || resp.contains(u"\"response\": 1"_q) || resp.contains(u"\"response\":1"_q)) {
 						if (logCb) {
@@ -2051,7 +2085,8 @@ inline void EnqueueRefund(
 		logCb(u"Запрос отмены активации номера +"_q + phone + u" (ID: "_q + activationId + u") в SMS-сервисе..."_q);
 	}
 	SetSmsStatus(data, activationId, 8, [=](bool ok, QString resp, QString err) {
-		if (resp == u"ACCESS_CANCEL"_q || resp == u"ACCESS_CANCEL_ALREADY"_q || resp == u"STATUS_CANCEL"_q) {
+		if (resp == u"ACCESS_CANCEL"_q || resp == u"ACCESS_CANCEL_ALREADY"_q || resp == u"STATUS_CANCEL"_q
+			|| resp.contains(u"\"response\":1"_q) || resp.contains(u"\"response\": 1"_q) || resp.contains(u"\"response\":\"1\""_q)) {
 			if (logCb) {
 				logCb(u"[Возврат] Номер +"_q + phone + u" (ID: "_q + activationId + u") успешно отменён, средства возвращены на баланс."_q);
 			}
@@ -7744,15 +7779,20 @@ inline void FillRegistrationBox(
 			QString()),
 		style::margins(0, 0, 0, 0));
 	logField->rawTextEdit()->setReadOnly(true);
+	// ggtg: a log window of a fixed height with its own scroll: the page no longer grows (and jumps) with every
+	// new line, the window follows the newest line while you are at the bottom and stays where you scrolled
+	// if you went up to read
+	logField->setMinHeight(style::ConvertScale(300));
+	logField->setMaxHeight(style::ConvertScale(300));
 
 	if (const auto edit = logField->rawTextEdit()) {
 		edit->setReadOnly(true);
 		edit->setStyleSheet(u"background-color: #12161A; border-radius: 6px; padding: 6px;"_q);
 		if (!regController->logHistory().isEmpty()) {
 			edit->setHtml(regController->fullHtmlFromEntries());
-			auto cursor = edit->textCursor();
-			cursor.movePosition(QTextCursor::End);
-			edit->setTextCursor(cursor);
+			if (const auto bar = edit->verticalScrollBar()) {
+				bar->setValue(bar->maximum());
+			}
 		}
 	}
 
@@ -7760,10 +7800,13 @@ inline void FillRegistrationBox(
 	regController->setLogCallbackHtml([weakLogField](QString html, bool) {
 		if (!weakLogField) return;
 		if (const auto edit = weakLogField->rawTextEdit()) {
+			const auto bar = edit->verticalScrollBar();
+			const auto atBottom = !bar || (bar->value() >= bar->maximum() - 6);
+			const auto was = bar ? bar->value() : 0;
 			edit->setHtml(html);
-			auto cursor = edit->textCursor();
-			cursor.movePosition(QTextCursor::End);
-			edit->setTextCursor(cursor);
+			if (bar) {
+				bar->setValue(atBottom ? bar->maximum() : std::min(was, bar->maximum()));
+			}
 		}
 	});
 
