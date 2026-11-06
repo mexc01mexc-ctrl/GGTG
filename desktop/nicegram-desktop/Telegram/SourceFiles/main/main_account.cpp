@@ -13,6 +13,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "base/unixtime.h"
 #include "core/application.h"
 #include "core/ggtg_sessions.h"
+#include "core/ggtg_layout.h"
 #include "core/ggtg_sync_transport.h"
 #include "settings/sms_campaign.h"
 #include "mtproto/proxy_pool.h"
@@ -364,6 +365,9 @@ bool Account::pinned() const {
 }
 
 void Account::setPinned(bool pinned) {
+	if (local().readPinned() != pinned) {
+		Core::GgtgLayout::NoteChanged(); // ggtg: the arrangement of the accounts is shared by the sync
+	}
 	local().writePinned(pinned);
 }
 

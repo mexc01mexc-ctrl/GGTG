@@ -183,6 +183,7 @@ public class AccountSwitcherView extends FrameLayout {
                 uc.saveConfig(false);
             }
         }
+        app.ggtg.GgtgLayout.INSTANCE.noteChanged(); // ggtg: the arrangement is shared with the desktop
     }
 
     private void refresh() {

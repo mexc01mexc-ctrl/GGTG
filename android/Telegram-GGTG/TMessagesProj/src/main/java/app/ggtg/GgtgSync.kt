@@ -345,6 +345,8 @@ object GgtgSync {
         }
         // always present, even empty: an empty list means "no accounts here", not "unchanged"
         body.put("available_accounts", availableAccounts)
+        // the arrangement of the accounts list (order, pinned): the device that changed it last wins
+        body.put("layout", GgtgLayout.toJson())
 
         // the hash covers the contents only, not who made it and when
         val hash = MessageDigest.getInstance("SHA-256").digest(body.toString().toByteArray(Charsets.UTF_8))
@@ -373,6 +375,8 @@ object GgtgSync {
                 savePeerAccounts(it, dev, root.optString("deviceId"), root.optString("snapshotAt").toLongOrNull() ?: 0L)
             }
         }
+
+        root.optJSONObject("layout")?.let { GgtgLayout.apply(it) }
 
         // what was deleted on purpose, from both sides
         val remoteTomb = HashMap<String, Long>()

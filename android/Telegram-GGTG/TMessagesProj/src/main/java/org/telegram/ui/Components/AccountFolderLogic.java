@@ -189,6 +189,7 @@ public class AccountFolderLogic {
                     } else if (finalPinIndex >= 0 && which == finalPinIndex) {
                         uc.ncgPinned = !uc.ncgPinned;
                         uc.saveConfig(false);
+                        app.ggtg.GgtgLayout.INSTANCE.noteChanged(); // ggtg: the arrangement is shared with the desktop
                         if (onChanged != null) onChanged.run();
                     } else {
                         assignFolder(account, "", onChanged);
@@ -213,6 +214,7 @@ public class AccountFolderLogic {
                         deleteFolder(folder, onChanged);
                     } else {
                         AccountFolderStore.setPinned(folder, !AccountFolderStore.isPinned(folder));
+                        app.ggtg.GgtgLayout.INSTANCE.noteChanged();
                         if (onChanged != null) onChanged.run();
                     }
                 })

@@ -94,6 +94,7 @@ public:
 	[[nodiscard]] bool isLive(not_null<Account*> account) const;
 	[[nodiscard]] rpl::producer<Account*> activeValue() const;
 	[[nodiscard]] rpl::producer<> accountsChanges() const;
+	void notifyAccountsChanged() { _accountsChanges.fire({}); } // ggtg: the arrangement was changed from outside
 	[[nodiscard]] Account *maybeLastOrSomeAuthedAccount();
 	[[nodiscard]] int accountsAuthedCount() const;
 

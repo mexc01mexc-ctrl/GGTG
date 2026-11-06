@@ -39,8 +39,18 @@ object GgtgAccounts {
             // An account in the «Корзина» is listed under it, not in the folder it used to be in.
             result.add(AccountRef(slot, uc.clientUserId, if (uc.ncgTrashed) TRASH_FOLDER else (uc.ncgFolder ?: "")))
         }
-        // ungrouped first, then folders, the trash last, each keeping ncgOrder / loginTime order within
-        return result.sortedWith(compareBy({ it.folder == TRASH_FOLDER }, { it.folder.isNotEmpty() }, { it.folder }))
+        // the order shared with the desktop: folders as arranged there (new ones after them, alphabetically), the trash
+        // last; inside a folder the pinned first, then the shared order of the accounts
+        val folderOrder = GgtgLayout.folderOrder()
+        return result.sortedWith(compareBy<AccountRef>(
+            { it.folder == TRASH_FOLDER },
+            { it.folder.isEmpty() },
+            { val i = folderOrder.indexOf(it.folder); if (i < 0) Int.MAX_VALUE else i },
+            { it.folder },
+            { !UserConfig.getInstance(it.slot).ncgPinned },
+            { val o = UserConfig.getInstance(it.slot).ncgOrder; if (o < 0) Int.MAX_VALUE else o },
+            { it.slot }
+        ))
     }
 
     /** «Корзина»: hides the accounts from Telegram's own lists (see AccountFolderLogic) while

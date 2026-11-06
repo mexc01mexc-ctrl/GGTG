@@ -7,6 +7,8 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
 #pragma once
 
+#include "core/ggtg_layout.h"
+
 #include "core/core_settings_proxy.h"
 #include "media/media_common.h"
 #include "dialogs/ui/dialogs_quick_action.h"
@@ -869,6 +871,9 @@ public:
 		return _accountsOrder;
 	}
 	void setAccountsOrder(const std::vector<uint64> &order) {
+		if (_accountsOrder != order) {
+			Core::GgtgLayout::NoteChanged(); // ggtg: the arrangement of the accounts is shared by the sync
+		}
 		_accountsOrder = order;
 	}
 

@@ -22,6 +22,9 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "main/main_domain.h"
 #include "main/main_session.h"
 #include "mtproto/proxy_pool.h"
+#include "core/ggtg_layout.h"
+#include "base/flat_map.h"
+#include <range/v3/algorithm/contains.hpp>
 #include "settings/ggtg_export.h"
 
 #include <QtCore/QCryptographicHash>
@@ -397,6 +400,36 @@ Snapshot BuildSnapshot(const Settings &settings) {
 			body.insert("sessions", records);
 		}
 	}
+	// The arrangement of the accounts list: order (the folders follow it) and the pinned ones.
+	{
+		if (!Core::GgtgLayout::At()) {
+			Core::GgtgLayout::SetAt(base::unixtime::now()); // first time: this arrangement is the one to share
+		}
+		auto accountsArr = QJsonArray();
+		auto foldersArr = QJsonArray();
+		auto seenFolders = QSet<QString>();
+		for (const auto &account : Core::App().domain().orderedAccounts()) {
+			if (!account->sessionExists()) {
+				continue;
+			}
+			const auto user = account->session().user();
+			auto entry = QJsonObject{
+				{ "userId", QString::number(user->id.value) },
+				{ "pinned", account->pinned() },
+			};
+			const auto folder = account->trashed() ? QString() : account->folderTag();
+			if (!account->trashed() && !folder.isEmpty() && !seenFolders.contains(folder)) {
+				seenFolders.insert(folder);
+				foldersArr.append(folder);
+			}
+			accountsArr.append(entry);
+		}
+		body.insert("layout", QJsonObject{
+			{ "at", QString::number(Core::GgtgLayout::At()) },
+			{ "accounts", accountsArr },
+			{ "folders", foldersArr },
+		});
+	}
 	// numbers that already failed in a registration: the other device must not pay for them again
 	if (!Core::GgtgBadNumbers::Set().isEmpty()) {
 		body.insert("bad_numbers", Core::GgtgBadNumbers::ToJson());
@@ -646,6 +679,43 @@ MergeResult MergeSnapshot(const QByteArray &json) {
 
 	if (root.contains("bad_numbers")) {
 		Core::GgtgBadNumbers::Merge(root["bad_numbers"].toArray());
+	}
+
+	// The arrangement of the accounts list: the device that changed it last wins.
+	if (root.contains("layout")) {
+		const auto layout = root["layout"].toObject();
+		const auto remoteAt = layout["at"].toString().toLongLong();
+		if (remoteAt > Core::GgtgLayout::At()) {
+			Core::GgtgLayout::Applying() = true;
+			auto byUser = base::flat_map<quint64, not_null<Main::Account*>>();
+			for (const auto &account : Core::App().domain().orderedAccounts()) {
+				if (account->sessionExists()) {
+					byUser.emplace(account->session().user()->id.value, account);
+				}
+			}
+			auto order = std::vector<uint64>();
+			for (const auto &item : layout["accounts"].toArray()) {
+				const auto object = item.toObject();
+				const auto userId = object["userId"].toString().toULongLong();
+				const auto i = byUser.find(userId);
+				if (i == byUser.end()) {
+					continue;
+				}
+				i->second->setPinned(object["pinned"].toBool());
+				order.push_back(i->second->session().uniqueId());
+			}
+			// accounts that exist only here keep their relative places after the received ones
+			for (const auto id : Core::App().settings().accountsOrder()) {
+				if (!ranges::contains(order, id)) {
+					order.push_back(id);
+				}
+			}
+			Core::App().settings().setAccountsOrder(order);
+			Core::App().saveSettings();
+			Core::GgtgLayout::Applying() = false;
+			Core::GgtgLayout::SetAt(remoteAt);
+			Core::App().domain().notifyAccountsChanged();
+		}
 	}
 
 	// Sessions: one record per session, newest write wins (see core/ggtg_session_catalog.h).
