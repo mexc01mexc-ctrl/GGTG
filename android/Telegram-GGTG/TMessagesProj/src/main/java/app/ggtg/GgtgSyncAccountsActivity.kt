@@ -46,10 +46,10 @@ class GgtgSyncAccountsActivity : BaseFragment() {
         val root = GgtgUi.page(context, frame)
 
         GgtgUi.addCard(root, GgtgUi.infoCard(context, R.drawable.msg_info, "Отдельная сессия для телефона",
-            "Mac создаёт для каждого аккаунта отдельную Desktop-сессию со своим устройством, языком и часовым поясом, телефон ставит её как есть. Сессия самого Mac продолжает работать параллельно."), top = 10f)
+            "Desktop создаёт для каждого аккаунта отдельную Desktop-сессию со своим устройством, языком и часовым поясом, телефон ставит её как есть. Сессия самого Desktop продолжает работать параллельно."), top = 10f)
 
         // Section: Accounts on Desktop (Mint on Android)
-        root.addView(GgtgUi.sectionLabel(context, "Доступные аккаунты с Desktop (Mac)"))
+        root.addView(GgtgUi.sectionLabel(context, "Доступные аккаунты с Desktop"))
         val peerCard = GgtgUi.card(context)
         val pp = GgtgPeerAccountPicker(context)
         pp.setBackgroundColor(android.graphics.Color.TRANSPARENT)
@@ -57,7 +57,7 @@ class GgtgSyncAccountsActivity : BaseFragment() {
         GgtgUi.addCard(root, peerCard)
         peerPicker = pp
 
-        val mintButton = GgtgUi.button(context, "Получить сессии с Mac") { mintSelected() }
+        val mintButton = GgtgUi.button(context, "Получить сессии с Desktop") { mintSelected() }
         mintButton.visibility = if (pp.selectedAccounts().isNotEmpty()) View.VISIBLE else View.GONE
         GgtgUi.addButton(root, mintButton, top = 10f)
         btnMint = mintButton
@@ -66,8 +66,8 @@ class GgtgSyncAccountsActivity : BaseFragment() {
             updateMintButton()
         }
 
-        val readyRow = GgtgUi.actionCard(context, R.drawable.msg_download, "Готовые сессии от Mac",
-            "Сессии, которые Mac уже положил в «Избранное» главного аккаунта и которые никто не забрал: установить их на этот телефон") {
+        val readyRow = GgtgUi.actionCard(context, R.drawable.msg_download, "Готовые сессии от Desktop",
+            "Сессии, которые Desktop уже положил в «Избранное» главного аккаунта и которые никто не забрал: установить их на этот телефон") {
             installReady()
         }
         GgtgUi.addCard(root, readyRow, top = 8f)
@@ -78,8 +78,8 @@ class GgtgSyncAccountsActivity : BaseFragment() {
         }
         GgtgUi.addCard(root, refreshRow, top = 8f)
 
-        GgtgUi.addCard(root, GgtgUi.infoCard(context, R.drawable.msg_channel, "Аккаунты этого телефона на Mac",
-            "На Mac: «Синхронизация» → «Аккаунты с телефона Android» → «Войти по QR». Телефон сам подтвердит вход этим аккаунтом, прокси, язык и время берутся с аккаунта."), top = 14f)
+        GgtgUi.addCard(root, GgtgUi.infoCard(context, R.drawable.msg_channel, "Аккаунты этого телефона на Desktop",
+            "На Desktop: «Синхронизация» → «Аккаунты с телефона Android» → «Войти по QR». Телефон сам подтвердит вход этим аккаунтом, прокси, язык и время берутся с аккаунта."), top = 14f)
 
         root.addView(GgtgUi.spacer(context))
 
@@ -91,7 +91,7 @@ class GgtgSyncAccountsActivity : BaseFragment() {
         val selected = peerPicker?.selectedAccounts().orEmpty()
         btnMint?.let { btn ->
             if (btn is android.widget.TextView) {
-                btn.text = if (selected.isNotEmpty()) "Получить сессии с Mac (${selected.size})" else "Получить сессии с Mac"
+                btn.text = if (selected.isNotEmpty()) "Получить сессии с Desktop (${selected.size})" else "Получить сессии с Desktop"
             }
             btn.visibility = if (selected.isNotEmpty()) View.VISIBLE else View.GONE
         }
@@ -113,9 +113,9 @@ class GgtgSyncAccountsActivity : BaseFragment() {
         val activity = parentActivity ?: return
         GgtgSyncTransport.findIncoming { list, error ->
             if (error.isNotEmpty()) { toast(error); return@findIncoming }
-            if (list.isEmpty()) { toast("Готовых сессий от Mac нет"); return@findIncoming }
+            if (list.isEmpty()) { toast("Готовых сессий от Desktop нет"); return@findIncoming }
             AlertDialog.Builder(activity)
-                .setTitle("Готовые сессии от Mac: ${list.size}")
+                .setTitle("Готовые сессии от Desktop: ${list.size}")
                 .setMessage("Они будут установлены на этом телефоне и удалены из очереди. Одна сессия работает только на одном устройстве: не нажимайте, если их ждёт другой телефон.")
                 .setPositiveButton("Установить") { _, _ -> runInstallReady(list) }
                 .setNegativeButton("Отмена", null)
@@ -193,7 +193,7 @@ class GgtgSyncAccountsActivity : BaseFragment() {
             return
         }
 
-        val progress = TdataImportProgressDialog(activity, "Получение сессий с Mac")
+        val progress = TdataImportProgressDialog(activity, "Получение сессий с Desktop")
         progress.show()
         val process = GgtgProcess.start("Получение сессий с Desktop (${selected.size})", GgtgProcess.Kind.Other)
         process.progress(0, selected.size)
@@ -289,49 +289,59 @@ class GgtgSyncAccountsActivity : BaseFragment() {
             it != UserConfig.selectedAccount && !UserConfig.getInstance(it).isClientActivated
         }
         if (free < 1) {
-            process.log("Нет свободных слотов для переноса с Mac")
+            process.log("Нет свободных слотов для переноса с Desktop")
             return null
         }
         suspend fun packs(): List<GgtgSyncTransport.Remote>? = kotlin.coroutines.suspendCoroutine { cont ->
             GgtgSyncTransport.findIncoming { list, error -> cont.resume(if (error.isEmpty()) list else null) }
         }
         val before = packs()?.maxOfOrNull { it.msgId } ?: 0
-        progress.setWorkingText("+${acc.phone}: просим Mac подготовить сессию…")
-        process.log("Запрос временной сессии у Mac")
+        progress.setWorkingText("+${acc.phone}: просим Desktop подготовить сессию…")
+        process.log("Запрос временной сессии у Desktop")
         val sent = kotlinx.coroutines.CompletableDeferred<String>()
         GgtgSyncTransport.sendControl(org.json.JSONObject()
             .put("type", "pack_req")
             .put("userId", acc.userId.toString())) { ok, text -> sent.complete(if (ok) "" else text) }
         val problem = kotlinx.coroutines.withTimeoutOrNull(20_000) { sent.await() }
         if (!problem.isNullOrEmpty()) {
-            process.log("Запрос на Mac не ушёл: $problem")
+            process.log("Запрос на Desktop не ушёл: $problem")
             progress.setWorkingText("+${acc.phone}: $problem")
             return null
         }
-        progress.setWorkingText("+${acc.phone}: Mac готовит сессию…")
+        progress.setWorkingText("+${acc.phone}: Desktop готовит сессию…")
+        // ggtg: other sessions may be waiting in the queue (for another phone, or left over from earlier runs):
+        // only a pack that holds THIS account is taken, the others are left where they are
         var remote: GgtgSyncTransport.Remote? = null
+        val rejected = HashSet<Long>()
+        val file = java.io.File(org.telegram.messenger.ApplicationLoader.applicationContext.cacheDir, "ggtg_sync_mint.ggtg")
         val until = System.currentTimeMillis() + 180_000
         while (System.currentTimeMillis() < until && remote == null) {
             kotlinx.coroutines.delay(4_000)
-            remote = packs()?.filter { it.msgId > before }?.maxByOrNull { it.msgId }
+            val fresh = packs()?.filter { it.msgId > before && it.msgId !in rejected }?.sortedByDescending { it.msgId }.orEmpty()
+            for (candidate in fresh) {
+                val bytes = kotlin.coroutines.suspendCoroutine<ByteArray?> { cont ->
+                    GgtgSyncTransport.fetchIncoming(candidate) { data, _ -> cont.resume(data) }
+                } ?: continue
+                file.writeBytes(bytes)
+                if (GgtgPackImporter.isPack(file) && acc.userId in GgtgPackImporter.packUserIds(file)) {
+                    remote = candidate
+                    break
+                }
+                rejected.add(candidate.msgId)
+            }
         }
         if (remote == null) {
-            process.log("Mac не прислал сессию за 3 минуты")
+            try { file.delete() } catch (_: Throwable) {}
+            process.log("Desktop не прислал сессию этого аккаунта за 3 минуты")
             return null
         }
-        process.log("Сессия от Mac получена")
-        progress.setWorkingText("+${acc.phone}: скачиваем сессию…")
-        val bytes = kotlin.coroutines.suspendCoroutine<ByteArray?> { cont ->
-            GgtgSyncTransport.fetchIncoming(remote) { data, _ -> cont.resume(data) }
-        } ?: return Triple(false, null, "Не скачалась сессия с Mac")
-        val file = java.io.File(org.telegram.messenger.ApplicationLoader.applicationContext.cacheDir, "ggtg_sync_mint.ggtg")
-        file.writeBytes(bytes)
+        process.log("Сессия от Desktop получена")
         try {
-            if (!GgtgPackImporter.isPack(file)) return Triple(false, null, "Mac прислал не сессию")
+            if (!GgtgPackImporter.isPack(file)) return Triple(false, null, "Desktop прислал не сессию")
             val res = GgtgPackImporter.import(file, null, progress, createBackup = true)
             GgtgSyncTransport.deleteIncoming(remote)
             if (acc.userId !in res.imported) {
-                return Triple(false, null, res.failReason ?: "Не удалось создать сессию из временной")
+                return Triple(false, null, res.failReason ?: if (res.alreadyLoggedIn > 0) "Аккаунт уже есть на этом телефоне" else if (res.noFreeSlot > 0) "Нет свободного слота на телефоне" else "Не удалось создать сессию из временной")
             }
             val slot = (0 until UserConfig.MAX_ACCOUNT_COUNT).firstOrNull {
                 UserConfig.getInstance(it).isClientActivated && UserConfig.getInstance(it).clientUserId == acc.userId
@@ -356,7 +366,7 @@ class GgtgSyncAccountsActivity : BaseFragment() {
         // the phone installs it as it is. Telegram asks a login e-mail on every new Android login, so
         // there is no "log in here by code" way any more.
         mintViaMac(acc, progress, process)
-            ?: Triple(false, null, "Mac не ответил: откройте GGTG на Mac с этим аккаунтом и повторите")
+            ?: Triple(false, null, "Desktop не ответил: откройте GGTG на Desktop с этим аккаунтом и повторите")
     }
 
     private suspend fun ConnectionsManager.sendSuspend(

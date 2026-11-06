@@ -377,7 +377,7 @@ object GgtgSync {
         }
 
         if (root.has("available_accounts")) {
-            val dev = root.optString("deviceName").ifEmpty { "Mac" }
+            val dev = root.optString("deviceName").ifEmpty { "Desktop" }
             root.optJSONArray("available_accounts")?.let { savePeerAccounts(it, dev) }
         }
 
@@ -671,7 +671,7 @@ object GgtgSync {
 
     fun savePeerAccounts(accounts: JSONArray, device: String) = synchronized(lock) {
         val root = JSONObject().apply {
-            put("device", device.ifEmpty { "Mac" })
+            put("device", device.ifEmpty { "Desktop" })
             put("updatedAt", System.currentTimeMillis() / 1000)
             put("accounts", accounts)
         }
@@ -682,7 +682,7 @@ object GgtgSync {
         val f = peerAccountsFile()
         if (!f.exists()) return emptyList()
         val root = runCatching { JSONObject(f.readText()) }.getOrNull() ?: return emptyList()
-        val device = root.optString("device", "Mac")
+        val device = root.optString("device", "Desktop")
         val arr = root.optJSONArray("accounts") ?: return emptyList()
         val list = ArrayList<PeerAccount>()
         for (i in 0 until arr.length()) {

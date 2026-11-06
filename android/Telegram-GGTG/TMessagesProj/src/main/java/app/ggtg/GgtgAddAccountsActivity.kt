@@ -86,7 +86,7 @@ class GgtgAddAccountsActivity : BaseFragment() {
         })
         if (GgtgSyncTransport.mainSlot() != null) {
             GgtgUi.addCard(column, GgtgUi.actionCard(context, R.drawable.msg_download, "Принять аккаунты с Desktop",
-                "Через синхронизацию: Mac создаёт для телефона отдельную сессию, телефон ставит её как есть. Сессия Mac продолжает работать.") {
+                "Через синхронизацию: Desktop создаёт для телефона отдельную сессию, телефон ставит её как есть. Сессия Desktop продолжает работать.") {
                 presentFragment(GgtgSyncAccountsActivity())
             })
         }

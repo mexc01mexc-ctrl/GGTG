@@ -410,7 +410,7 @@ object GgtgSyncTransport {
                 onState(problem)
                 return null
             }
-            onState("запрос передан на Mac, ждём код…")
+            onState("запрос передан на Desktop, ждём код…")
             val until = System.currentTimeMillis() + timeoutMs
             while (System.currentTimeMillis() < until && !waiter.isCompleted) {
                 pollControl()
@@ -468,7 +468,7 @@ object GgtgSyncTransport {
         FileLog.d("qr login for $userId: ${err?.text ?: "accepted"}")
         if (err == null) {
             AndroidUtilities.runOnUIThread {
-                android.widget.Toast.makeText(ApplicationLoader.applicationContext, "Вход на Mac подтверждён: ${GgtgAccounts.label(slot)}", android.widget.Toast.LENGTH_LONG).show()
+                android.widget.Toast.makeText(ApplicationLoader.applicationContext, "Вход на Desktop подтверждён: ${GgtgAccounts.label(slot)}", android.widget.Toast.LENGTH_LONG).show()
             }
         }
     }

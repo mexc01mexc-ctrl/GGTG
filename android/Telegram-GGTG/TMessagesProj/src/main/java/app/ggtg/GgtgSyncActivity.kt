@@ -81,8 +81,8 @@ class GgtgSyncActivity : BaseFragment() {
         val settings = GgtgSync.loadSettings()
 
         val intro = GgtgUi.card(context)
-        intro.addView(GgtgUi.body(context, "Базы, «уже написали», шаблоны и память ИИ сами переходят между телефоном и Mac: при " +
-            "запуске, после изменений и каждые 5 минут. Перед каждой рассылкой GGTG сначала забирает с Mac, кому там уже " +
+        intro.addView(GgtgUi.body(context, "Базы, «уже написали», шаблоны и память ИИ сами переходят между телефоном и Desktop: при " +
+            "запуске, после изменений и каждые 5 минут. Перед каждой рассылкой GGTG сначала забирает с Desktop, кому там уже " +
             "написали, так что одному человеку не напишут дважды."))
         GgtgUi.addCard(column, intro)
 
@@ -95,8 +95,8 @@ class GgtgSyncActivity : BaseFragment() {
         refreshStatus()
 
         // ---- pairing ----
-        GgtgUi.addCard(column, GgtgUi.actionCard(context, R.drawable.msg_qrcode, "Сканировать QR-код с Mac",
-            "На Mac: «Синхронизация» → «Подключить телефон по QR-коду». Больше ничего вводить не нужно.") {
+        GgtgUi.addCard(column, GgtgUi.actionCard(context, R.drawable.msg_qrcode, "Сканировать QR-код с Desktop",
+            "На Desktop: «Синхронизация» → «Подключить телефон по QR-коду». Больше ничего вводить не нужно.") {
             scan()
         })
 
@@ -193,7 +193,7 @@ class GgtgSyncActivity : BaseFragment() {
 
         // ---- accounts between the devices ----
         GgtgUi.addCard(column, GgtgUi.actionCard(context, R.drawable.msg2_devices, "Синхронизация аккаунтов (по запросу)",
-            "Выбрать аккаунты с Mac и получить их на телефон: Mac создаёт для каждого отдельную сессию (своё устройство, язык, часовой пояс, прокси), телефон ставит её как есть.") {
+            "Выбрать аккаунты с Desktop и получить их на телефон: Desktop создаёт для каждого отдельную сессию (своё устройство, язык, часовой пояс, прокси), телефон ставит её как есть.") {
             presentFragment(GgtgSyncAccountsActivity())
         })
 

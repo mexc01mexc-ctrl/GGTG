@@ -53,6 +53,9 @@ object GgtgPackImporter {
     )
 
     /** True when [file] is a zip holding a GGTG Desktop export manifest. */
+    /** The user ids inside a pack, so a caller can tell whose session it holds before installing it. */
+    fun packUserIds(file: File): List<Long> = try { readPack(file).map { it.userId } } catch (t: Throwable) { emptyList() }
+
     fun isPack(file: File): Boolean = try {
         ZipFile(file).use { zip ->
             val entry = zip.getEntry(MANIFEST) ?: return false

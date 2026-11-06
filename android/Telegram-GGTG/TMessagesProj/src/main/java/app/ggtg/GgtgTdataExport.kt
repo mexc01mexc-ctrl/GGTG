@@ -454,7 +454,7 @@ object TdataExportHelper {
      *  user-facing summary. Always duplicates: the phone's own sessions stay separate. */
     @JvmStatic
     fun exportForDesktop(activity: FragmentActivity, slots: List<Int>, sessionNote: String = "", onDone: (ByteArray?, String) -> Unit) {
-        val progress = TdataImportProgressDialog(activity, "Аккаунты на Mac")
+        val progress = TdataImportProgressDialog(activity, "Аккаунты на Desktop")
         progress.setWorkingText("Подготовка…")
         MainScope().launch {
             GgtgWakeLock.withLock("export_desktop") {

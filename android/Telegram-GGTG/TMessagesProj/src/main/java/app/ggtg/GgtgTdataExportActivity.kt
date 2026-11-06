@@ -106,7 +106,7 @@ class GgtgTdataExportActivity(private val preselectedSlots: List<Int> = emptyLis
         addFormatOption(
             TdataExportHelper.ExportFormat.GgtgPack,
             "Пакет GGTG (.ggtg)",
-            "Один архив с несколькими аккаунтами: сессии, устройство, прокси, папки и пароли 2FA. Импортируется в GGTG на телефоне и на Mac."
+            "Один архив с несколькими аккаунтами: сессии, устройство, прокси, папки и пароли 2FA. Импортируется в GGTG на телефоне и на Desktop."
         )
         refreshFormats()
 
