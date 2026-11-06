@@ -23,6 +23,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "main/main_session.h"
 #include "mtproto/proxy_pool.h"
 #include "core/ggtg_layout.h"
+#include "core/core_settings.h"
 #include "base/flat_map.h"
 #include <range/v3/algorithm/contains.hpp>
 #include "settings/ggtg_export.h"
