@@ -137,7 +137,8 @@ object GgtgSessions {
         }
     }
 
-    const val TRUST_COOLDOWN = 86400L // 24 hours
+    const val TRUST_COOLDOWN = 25 * 3600L // 25 hours: Telegram's 24 plus an hour in reserve
+    const val QUARANTINE_FOLDER = "Карантин"
 
     @JvmStatic
     fun isTrusted(session: StoredSession): Boolean {
@@ -157,10 +158,29 @@ object GgtgSessions {
     @JvmStatic
     fun trustCountdownString(session: StoredSession): String {
         val remaining = secondsUntilTrusted(session)
-        if (remaining <= 0L) return "Выдержана (> 24 ч., готова к защите)"
+        if (remaining <= 0L) return "Выдержана (> 25 ч., готова к защите)"
         val hours = remaining / 3600
         val minutes = (remaining % 3600) / 60
         return "Отлёжка: осталось %d ч. %02d мин.".format(Locale.getDefault(), hours, minutes)
+    }
+
+    /** An account waiting out the anti-theft timer sits in the "Карантин" folder; the folder it had stays in the spare's record. */
+    fun enterQuarantine(slot: Int, spare: StoredSession) {
+        val until = SimpleDateFormat("dd.MM.yyyy HH:mm", Locale.getDefault()).format(Date((spare.createdAt + TRUST_COOLDOWN) * 1000))
+        updateNote(spare.id, "карантин (анти-угон) до $until")
+        val uc = UserConfig.getInstance(slot)
+        if (uc.ncgFolder != QUARANTINE_FOLDER) {
+            uc.ncgFolder = QUARANTINE_FOLDER
+            uc.saveConfig(false)
+        }
+    }
+
+    fun leaveQuarantine(slot: Int, folderBefore: String?) {
+        val uc = UserConfig.getInstance(slot)
+        if (uc.ncgFolder == QUARANTINE_FOLDER && folderBefore != QUARANTINE_FOLDER) {
+            uc.ncgFolder = folderBefore.orEmpty()
+            uc.saveConfig(false)
+        }
     }
 
     @JvmStatic
@@ -880,8 +900,9 @@ object GgtgSessions {
         if (backups.isEmpty()) {
             return suspendCancellableCoroutine { cont ->
                 createBackupSession(activity, slot) { res ->
-                    res.onSuccess {
-                        cont.resume(Result.success("Резервная сессия создана. Запущен таймер 24ч отлёжки (Telegram блокирует сброс чужих сессий)."))
+                    res.onSuccess { spare ->
+                        enterQuarantine(slot, spare)
+                        cont.resume(Result.success("Резервная сессия создана. Запущен таймер 25 ч отлёжки (24 ч требует Telegram + 1 ч запас), аккаунт в папке «Карантин»."))
                     }.onFailure {
                         cont.resume(Result.failure(it))
                     }
@@ -912,6 +933,7 @@ object GgtgSessions {
         for (p in purchasedList) {
             removeStored(p.id)
         }
+        leaveQuarantine(slot, oldest.folder)
 
         return Result.success("Защита от угона завершена: сессия продавца разорвана и удалена, чужие входы завершены.")
     }

@@ -541,14 +541,15 @@ class GgtgAccountInfoActivity(private val slot: Int, private val onChanged: () -
                                 .setTitle("Защита от угона (Анти-угон)")
 
                             if (backupSessions.isEmpty()) {
-                                bld.setMessage("Для защиты купленного аккаунта требуется создать резервную сессию программы и дать ей отлежаться 24 часа в Telegram (сервер блокирует сброс чужих сессий для новых авторизаций).\n\nНажмите «Создать сессию», чтобы запустить 24ч таймер.")
+                                bld.setMessage("Для защиты купленного аккаунта требуется создать резервную сессию программы и дать ей отлежаться 25 часов (24 ч требует Telegram, 1 ч запас): сервер блокирует сброс чужих сессий для новых авторизаций. Пока идёт отлёжка, аккаунт лежит в папке «Карантин».\n\nНажмите «Создать сессию», чтобы запустить 25ч таймер.")
                                 bld.setPositiveButton("Создать сессию") { _, _ ->
                                     val progress = app.ggtg.ui.TdataImportProgressDialog(act, "Анти-угон")
                                     progress.setWorkingText("Создание резервной сессии…")
                                     GgtgSessions.createBackupSession(act, slot, progress) { res ->
                                         progress.dismiss()
-                                        res.onSuccess {
-                                            Toast.makeText(context, "Резервная сессия создана. Таймер 24ч отлёжки запущен.", Toast.LENGTH_LONG).show()
+                                        res.onSuccess { spare ->
+                                            GgtgSessions.enterQuarantine(slot, spare)
+                                            Toast.makeText(context, "Резервная сессия создана. Таймер 25ч отлёжки запущен, аккаунт в папке «Карантин».", Toast.LENGTH_LONG).show()
                                             onChanged(); rebuild()
                                         }.onFailure {
                                             Toast.makeText(context, "Ошибка: ${it.message}", Toast.LENGTH_LONG).show()
@@ -560,8 +561,8 @@ class GgtgAccountInfoActivity(private val slot: Int, private val onChanged: () -
                                 val isTrust = GgtgSessions.isTrusted(oldest)
                                 val countdown = GgtgSessions.trustCountdownString(oldest)
                                 val desc = "Статус резервной сессии: $countdown\n\n" +
-                                    if (isTrust) "Сессия выдержана (> 24ч) и готова к защите. Нажмите «Защитить аккаунт», чтобы переключиться на неё, сбросить сессию продавца и удалить её."
-                                    else "Telegram заблокирует сброс сессий до завершения 24 часов (ошибка FRESH_RESET_AUTHORISATION_FORBIDDEN). Дождитесь окончания отлёжки."
+                                    if (isTrust) "Сессия выдержана (> 25ч) и готова к защите. Нажмите «Защитить аккаунт», чтобы переключиться на неё, сбросить сессию продавца и удалить её."
+                                    else "Telegram заблокирует сброс сессий до завершения отлёжки (24 ч, у нас 25) (ошибка FRESH_RESET_AUTHORISATION_FORBIDDEN). Дождитесь окончания отлёжки."
 
                                 bld.setMessage(desc)
                                 if (isTrust) {

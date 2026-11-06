@@ -574,10 +574,14 @@ inline constexpr auto kActiveNote = "активная (текущая)";
 }
 
 // Anti-theft trust cooldown: Telegram requires a newly created authorization
-// to be at least 24 hours (86400 seconds) old before it is allowed to terminate
+// to be at least 24 hours old before it is allowed to terminate
 // other authorizations (FRESH_RESET_AUTHORISATION_FORBIDDEN) or change the phone number
 // (FRESH_CHANGE_PHONE_FORBIDDEN).
-constexpr qint64 kAntiTheftTrustCooldown = 86400;
+// The timer is 25 hours: Telegram's 24 plus an hour in reserve. Accounts waiting it out sit in the folder below.
+constexpr qint64 kAntiTheftTrustCooldown = 25 * 3600;
+[[nodiscard]] inline QString QuarantineFolder() {
+	return u"Карантин"_q;
+}
 
 [[nodiscard]] inline bool IsSessionTrusted(const StoredSession &entry) {
 	if (entry.createdAt <= 0) {
@@ -599,7 +603,7 @@ constexpr qint64 kAntiTheftTrustCooldown = 86400;
 [[nodiscard]] inline QString TrustCountdownString(const StoredSession &entry) {
 	const auto remaining = SecondsUntilTrusted(entry);
 	if (remaining <= 0) {
-		return u"выдержана (> 24 ч., готова к сбросу сессий)"_q;
+		return u"выдержана (> 25 ч., готова к сбросу сессий)"_q;
 	}
 	const auto hours = remaining / 3600;
 	const auto minutes = (remaining % 3600) / 60;

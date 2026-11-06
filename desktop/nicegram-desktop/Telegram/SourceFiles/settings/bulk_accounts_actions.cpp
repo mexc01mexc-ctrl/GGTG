@@ -1139,6 +1139,41 @@ void StepSwapToBackup(
 	});
 }
 
+// ggtg: an account waiting out the anti-theft timer sits in the "Карантин" folder (the folder it had before is
+// kept in the spare's own record) and comes back to it when the protection has been done.
+void EnterAntiTheftQuarantine(
+		not_null<Main::Account*> account,
+		const QString &spareId) {
+	namespace Sessions = Core::GgtgSessions;
+	for (const auto &entry : Sessions::LoadVault()) {
+		if (entry.id == spareId) {
+			const auto until = QDateTime::fromSecsSinceEpoch(
+				entry.createdAt + Sessions::kAntiTheftTrustCooldown
+			).toString(u"dd.MM.yyyy hh:mm"_q);
+			Sessions::UpdateStoredNote(
+				spareId,
+				u"карантин (анти-угон) до "_q + until);
+			break;
+		}
+	}
+	if (account->folderTag() != Sessions::QuarantineFolder()) {
+		account->setFolderTag(Sessions::QuarantineFolder());
+	}
+	Core::GgtgLog::Info(
+		u"Анти-угон"_q,
+		u"Аккаунт в папке «Карантин»: резервная набирает возраст"_q);
+}
+
+void LeaveAntiTheftQuarantine(
+		not_null<Main::Account*> account,
+		const QString &folderBefore) {
+	namespace Sessions = Core::GgtgSessions;
+	if (account->folderTag() == Sessions::QuarantineFolder()
+		&& folderBefore != Sessions::QuarantineFolder()) {
+		account->setFolderTag(folderBefore);
+	}
+}
+
 void StepAntiTheftProtection(
 		not_null<Main::Account*> account,
 		StepDone done) {
@@ -1170,7 +1205,8 @@ void StepAntiTheftProtection(
 					done(false, u"ошибка создания сессии: "_q + err);
 					return;
 				}
-				done(true, u"Резервная сессия создана. Запущен таймер 24ч отлёжки (Telegram блокирует сброс чужих сессий)."_q);
+				EnterAntiTheftQuarantine(account, id);
+				done(true, u"Резервная сессия создана. Запущен таймер 25 ч отлёжки (24 ч требует Telegram + 1 ч запас), аккаунт в папке «Карантин»."_q);
 			});
 		return;
 	}
@@ -1179,6 +1215,7 @@ void StepAntiTheftProtection(
 		return a.createdAt < b.createdAt;
 	});
 	const auto oldest = backups.front();
+	const auto folderBefore = oldest.folder;
 
 	if (!Sessions::IsSessionTrusted(oldest)) {
 		const auto countdown = Sessions::TrustCountdownString(oldest);
@@ -1221,6 +1258,7 @@ void StepAntiTheftProtection(
 			for (const auto &pid : purchasedIds) {
 				Sessions::RemoveStored(pid);
 			}
+			LeaveAntiTheftQuarantine(nowAcc, folderBefore);
 			// the session the account has just left is the seller's one (ended above): its key is of no use
 			for (const auto &entry : Sessions::StoredForUser(
 					Sessions::LoadVault(),
@@ -1895,12 +1933,12 @@ void ShowBulkAntiTheftBox(
 		auto infoText = u"Защита купленных аккаунтов (TData / Сессия+JSON) от доступа продавца и третьих лиц.\n\n"
 			u"Как работает механизм защиты:\n"
 			u"1. Программа создаёт чистую резервную сессию со своим ключом авторизации.\n"
-			u"2. По правилам безопасности Telegram новая сессия должна отлежаться 24 часа. Сброс чужих сессий заблокирован сервером Telegram на 24 часа (ошибка FRESH_RESET_AUTHORISATION_FORBIDDEN).\n"
-			u"3. Спустя 24 часа программа переключает аккаунт на выдержанную сессию, завершает сессию продавца и все чужие сессии, удаляет старую сессию и создаёт свежий бэкап.\n\n"
+			u"2. По правилам безопасности Telegram новая сессия должна отлежаться 24 часа; программа ждёт 25 часов с запасом. Пока идёт отлёжка, аккаунт лежит в папке «Карантин». Сброс чужих сессий заблокирован сервером Telegram на это время (ошибка FRESH_RESET_AUTHORISATION_FORBIDDEN).\n"
+			u"3. Спустя 25 часов программа переключает аккаунт на выдержанную сессию, завершает сессию продавца и все чужие сессии, удаляет старую сессию и создаёт свежий бэкап.\n\n"
 			u"Статус выбранных аккаунтов (%1):\n"
-			u"• Без резервной сессии: %2 (требуется создать сессию и запустить таймер 24ч)\n"
-			u"• На 24-часовой отлёжке: %3 (ожидание доверия Telegram)\n"
-			u"• Готовы к полной защите: %4 (выдержаны > 24ч, можно сбросить продавца)"_q
+			u"• Без резервной сессии: %2 (требуется создать сессию и запустить таймер 25 ч)\n"
+			u"• На 25-часовой отлёжке (папка «Карантин»): %3 (ожидание доверия Telegram)\n"
+			u"• Готовы к полной защите: %4 (выдержаны > 25 ч, можно сбросить продавца)"_q
 			.arg(accounts.size())
 			.arg(needBackup)
 			.arg(waitingCooldown)
@@ -1967,12 +2005,12 @@ void ShowAccountAntiTheftBox(
 			u"Защита купленных аккаунтов исключает риск возврата доступа продавцом или сторонними лицами.\n\n"
 			u"Механизм защиты:\n"
 			u"1. Создание чистой резервной сессии программы.\n"
-			u"2. 24-часовая отлёжка (требование сервера Telegram для разрешения сброса чужих сессий).\n"
+			u"2. 25-часовая отлёжка в папке «Карантин» (24 ч требует сервер Telegram, 1 ч запас).\n"
 			u"3. Переключение на выдержанную сессию, завершение сессии продавца, удаление её из программы и создание свежего бэкапа.\n\n"_q
 			.arg(phone);
 
 		if (backups.empty()) {
-			desc += u"Статус: Резервная сессия ещё не создана. Нажмите «Создать сессию», чтобы запустить 24-часовой таймер отлёжки."_q;
+			desc += u"Статус: Резервная сессия ещё не создана. Нажмите «Создать сессию», чтобы запустить 25-часовой таймер отлёжки (аккаунт уйдёт в папку «Карантин»)."_q;
 		} else {
 			const auto &b = backups.front();
 			const auto createdStr = QDateTime::fromSecsSinceEpoch(b.createdAt).toString(u"dd.MM.yyyy hh:mm"_q);
@@ -1982,9 +2020,9 @@ void ShowAccountAntiTheftBox(
 				.arg(countdown);
 
 			if (Sessions::IsSessionTrusted(b)) {
-				desc += u"Сессия набрала необходимый возраст (> 24 часов) и готова к полной защите аккаунта."_q;
+				desc += u"Сессия набрала необходимый возраст (> 25 часов) и готова к полной защите аккаунта."_q;
 			} else {
-				desc += u"Telegram вернёт ошибку FRESH_RESET_AUTHORISATION_FORBIDDEN при попытке сброса других сессий до истечения 24 часов. Дождитесь окончания таймера."_q;
+				desc += u"Telegram вернёт ошибку FRESH_RESET_AUTHORISATION_FORBIDDEN при попытке сброса других сессий до истечения 24 часов; программа ждёт 25. Дождитесь окончания таймера."_q;
 			}
 		}
 
@@ -1998,11 +2036,14 @@ void ShowAccountAntiTheftBox(
 					account,
 					u"резервная (анти-угон)"_q,
 					MakeSessionPasswordPrompt(account),
-					[=](QString err, QString) {
+					[=](QString err, QString spareId) {
 						if (!err.isEmpty()) {
 							Ggtg::Notice(show, u"Ошибка: "_q + err);
 						} else {
-							Ggtg::Notice(show, u"Резервная сессия создана. Таймер 24ч отлёжки запущен."_q);
+							if (Main::AccountIsLive(account)) {
+								EnterAntiTheftQuarantine(account, spareId);
+							}
+							Ggtg::Notice(show, u"Резервная сессия создана. Таймер 25 ч отлёжки запущен, аккаунт в папке «Карантин»."_q);
 						}
 					});
 			});
