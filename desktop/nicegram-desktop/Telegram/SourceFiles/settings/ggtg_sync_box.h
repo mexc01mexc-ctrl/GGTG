@@ -784,14 +784,13 @@ inline void FillGgtgSyncBox(
 	Ui::AddSkip(layout, st::defaultVerticalListSkip);
 
 	// ---- Accounts exchange ----
-	Ui::AddSubsectionTitle(layout, rpl::single(u"Аккаунты на телефоне (Android)"_q));
+	Ui::AddSubsectionTitle(layout, rpl::single(u"Desktop → телефон"_q));
 	box->addRow(
 		object_ptr<Ui::FlatLabel>(
 			box,
-			u"Список активных аккаунтов синхронизируется через облако без отправки файлов. Выберите нужный аккаунт, чтобы создать для него сессию на этом Desktop."_q,
+			u"Выберите аккаунты: для каждого создаётся отдельная сессия и кладётся в «Избранное» главного аккаунта. Телефон заберёт её по кнопке «Принять аккаунты с Desktop», даже если этот Desktop к тому времени выключен."_q,
 			st::boxDividerLabel),
 		st::boxRowPadding);
-
 	const auto sendAccs = box->addRow(
 		object_ptr<Ggtg::ActionRow>(
 			box,
@@ -801,29 +800,24 @@ inline void FillGgtgSyncBox(
 	sendAccs->setClickedCallback([=] {
 		controller->show(MakeGgtgExportBox(controller, true));
 	});
+	Ui::AddSkip(layout, st::defaultVerticalListSkip);
+
+	Ui::AddSubsectionTitle(layout, rpl::single(u"Телефон → Desktop"_q));
 	box->addRow(
 		object_ptr<Ui::FlatLabel>(
 			box,
-			u"Выберите аккаунты: для каждого создаётся отдельная сессия и кладётся в «Избранное» главного аккаунта. Телефон заберёт её, когда вы нажмёте «Принять аккаунты с Desktop», даже если этот Desktop к тому времени выключен."_q,
+			u"Аккаунты, активные на подключённом телефоне. Выберите аккаунт: Desktop создаст для него свою сессию, вход по QR подтвердится на телефоне сам."_q,
 			st::boxDividerLabel),
 		st::boxRowPadding);
-
 	const auto peerAccs = box->addRow(
 		object_ptr<Ggtg::ActionRow>(
 			box,
-			rpl::single(u"Аккаунты с телефона Android…"_q),
+			rpl::single(u"Взять аккаунты с телефона Android…"_q),
 			u"→"_q),
 		st::boxRowPadding);
 	peerAccs->setClickedCallback([=] {
 		ShowPeerAccountsFromAndroidBox(controller, box->uiShow());
 	});
-
-	box->addRow(
-		object_ptr<Ui::FlatLabel>(
-			box,
-			u"Аккаунты с этого Desktop автоматически доступны в списке на телефоне («Синхронизация аккаунтов»). Сессии создаются независимо на каждом устройстве и работают одновременно."_q,
-			st::boxDividerLabel),
-		st::boxRowPadding);
 
 	box->addButton(tr::lng_close(), [=] { box->closeBox(); });
 }

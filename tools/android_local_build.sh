@@ -63,7 +63,9 @@ fi
 cd "$PROJ"
 chmod +x gradlew
 trap './gradlew --stop >/dev/null 2>&1 || true' EXIT
+# every local build gets a higher versionCode (minutes since epoch), so a phone always takes it as an update
 ./gradlew --build-cache --parallel \
+  -PAPP_VERSION_CODE="$(( $(date +%s) / 60 ))" \
   -Dorg.gradle.jvmargs="-Xmx$HEAP -XX:MaxMetaspaceSize=1g" \
   -Dkotlin.daemon.jvm.options="-Xmx2g" \
   -Dorg.gradle.caching=true \
