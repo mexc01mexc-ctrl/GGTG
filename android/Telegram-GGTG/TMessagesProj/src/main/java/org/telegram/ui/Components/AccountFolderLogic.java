@@ -87,6 +87,16 @@ public class AccountFolderLogic {
         return sorted;
     }
 
+    /** ggtg: the colour of the connection dot, the truth about the account (like the desktop's): grey = no connection on
+     *  purpose (a trashed account that sleeps, or one set offline), red = no proxy, amber = connecting, green = connected. */
+    public static int connectionDotColor(int account) {
+        UserConfig uc = UserConfig.getInstance(account);
+        org.telegram.tgnet.ConnectionsManager cm = org.telegram.tgnet.ConnectionsManager.getInstance(account);
+        if (uc.ncgOffline || cm.isAsleep()) return 0xFF9E9E9E;
+        if (!org.telegram.tgnet.ConnectionsManager.ncgAccountHasProxy(account)) return 0xFFF44336;
+        return cm.getConnectionState() == org.telegram.tgnet.ConnectionsManager.ConnectionStateConnected ? 0xFF4CAF50 : 0xFFFFA726;
+    }
+
     // Live unread badges: subscribe to every activated account's counter event.
     public static void observeUnread(NotificationCenter.NotificationCenterDelegate delegate, boolean add) {
         for (int a = 0; a < UserConfig.MAX_ACCOUNT_COUNT; a++) {

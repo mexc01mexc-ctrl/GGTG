@@ -46,6 +46,7 @@ public class AccountFolderCells {
         final ImageView pinView;
         final ImageView handleView;
         boolean noProxy;
+        int connectionColor = 0xFF9E9E9E;
 
         public AccountFolderRowCell(Context context) {
             super(context);
@@ -58,11 +59,13 @@ public class AccountFolderCells {
                 @Override
                 protected void dispatchDraw(@NonNull Canvas canvas) {
                     super.dispatchDraw(canvas);
-                    float cx = getWidth() - dp(3);
-                    float cy = getHeight() - dp(3);
+                    // ggtg: the whole dot (with its border) stays inside the avatar's box, so it is a full circle and
+                    // not cut off by the parent
+                    float cx = getWidth() - dp(6);
+                    float cy = getHeight() - dp(6);
                     noProxyBorderPaint.setColor(Theme.getColor(Theme.key_windowBackgroundWhite));
                     canvas.drawCircle(cx, cy, dp(5.5f), noProxyBorderPaint);
-                    noProxyPaint.setColor(noProxy ? 0xFFF44336 : 0xFF4CAF50);
+                    noProxyPaint.setColor(connectionColor);
                     canvas.drawCircle(cx, cy, dp(4), noProxyPaint);
                 }
             };
@@ -108,6 +111,7 @@ public class AccountFolderCells {
 
         void bind(int account, boolean indented) {
             noProxy = !ConnectionsManager.ncgAccountHasProxy(account);
+            connectionColor = AccountFolderLogic.connectionDotColor(account);
             UserConfig uc = UserConfig.getInstance(account);
             TLRPC.User user = uc.getCurrentUser();
 

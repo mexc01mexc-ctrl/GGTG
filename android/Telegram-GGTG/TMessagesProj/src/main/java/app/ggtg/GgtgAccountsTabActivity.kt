@@ -20,6 +20,7 @@ import org.telegram.ui.MainTabsActivity
 class GgtgAccountsTabActivity : BaseFragment(), NotificationCenter.NotificationCenterDelegate, MainTabsActivity.TabFragmentDelegate {
 
     private var switcher: AccountSwitcherView? = null
+    private val refreshRunnable = Runnable { switcher?.refreshAccounts(accountSlots()) }
 
     private fun accountSlots(): ArrayList<Int> {
         val list = ArrayList<Int>()
@@ -67,15 +68,21 @@ class GgtgAccountsTabActivity : BaseFragment(), NotificationCenter.NotificationC
     override fun onResume() {
         super.onResume()
         AccountFolderLogic.observeUnread(this, true)
+        NotificationCenter.getGlobalInstance().addObserver(this, NotificationCenter.didUpdateConnectionState)
         switcher?.refreshAccounts(accountSlots())
     }
 
     override fun onPause() {
         super.onPause()
         AccountFolderLogic.observeUnread(this, false)
+        NotificationCenter.getGlobalInstance().removeObserver(this, NotificationCenter.didUpdateConnectionState)
     }
 
     override fun didReceivedNotification(id: Int, account: Int, vararg args: Any?) {
-        if (id == NotificationCenter.dialogsUnreadCounterChanged) switcher?.refreshAccounts(accountSlots())
+        if (id == NotificationCenter.dialogsUnreadCounterChanged || id == NotificationCenter.didUpdateConnectionState) {
+            // the dots show the real state of each connection; several updates arrive at once, so one refresh is enough
+            AndroidUtilities.cancelRunOnUIThread(refreshRunnable)
+            AndroidUtilities.runOnUIThread(refreshRunnable, 400)
+        }
     }
 }

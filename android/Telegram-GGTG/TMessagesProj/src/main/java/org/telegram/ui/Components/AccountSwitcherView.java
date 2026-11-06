@@ -246,6 +246,7 @@ public class AccountSwitcherView extends FrameLayout {
         boolean selected;
         boolean noProxy;
         boolean isOffline;
+        int connectionColor = 0xFF9E9E9E;
 
         AccountRow(Context context) {
             super(context);
@@ -267,11 +268,13 @@ public class AccountSwitcherView extends FrameLayout {
                     super.dispatchDraw(canvas);
                     // ng: proxy protection tripped (red) vs genuinely connected (green) - matches
                     // the desktop app's per-account connection indicator
-                    float cx = getWidth() - dp(3);
-                    float cy = getHeight() - dp(3);
+                    // ggtg: the whole dot stays inside the avatar's box (a full circle, not cut off), and its colour is
+                    // the real state of the connection
+                    float cx = getWidth() - dp(6);
+                    float cy = getHeight() - dp(6);
                     noProxyBorderPaint.setColor(Theme.getColor(Theme.key_windowBackgroundWhite));
                     canvas.drawCircle(cx, cy, dp(5.5f), noProxyBorderPaint);
-                    noProxyPaint.setColor(isOffline ? 0xFF9E9E9E : (noProxy ? 0xFFF44336 : 0xFF4CAF50));
+                    noProxyPaint.setColor(connectionColor);
                     canvas.drawCircle(cx, cy, dp(4), noProxyPaint);
                 }
             };
@@ -320,6 +323,7 @@ public class AccountSwitcherView extends FrameLayout {
             noProxy = !ConnectionsManager.ncgAccountHasProxy(account);
             UserConfig uc = UserConfig.getInstance(account);
             isOffline = uc.ncgOffline;
+            connectionColor = AccountFolderLogic.connectionDotColor(account);
             TLRPC.User user = uc.getCurrentUser();
 
             ((LinearLayout.LayoutParams) avatarContainer.getLayoutParams()).leftMargin = dp(indented ? 12 + INDENT_DP : 12);
