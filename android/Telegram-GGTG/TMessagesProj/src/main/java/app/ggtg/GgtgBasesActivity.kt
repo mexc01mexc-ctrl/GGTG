@@ -56,10 +56,12 @@ class GgtgBasesActivity : BaseFragment() {
                     2 -> showSearchDialog()
                     3 -> showImportGroupsDialog()
                     4 -> presentFragment(GgtgSentActivity())
+                    5 -> parentActivity?.let { GgtgUsersTrash.showDialog(it) { rebuild() } }
                 }
             }
         })
         val menu = actionBar.createMenu()
+        menu.addItem(5, R.drawable.msg_delete) // «Корзина пользователей»
         menu.addItem(4, R.drawable.msg_send)
         menu.addItem(2, R.drawable.msg_search)
         menu.addItem(3, R.drawable.msg_folders)

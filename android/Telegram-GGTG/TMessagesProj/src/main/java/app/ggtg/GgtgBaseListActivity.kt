@@ -667,6 +667,9 @@ class GgtgBaseListActivity(private val baseId: Long, private val isGroups: Boole
             if (left.size == GgtgDb.loadGroupEntries(baseId).size) { toast("Не удалось удалить"); return }
             GgtgDb.saveGroupEntries(baseId, meta.title, left)
         } else {
+            // thrown out by hand: the user counts this person as rubbish, the detector learns from it
+            val known = GgtgDb.lookupUser(row.username)
+            GgtgUsersTrash.add(GgtgUsersTrash.Entry(row.username, known?.name.orEmpty(), known?.id ?: 0L, known?.lastSeenText.orEmpty(), meta.title))
             GgtgDb.saveUsernames(baseId, meta.title, GgtgDb.loadUsernames(baseId).filter { !it.equals(row.username, true) }, crossDedupe = false)
         }
         rows.removeAt(index)

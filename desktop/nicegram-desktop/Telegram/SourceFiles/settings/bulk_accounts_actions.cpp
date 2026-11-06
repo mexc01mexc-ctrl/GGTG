@@ -53,6 +53,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "settings/ggtg_export.h"
 #include "settings/ggtg_session_json.h"
 #include "core/ggtg_sessions.h"
+#include "core/ggtg_users_trash.h"
 #include "core/ggtg_session_catalog.h"
 #include "core/ggtg_sync_transport.h"
 #include "settings/ggtg_registration.h"
@@ -3133,6 +3134,108 @@ void StartBaseVerification(
 	}));
 }
 
+// ggtg: «Корзина пользователей»: the people thrown out of bases by hand (✕ in the opened list). The detector learns from
+// them what the user counts as rubbish and fakes (so the cleanup finds similar ones), and a person can be put back.
+void ShowUsersTrashBox(std::shared_ptr<Ui::Show> show) {
+	show->showBox(Box([=](not_null<Ui::GenericBox*> box) {
+		box->setWidth(st::accountsBoxWidth);
+		box->setTitle(rpl::single(u"Корзина пользователей"_q));
+		const auto total = Core::GgtgUsersTrash::Count();
+		box->addRow(
+			object_ptr<Ui::FlatLabel>(
+				box,
+				u"Сюда попадают люди, которых вы убрали из базы крестиком в открытом списке: то, что вы считаете мусором и фейками. "
+					"Программа учится на их именах и юзернеймах и находит похожих при очистке базы. Нажмите на человека, чтобы вернуть его в базу."_q,
+				st::boxDividerLabel),
+			st::boxRowPadding);
+		if (!total) {
+			box->addRow(
+				object_ptr<Ui::FlatLabel>(box, u"Корзина пуста."_q, st::boxLabel),
+				st::boxRowPadding);
+			box->addButton(tr::lng_close(), [=] { box->closeBox(); });
+			return;
+		}
+		box->addRow(
+			object_ptr<Ui::FlatLabel>(
+				box,
+				u"Людей в корзине: "_q + QString::number(total)
+					+ (total > 300 ? u" (показаны последние 300)"_q : QString()),
+				st::boxLabel),
+			st::boxRowPadding);
+		auto entries = Core::GgtgUsersTrash::Cache();
+		std::reverse(entries.begin(), entries.end()); // the newest first
+		const auto weak = QPointer<Ui::GenericBox>(box.get());
+		auto shown = 0;
+		for (const auto &entry : entries) {
+			if (++shown > 300) {
+				break;
+			}
+			const auto when = QDateTime::fromSecsSinceEpoch(entry.at).toString(u"dd.MM hh:mm"_q);
+			auto sub = u"@"_q + entry.username;
+			if (!entry.baseTitle.isEmpty()) {
+				sub += u" · из «"_q + entry.baseTitle + u"»"_q;
+			}
+			sub += u" · "_q + when;
+			const auto row = box->addRow(object_ptr<Ggtg::InfoRow>(
+				box,
+				rpl::single(Ggtg::InfoRowData{
+					.title = entry.name.isEmpty() ? (u"@"_q + entry.username) : entry.name,
+					.subtitle = sub,
+					.chip = u"Вернуть"_q,
+				})),
+				st::boxRowPadding);
+			const auto username = entry.username;
+			const auto baseTitle = entry.baseTitle;
+			row->setClickedCallback([=] {
+				// back into the base it came from, else into the first base of people
+				auto target = uint64(0);
+				auto targetTitle = QString();
+				for (const auto &meta : Data::LoadScrapedGroupsIndex()) {
+					if (meta.kind != Data::BaseKind::Users) {
+						continue;
+					}
+					if (!target || meta.title == baseTitle) {
+						target = meta.id;
+						targetTitle = meta.title;
+						if (meta.title == baseTitle) {
+							break;
+						}
+					}
+				}
+				if (!target) {
+					Ggtg::Notice(show, u"Нет базы пользователей, куда вернуть"_q);
+					return;
+				}
+				auto list = Data::LoadScrapedGroupUsernames(target);
+				list.push_back(username);
+				Data::SaveScrapedGroupUsernames(target, targetTitle, list);
+				Core::GgtgUsersTrash::Remove(username);
+				Ggtg::Notice(show, u"@"_q + username + u" возвращён в «"_q + targetTitle + u"»"_q);
+				if (const auto strong = weak.data()) {
+					strong->closeBox();
+				}
+				ShowUsersTrashBox(show);
+			});
+		}
+		box->addButton(rpl::single(u"Учиться на корзине"_q), [=] {
+			Ggtg::FakeDetector::TrainDetectorFromMarked(show);
+		});
+		box->addLeftButton(rpl::single(u"Очистить корзину"_q), [=] {
+			show->show(Ui::MakeConfirmBox({
+				.text = u"Очистить корзину пользователей? Это не вернёт людей в базу, программа только забудет, чему на них училась. Уже найденные признаки останутся."_q,
+				.confirmed = [=](Fn<void()> &&close) {
+					close();
+					Core::GgtgUsersTrash::Clear();
+					if (const auto strong = weak.data()) {
+						strong->closeBox();
+					}
+				},
+				.confirmText = u"Очистить"_q,
+			}));
+		});
+	}));
+}
+
 // ggtg: ONE window for cleaning a base: tick what to remove (several at once), see how many each takes out,
 // confirm once. Bases collected through Squidward are the ones that need it (their data is a guess); a base
 // taken from an open group is real people, so nothing is ticked for it.
@@ -3969,6 +4072,17 @@ void ShowClickableUsernamesBox(
 								box->uiShow(),
 								Core::GuardedAction::EditBases)) {
 							return;
+						}
+						if (!isGroupList) {
+							// thrown out by hand: the user counts this person as rubbish, the detector learns from it
+							const auto meta = Data::LookupUserMeta(username);
+							Core::GgtgUsersTrash::Add({
+								.username = username,
+								.name = meta.name,
+								.id = meta.id,
+								.lastseenText = meta.lastseenText,
+								.baseTitle = title,
+							});
 						}
 						remove(username);
 						forget(username);
@@ -5529,6 +5643,11 @@ object_ptr<Ui::BoxContent> MakeScrapedGroupsDbBox(
 					},
 					&st::menuIconRestore);
 			}
+			(*menu)->addAction(
+				u"Корзина пользователей ("_q
+					+ QString::number(Core::GgtgUsersTrash::Count()) + u")…"_q,
+				[=] { ShowUsersTrashBox(show); },
+				&st::menuIconCancel);
 			if (Data::CountSmsResettable() > 0) {
 				(*menu)->addAction(
 					u"Вернуть в очередь все пометки ("_q

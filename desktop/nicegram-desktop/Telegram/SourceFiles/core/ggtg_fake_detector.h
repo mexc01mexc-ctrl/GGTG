@@ -2,6 +2,7 @@
 
 #include "core/ggtg_id_date.h"
 #include "core/ggtg_paths.h"
+#include "core/ggtg_users_trash.h"
 #include "window/ggtg_widgets.h"
 #include "data/scraped_members_db.h"
 #include "boxes/abstract_box.h"
@@ -613,6 +614,16 @@ inline LearnResult LearnFromMarks() {
 	for (const auto &rec : Data::LoadAllSmsSendRecords()) {
 		if (rec.status == Data::SmsSendStatus::SuspectedFake && !fakes.contains(rec.username)) {
 			fakes.push_back(rec.username);
+		}
+	}
+	// ggtg: the people the user threw out of bases by hand ("Корзина пользователей") count as fakes: their usernames
+	// and the names they carried teach the detector what the user considers rubbish
+	for (const auto &entry : Core::GgtgUsersTrash::Cache()) {
+		if (!fakes.contains(entry.username)) {
+			fakes.push_back(entry.username);
+		}
+		if (!entry.name.isEmpty() && !fakes.contains(entry.name.toLower())) {
+			fakes.push_back(entry.name.toLower());
 		}
 	}
 	static const auto wordRe = QRegularExpression(u"[a-zA-Zа-яА-ЯёЁ]{4,}"_q);

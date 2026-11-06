@@ -460,6 +460,13 @@ object GgtgFakeDetector {
         for (rec in GgtgDb.loadAllSmsRecords()) {
             if (rec.status == GgtgDb.SmsStatus.SuspectedFake && !fakes.contains(rec.username)) fakes.add(rec.username)
         }
+        // the people the user threw out of bases by hand ("Корзина пользователей") count as fakes: their usernames and
+        // the names they carried teach the detector what the user considers rubbish
+        for (e in GgtgUsersTrash.all()) {
+            if (e.username !in fakes) fakes.add(e.username)
+            val n = e.name.lowercase()
+            if (n.isNotEmpty() && n !in fakes) fakes.add(n)
+        }
         val wordRe = Regex("[a-zA-Zа-яА-ЯёЁ]{4,}")
         fun count(names: Collection<String>): Map<String, Int> {
             val result = HashMap<String, Int>()
