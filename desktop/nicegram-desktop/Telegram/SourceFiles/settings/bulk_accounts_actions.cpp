@@ -3482,6 +3482,13 @@ void ShowClickableUsernamesBox(
 
 			const auto order = std::make_shared<ListOrder>(ListOrder::Base);
 			const auto rebuild = std::make_shared<Fn<void()>>();
+			// ggtg: the people STILL in this list. A person removed here (or moved to another base) leaves it for good:
+			// before, a rebuild (search, sort) drew the rows again from the list the window was opened with, so
+			// "deleted" people came back.
+			const auto current = std::make_shared<QStringList>(usernames);
+			const auto forget = [=](const QString &username) {
+				current->removeAll(username);
+			};
 
 			if (!isGroupList) {
 				auto cardOwned = object_ptr<Ui::RpWidget>(box);
@@ -3639,7 +3646,7 @@ void ShowClickableUsernamesBox(
 				QString());
 			const auto countLabel = Ui::CreateChild<Ui::FlatLabel>(
 				controls,
-				QString::number(usernames.size()) + unitWord(usernames.size()),
+				QString::number(current->size()) + unitWord(int(current->size())),
 				st::boxDividerLabel);
 			const auto sourceLabel = (!baseSource.isEmpty())
 				? Ui::CreateChild<Ui::FlatLabel>(
@@ -3964,6 +3971,7 @@ void ShowClickableUsernamesBox(
 							return;
 						}
 						remove(username);
+						forget(username);
 						wrap->deleteLater();
 					});
 				}
@@ -4032,7 +4040,7 @@ void ShowClickableUsernamesBox(
 					if (move) {
 						entries.push_back({
 							u"Перенести в другую базу..."_q,
-							[=] { move(username, [=] { wrap->deleteLater(); }); },
+							[=] { move(username, [=] { forget(username); wrap->deleteLater(); }); },
 							&st::menuIconReplace,
 						});
 					}
@@ -4131,8 +4139,8 @@ void ShowClickableUsernamesBox(
 				const auto q = searchQuery->trimmed().toLower();
 				const auto qNoAt = q.startsWith('@') ? q.mid(1) : q;
 				auto filtered = QStringList();
-				filtered.reserve(usernames.size());
-				for (const auto &u : usernames) {
+				filtered.reserve(current->size());
+				for (const auto &u : *current) {
 					if (q.isEmpty()) {
 						filtered.push_back(u);
 						continue;
@@ -4160,9 +4168,9 @@ void ShowClickableUsernamesBox(
 				(*appendChunk)();
 				refreshFooter();
 				if (q.isEmpty()) {
-					countLabel->setText(QString::number(usernames.size()) + unitWord(usernames.size()));
+					countLabel->setText(QString::number(current->size()) + unitWord(int(current->size())));
 				} else {
-					countLabel->setText(QString::number(filtered.size()) + u" из "_q + QString::number(usernames.size()) + unitWord(usernames.size()));
+					countLabel->setText(QString::number(filtered.size()) + u" из "_q + QString::number(current->size()) + unitWord(int(current->size())));
 				}
 				relayoutControls();
 			};
