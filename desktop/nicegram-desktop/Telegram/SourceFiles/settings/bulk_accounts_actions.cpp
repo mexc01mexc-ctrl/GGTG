@@ -8676,42 +8676,56 @@ void AddSessionsSection(
 			return false;
 		};
 
-		// First pass: match any stored sessions with hash == 0 (or mismatch)
-		// to an active session by matching device model
+		// ggtg: a stored session's Telegram number (hash) is NEVER rewritten from a device-name guess: names like
+		// "MacBook Pro" fit many sessions, and a wrong number made dead spares look alive (and live ones look
+		// dead to "terminate other sessions"). Only a missing number is filled, and only when exactly one live
+		// session fits and no other stored session already owns that number.
 		for (auto &item : stored) {
-			if (Sessions::HasKey(item)) {
-				const auto devModel = item.device.value(u"deviceModel"_q).toString();
-				if (!devModel.isEmpty()) {
-					for (const auto &entry : list) {
-						if (entry.hash != 0 && matchDev(entry.name, devModel)) {
-							if (!item.hash || item.hash != entry.hash) {
-								item.hash = entry.hash;
-								item.state = u"ok"_q;
-								Sessions::UpdateStoredHash(item.id, item.hash);
-							}
-							break;
-						}
-					}
+			if (item.hash || !Sessions::HasKey(item)) {
+				continue;
+			}
+			const auto devModel = item.device.value(u"deviceModel"_q).toString();
+			if (devModel.isEmpty()) {
+				continue;
+			}
+			const Api::Authorizations::Entry *found = nullptr;
+			auto matches = 0;
+			for (const auto &entry : list) {
+				if (entry.hash != 0 && matchDev(entry.name, devModel)) {
+					found = &entry;
+					++matches;
 				}
+			}
+			if (matches != 1) {
+				continue;
+			}
+			const auto owned = ranges::any_of(stored, [&](
+					const Sessions::StoredSession &other) {
+				return other.hash == found->hash;
+			});
+			if (!owned) {
+				item.hash = found->hash;
+				item.state = u"ok"_q;
+				Sessions::UpdateStoredHash(item.id, item.hash);
 			}
 		}
 
-		// Ensure any stored session present in the live list is marked "ok"
-		if (list.size() > 0) {
+		// The state follows Telegram's own list, by number only: in the list = "ok", not in it = "revoked".
+		if (!list.empty()) {
 			for (auto &item : stored) {
-				if (item.hash) {
-					const auto aliveInList = ranges::any_of(list, [&](
-							const Api::Authorizations::Entry &entry) {
-						if (entry.hash && entry.hash == item.hash) {
-							return true;
-						}
-						const auto devModel = item.device.value(u"deviceModel"_q).toString();
-						return !devModel.isEmpty() && matchDev(entry.name, devModel);
-					});
-					if (aliveInList && item.state != u"ok"_q) {
-						item.state = u"ok"_q;
-						Sessions::UpdateStoredState(item.id, u"ok"_q);
-					}
+				if (!item.hash) {
+					continue;
+				}
+				const auto aliveInList = ranges::any_of(list, [&](
+						const Api::Authorizations::Entry &entry) {
+					return entry.hash && entry.hash == item.hash;
+				});
+				if (aliveInList && item.state != u"ok"_q) {
+					item.state = u"ok"_q;
+					Sessions::UpdateStoredState(item.id, u"ok"_q);
+				} else if (!aliveInList && item.state != u"revoked"_q) {
+					item.state = u"revoked"_q;
+					Sessions::UpdateStoredState(item.id, u"revoked"_q);
 				}
 			}
 		}
@@ -8740,16 +8754,7 @@ void AddSessionsSection(
 					}
 				}
 			}
-			if (!devName.isEmpty()) {
-				for (const auto &item : stored) {
-					if (Sessions::HasKey(item)) {
-						const auto devModel = item.device.value(u"deviceModel"_q).toString();
-						if (!devModel.isEmpty() && matchDev(devName, devModel)) {
-							return &item;
-						}
-					}
-				}
-			}
+			// (never by device name: a name fits many sessions and shows the wrong spare)
 			return nullptr;
 		};
 		auto sorted = list;
@@ -8785,7 +8790,7 @@ void AddSessionsSection(
 			// (ending it would just log the account out).
 			const auto hash = entry.hash;
 			const auto device = entry.name;
-			const auto canSwitch = (spare
+			const auto canSwitch = (spare && spare->state != u"revoked"_q
 				&& Sessions::HasKey(*spare)
 				&& QDir(Sessions::VaultFolder(*spare) + u"/tdata"_q).exists());
 			const auto storedSpare = spare ? *spare : Sessions::StoredSession();
@@ -8841,11 +8846,7 @@ void AddSessionsSection(
 			}
 			const auto matchedAbove = ranges::any_of(sorted, [&](
 					const Api::Authorizations::Entry &entry) {
-				if (entry.hash && item.hash && entry.hash == item.hash) {
-					return true;
-				}
-				const auto devModel = item.device.value(u"deviceModel"_q).toString();
-				return !devModel.isEmpty() && matchDev(entry.name, devModel);
+				return entry.hash && item.hash && entry.hash == item.hash;
 			});
 			if (matchedAbove) {
 				continue;
@@ -8856,7 +8857,9 @@ void AddSessionsSection(
 			synth.platform = item.device.value(u"systemVersion"_q).toString();
 			synth.system = synth.platform;
 			synth.info = item.device.value(u"appVersion"_q).toString();
-			synth.location = u"Сохранена в программе"_q;
+			synth.location = (item.state == u"revoked"_q)
+				? u"Завершена в Telegram (запись можно удалить)"_q
+				: u"Сохранена в программе"_q;
 			synth.activeTime = static_cast<TimeId>(item.createdAt);
 			const auto createdDt = QDateTime::fromSecsSinceEpoch(item.createdAt);
 			synth.active = createdDt.toString(u"dd.MM.yyyy hh:mm"_q);
@@ -11957,6 +11960,28 @@ void TerminateOtherSessions(
 			done(error, QString());
 			return;
 		}
+		// ggtg: a stored session whose number is not in Telegram's list is already dead: say so in the vault.
+		// If NONE of the spares is found, the numbers kept here cannot be trusted - end nothing this time.
+		auto spares = 0;
+		auto missing = 0;
+		for (const auto &entry
+				: Sessions::StoredForUser(Sessions::LoadVault(), userId)) {
+			if (entry.state == u"revoked"_q || !entry.hash) {
+				continue;
+			}
+			++spares;
+			if (std::find(hashes.begin(), hashes.end(), entry.hash)
+				== hashes.end()) {
+				++missing;
+				Sessions::UpdateStoredState(entry.id, u"revoked"_q);
+			}
+		}
+		if (spares > 0 && missing == spares) {
+			done(u"сохранённых резервных сессий нет в списке Telegram (они помечены "
+				"как завершённые). Ничего не завершено: проверьте аккаунт и "
+				"повторите"_q, QString());
+			return;
+		}
 		auto terminate = std::make_shared<std::vector<uint64>>();
 		auto kept = 0;
 		for (const auto hash : hashes) {
@@ -12240,7 +12265,7 @@ const auto kSwapRescueInstalled = [] {
 
 } // namespace
 
-void SwapToStoredSession(
+static void SwapToStoredSessionNow(
 		not_null<Main::Account*> account,
 		const QString &id,
 		Fn<void(QString error)> done) {
@@ -12315,6 +12340,52 @@ void SwapToStoredSession(
 		},
 		targetProxy,
 		targetDevice);
+}
+
+void SwapToStoredSession(
+		not_null<Main::Account*> account,
+		const QString &id,
+		Fn<void(QString error)> done) {
+	namespace Sessions = Core::GgtgSessions;
+	if (!Main::AccountIsLive(account)) {
+		done(u"аккаунт не в сети"_q);
+		return;
+	}
+	const auto target = FindStored(id);
+	if (!target) {
+		done(u"сохранённая сессия не найдена"_q);
+		return;
+	}
+	if (target->state == u"revoked"_q) {
+		done(u"эта сессия уже завершена в Telegram - переключение отменено"_q);
+		return;
+	}
+	const auto hash = target->hash;
+	if (!hash) {
+		// no Telegram number kept for it: nothing to check against, the rescue guard covers a dead one
+		SwapToStoredSessionNow(account, id, std::move(done));
+		return;
+	}
+	// ggtg: look at Telegram's own list first - a spare that is not in it any more (ended by "terminate other
+	// sessions", by the user, or by Telegram) is dead, and switching onto it would log the account out.
+	const auto weak = base::make_weak(account.get());
+	Main::FetchSessionHashes(account, [=](
+			std::vector<uint64> hashes,
+			QString error) {
+		const auto alive = weak.get();
+		if (!alive || !Main::AccountIsLive(alive)) {
+			done(u"аккаунт не в сети"_q);
+			return;
+		}
+		if (error.isEmpty()
+			&& std::find(hashes.begin(), hashes.end(), hash) == hashes.end()) {
+			Sessions::UpdateStoredState(id, u"revoked"_q);
+			done(u"эта резервная сессия уже завершена в Telegram - переключение "
+				"отменено, аккаунт остался на рабочей сессии"_q);
+			return;
+		}
+		SwapToStoredSessionNow(alive, id, done);
+	});
 }
 
 void MoveToNewSession(

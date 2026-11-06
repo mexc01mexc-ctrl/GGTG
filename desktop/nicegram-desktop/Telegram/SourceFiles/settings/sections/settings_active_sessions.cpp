@@ -1399,7 +1399,7 @@ public:
 	, _location(LocationAndDate(entry))
 	, _terminate(std::move(terminate))
 	, _switchSession(std::move(switchSession)) {
-		resize(width(), st::sessionListItem.height);
+		resize(width(), st::sessionListItem.height + extraHeight());
 		setMouseTracking(true);
 		setClickedCallback([=] {
 			const auto pos = mapFromGlobal(QCursor::pos());
@@ -1457,9 +1457,9 @@ protected:
 		const auto available = std::max(
 			width() - left - rightButton - st::sessionTerminateSkip,
 			0);
-		const auto name = (_entry.name.isEmpty()
+		const auto name = _entry.name.isEmpty()
 			? u"Устройство"_q
-			: _entry.name) + _nameSuffix;
+			: _entry.name;
 		p.setFont(item.nameStyle.font);
 		p.setPen(st::windowBoldFg);
 		p.drawText(
@@ -1471,12 +1471,32 @@ protected:
 			Qt::AlignLeft | Qt::AlignVCenter,
 			item.nameStyle.font->elided(name, available));
 
+		// ggtg: what the app knows about this session (spare, role, note, date) is shown in full under the
+		// name, wrapped, not cut off after one line
+		const auto shift = extraHeight();
+		if (shift) {
+			p.setFont(st::normalFont);
+			p.setPen(st::windowActiveTextFg);
+			auto suffix = _nameSuffix.trimmed();
+			if (suffix.startsWith('(') && suffix.endsWith(')')) {
+				suffix = suffix.mid(1, suffix.size() - 2);
+			}
+			p.drawText(
+				QRect(
+					left,
+					item.namePosition.y() + item.nameStyle.font->height,
+					available,
+					shift),
+				Qt::AlignLeft | Qt::AlignTop | Qt::TextWordWrap,
+				suffix);
+		}
+
 		p.setFont(st::normalFont);
 		p.setPen(item.statusFg);
 		p.drawText(
 			QRect(
 				left,
-				item.statusPosition.y(),
+				item.statusPosition.y() + shift,
 				available,
 				st::normalFont->height),
 			Qt::AlignLeft | Qt::AlignVCenter,
@@ -1486,7 +1506,7 @@ protected:
 		p.drawText(
 			QRect(
 				left,
-				st::sessionLocationTop,
+				st::sessionLocationTop + shift,
 				available,
 				st::normalFont->height),
 			Qt::AlignLeft | Qt::AlignVCenter,
@@ -1523,6 +1543,13 @@ protected:
 	}
 
 private:
+	// Two extra text lines for the app's own description of the session, when there is one.
+	[[nodiscard]] int extraHeight() const {
+		return _nameSuffix.trimmed().isEmpty()
+			? 0
+			: (2 * st::normalFont->height);
+	}
+
 	[[nodiscard]] QRect crossRect() const {
 		return QRect(
 			QPoint(
