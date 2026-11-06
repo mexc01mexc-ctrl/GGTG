@@ -11796,9 +11796,7 @@ void CreateBackupSessionWith(
 		return;
 	}
 	const auto weak = base::make_weak(account.get());
-	auto device = asAndroid
-		? DeviceOverrideFromJson(RandomAndroidDeviceJson(account->deviceOverride()))
-		: RandomDeviceOverrideForAccount(weak.get());
+	auto device = RandomDesktopFamilyDeviceOverride(weak.get());
 	const auto phone = account->sessionExists()
 		? account->session().user()->phone()
 		: QString();
@@ -11847,7 +11845,7 @@ void CreateBackupSessionWith(
 				.arg(entry.phone)
 				.arg(entry.name));
 		done(QString(), entry.id);
-	}, device, asAndroid);
+	}, device, false);
 }
 
 void CreateMobileSessionWith(
@@ -12598,6 +12596,17 @@ MTP::DeviceOverride RandomDeviceOverrideForAccount(not_null<Main::Account*> acco
 		return RandomMacDeviceOverride(phone);
 	}
 	return RandomDesktopDeviceOverride(phone);
+}
+
+// ggtg: a session this Desktop creates (duplicate, export, hand-off to the phone) is always a Desktop one:
+// Telegram Desktop's api_id / lang pack and a Mac or PC device, never an iOS or Android profile.
+MTP::DeviceOverride RandomDesktopFamilyDeviceOverride(not_null<Main::Account*> account) {
+	const auto phone = account->sessionExists()
+		? account->session().user()->phone()
+		: QString();
+	return Platform::IsMac()
+		? RandomMacDeviceOverride(phone)
+		: RandomDesktopDeviceOverride(phone);
 }
 
 void RandomizeAccountDevice(

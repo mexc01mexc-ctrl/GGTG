@@ -637,9 +637,8 @@ void ExportNext(std::shared_ptr<ExportRun> run, size_t index) {
 	const auto vault = Sessions::StoredForUser(Sessions::LoadVault(), userId);
 	const auto existingAndroid = [&]() -> const Sessions::StoredSession* {
 		// ggtg: never hand a stored spare to a phone - one key runs in one place only; a new session is minted
-		if (run->options.viaSync || run->options.handoff) {
-			return nullptr;
-		}
+		// ggtg: and no Android/iOS-born spare either: sessions made here are Desktop ones only
+		return nullptr;
 		for (const auto &item : vault) {
 			if (item.state == u"ok"_q
 				&& Sessions::HasKey(item)
@@ -724,9 +723,9 @@ void ExportNext(std::shared_ptr<ExportRun> run, size_t index) {
 	// ggtg: a handoff export is a Desktop session (the phone keeps running it as it is), so the phone must
 	// get the very device that session was born with: pick it here, mint with it and write it into the pack.
 	auto desktopDevice = std::optional<MTP::DeviceOverride>();
-	if (run->options.handoff) {
+	{
 		if (const auto alive = weakAccount.get()) {
-			auto picked = Settings::RandomDeviceOverrideForAccount(alive);
+			auto picked = Settings::RandomDesktopFamilyDeviceOverride(alive);
 			// language / time zone: what the account already runs with (they were fitted to its proxy list /
 			// proxy), else the country of its number
 			const auto own = EffectiveDeviceOverride(alive);
@@ -790,8 +789,8 @@ void ExportNext(std::shared_ptr<ExportRun> run, size_t index) {
 		}
 		const auto isIos = Settings::IsIosSession(targetDevice);
 		entry["keys"] = keys;
-		entry["handoff"] = run->options.handoff;
-		if (run->options.handoff) {
+		entry["handoff"] = true;
+		{
 			// the phone runs this very Desktop session: same device it was born with
 			if (desktopDevice) {
 				entry["device"] = Settings::DeviceOverrideToJson(*desktopDevice);
@@ -842,10 +841,7 @@ void ExportNext(std::shared_ptr<ExportRun> run, size_t index) {
 			});
 		}
 		next();
-	}, run->options.handoff
-		? desktopDevice
-		: std::optional<MTP::DeviceOverride>(targetDevice),
-	run->options.handoff ? false : !Settings::IsIosSession(targetDevice));
+	}, desktopDevice, false);
 }
 
 void ShowExportBox(std::shared_ptr<ExportRun> run) {

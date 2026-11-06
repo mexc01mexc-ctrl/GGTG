@@ -66,6 +66,12 @@ class GgtgSyncAccountsActivity : BaseFragment() {
             updateMintButton()
         }
 
+        val readyRow = GgtgUi.actionCard(context, R.drawable.msg_download, "Готовые сессии от Mac",
+            "Сессии, которые Mac уже положил в «Избранное» главного аккаунта и которые никто не забрал: установить их на этот телефон") {
+            installReady()
+        }
+        GgtgUi.addCard(root, readyRow, top = 8f)
+
         val refreshRow = GgtgUi.actionCard(context, R.drawable.msg_retry, "Обновить список с Desktop",
             "Запросить свежий список доступных аккаунтов через главное синхро-облако") {
             refreshPeerAccounts()
@@ -98,6 +104,75 @@ class GgtgSyncAccountsActivity : BaseFragment() {
                 peerPicker?.rebuild()
                 updateMintButton()
                 toast(if (report.ok) "Список аккаунтов обновлён" else "Синхронизация: ${report.text}")
+            }
+        }
+    }
+
+    /** Installs every session the Mac has already put up (the "waiting" count of the sync status) and clears it from the queue. */
+    private fun installReady() {
+        val activity = parentActivity ?: return
+        GgtgSyncTransport.findIncoming { list, error ->
+            if (error.isNotEmpty()) { toast(error); return@findIncoming }
+            if (list.isEmpty()) { toast("Готовых сессий от Mac нет"); return@findIncoming }
+            AlertDialog.Builder(activity)
+                .setTitle("Готовые сессии от Mac: ${list.size}")
+                .setMessage("Они будут установлены на этом телефоне и удалены из очереди. Одна сессия работает только на одном устройстве: не нажимайте, если их ждёт другой телефон.")
+                .setPositiveButton("Установить") { _, _ -> runInstallReady(list) }
+                .setNegativeButton("Отмена", null)
+                .show()
+        }
+    }
+
+    private fun runInstallReady(list: List<GgtgSyncTransport.Remote>) {
+        val activity = parentActivity ?: return
+        val progress = TdataImportProgressDialog(activity, "Установка готовых сессий")
+        progress.show()
+        val process = GgtgProcess.start("Установка готовых сессий (${list.size})", GgtgProcess.Kind.Other)
+        process.progress(0, list.size)
+        scope.launch {
+            var installed = 0
+            val problems = ArrayList<String>()
+            for ((index, remote) in list.withIndex()) {
+                progress.setWorking("сессия ${index + 1}", index + 1, list.size)
+                val bytes = kotlin.coroutines.suspendCoroutine<ByteArray?> { cont ->
+                    GgtgSyncTransport.fetchIncoming(remote) { data, _ -> cont.resume(data) }
+                }
+                if (bytes == null) { problems.add("не скачалась или не расшифровалась"); continue }
+                val file = java.io.File(org.telegram.messenger.ApplicationLoader.applicationContext.cacheDir, "ggtg_sync_ready.ggtg")
+                try {
+                    file.writeBytes(bytes)
+                    if (!GgtgPackImporter.isPack(file)) { problems.add("это не сессия"); continue }
+                    val res = withContext(Dispatchers.IO) { GgtgPackImporter.import(file, null, progress, createBackup = true) }
+                    if (res.imported.isNotEmpty()) {
+                        installed += res.imported.size
+                        GgtgSyncTransport.deleteIncoming(remote)
+                        res.imported.forEach { id ->
+                            val slot = (0 until UserConfig.MAX_ACCOUNT_COUNT).firstOrNull {
+                                UserConfig.getInstance(it).isClientActivated && UserConfig.getInstance(it).clientUserId == id
+                            }
+                            val acc = GgtgSync.getPeerAccounts().firstOrNull { it.userId == id }
+                            if (slot != null && acc != null) {
+                                val uc = UserConfig.getInstance(slot)
+                                if (acc.folder.isNotEmpty()) uc.ncgFolder = acc.folder
+                                if (acc.twoFactor.isNotEmpty()) uc.ncgTwoFactor = acc.twoFactor
+                                uc.saveConfig(false)
+                                if (acc.trashed) GgtgAccounts.setTrashed(listOf(slot), true)
+                            }
+                        }
+                    } else problems.add(res.failReason ?: "не установилась")
+                } catch (t: Throwable) {
+                    org.telegram.messenger.FileLog.e(t)
+                    problems.add("сбой: ${t.message ?: t.javaClass.simpleName}")
+                } finally {
+                    try { file.delete() } catch (_: Throwable) {}
+                }
+                process.progress(index + 1, list.size)
+            }
+            try { progress.dismiss() } catch (_: Throwable) {}
+            if (problems.isEmpty()) process.succeed("Установлено: $installed") else process.fail("Установлено $installed, проблем: ${problems.size}")
+            withContext(Dispatchers.Main) {
+                peerPicker?.rebuild()
+                toast("Установлено: $installed" + if (problems.isNotEmpty()) "; проблем: ${problems.size} (${problems.first()})" else "")
             }
         }
     }

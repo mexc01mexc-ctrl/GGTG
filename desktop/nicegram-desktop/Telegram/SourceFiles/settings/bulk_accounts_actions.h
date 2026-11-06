@@ -78,6 +78,7 @@ void ShowEditDeviceBox(
 [[nodiscard]] MTP::DeviceOverride RandomIosDeviceOverride(const QString &phone = QString());
 [[nodiscard]] MTP::DeviceOverride RandomAndroidDeviceOverride(const QString &phone = QString());
 [[nodiscard]] MTP::DeviceOverride RandomDeviceOverrideForAccount(not_null<Main::Account*> account);
+[[nodiscard]] MTP::DeviceOverride RandomDesktopFamilyDeviceOverride(not_null<Main::Account*> account);
 [[nodiscard]] MTP::DeviceOverride RandomDeviceOverride(const QString &phone = QString());
 
 // The device block of an account's "ggtg.json" (empty object = default).
