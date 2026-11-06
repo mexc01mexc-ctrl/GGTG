@@ -1212,8 +1212,22 @@ void StepAntiTheftProtection(
 		}
 
 		TerminateOtherSessions(nowAcc, [=](QString termErr, QString report) {
+			if (!termErr.isEmpty()) {
+				// ggtg: nothing was ended (e.g. Telegram's 24 h rule, or the spares could not be matched):
+				// do NOT throw the seller's keys away as if the protection had worked
+				done(false, u"сессии продавца не завершены: "_q + termErr);
+				return;
+			}
 			for (const auto &pid : purchasedIds) {
 				Sessions::RemoveStored(pid);
+			}
+			// the session the account has just left is the seller's one (ended above): its key is of no use
+			for (const auto &entry : Sessions::StoredForUser(
+					Sessions::LoadVault(),
+					userId)) {
+				if (entry.role == u"previous"_q) {
+					Sessions::RemoveStored(entry.id);
+				}
 			}
 
 			CreateBackupSession(nowAcc, u"резервная копия"_q, [=](QString backupErr) {
