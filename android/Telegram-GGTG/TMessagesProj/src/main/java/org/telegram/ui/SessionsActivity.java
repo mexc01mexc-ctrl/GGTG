@@ -271,6 +271,7 @@ public class SessionsActivity extends BaseFragment implements NotificationCenter
             if (position == deadToggleRow) {
                 showDeadSessions = !showDeadSessions;
                 updateRows();
+                if (listAdapter != null) listAdapter.notifyDataSetChanged();
                 return;
             } else if (position == syncFromDesktopRow) {
                 receiveFromDesktop();
