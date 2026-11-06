@@ -8713,8 +8713,8 @@ void AddSessionsSection(
 		// The state follows Telegram's own list, by number only: in the list = "ok", not in it = "revoked".
 		if (!list.empty()) {
 			for (auto &item : stored) {
-				if (!item.hash) {
-					continue;
+				if (!item.hash || item.current) {
+					continue; // the working session shows up in Telegram's list as "this one", without a number
 				}
 				const auto aliveInList = ranges::any_of(list, [&](
 						const Api::Authorizations::Entry &entry) {
@@ -8770,7 +8770,13 @@ void AddSessionsSection(
 			auto suffix = QString();
 			const auto spare = storedByHash(entry.hash, entry.name);
 			if (entry.hash == 0) {
-				suffix = u" (основная · эта сессия)"_q;
+				const auto born = Sessions::SessionBorn(userId);
+				suffix = u" (основная · эта сессия"_q
+					+ (born.at
+						? ((born.made ? u" · создана "_q : u" · добавлена в программу "_q)
+							+ QDateTime::fromSecsSinceEpoch(born.at).toString(u"dd.MM.yyyy hh:mm"_q))
+						: QString())
+					+ u")"_q;
 			} else if (spare) {
 				const auto notePart = (!spare->note.isEmpty())
 					? (u" · "_q + spare->note)
@@ -11966,7 +11972,7 @@ void TerminateOtherSessions(
 		auto missing = 0;
 		for (const auto &entry
 				: Sessions::StoredForUser(Sessions::LoadVault(), userId)) {
-			if (entry.state == u"revoked"_q || !entry.hash) {
+			if (entry.state == u"revoked"_q || !entry.hash || entry.current) {
 				continue;
 			}
 			++spares;
@@ -12294,6 +12300,11 @@ static void SwapToStoredSessionNow(
 	old.source = u"swap"_q;
 	old.note = u"бывшая рабочая"_q;
 	old.platform = u"desktop"_q;
+	{
+		// the date it was made / added, not the date of the swap
+		Sessions::NoteSessionBornIfNew(userId);
+		old.createdAt = Sessions::SessionBorn(userId).at;
+	}
 	old = Sessions::AddStored(old);
 	auto error = QString();
 	if (!Storage::ExportRawAuthorizationAsTdata(
@@ -12324,6 +12335,7 @@ static void SwapToStoredSessionNow(
 			if (switchError.isEmpty()) {
 				// Mark target session as active in vault, never remove it.
 				Sessions::MarkCurrent(targetId);
+				Sessions::SetSessionBorn(userId, target->createdAt, true);
 				Sessions::PruneFormer(target->userId, oldId);
 				SwapGuards()[userId] = {
 					.targetId = targetId,
@@ -12424,6 +12436,8 @@ void MoveToNewSession(
 	handedOut.role = u"exported"_q;
 	handedOut.source = u"export"_q;
 	handedOut.note = handedOutNote;
+	Sessions::NoteSessionBornIfNew(handedOut.userId);
+	handedOut.createdAt = Sessions::SessionBorn(handedOut.userId).at;
 	handedOut = Sessions::AddStored(handedOut);
 	auto handedErr = QString();
 	Storage::ExportRawAuthorizationAsTdata(
@@ -12439,6 +12453,7 @@ void MoveToNewSession(
 		[=](QString switchError) {
 			if (switchError.isEmpty()) {
 				Sessions::MarkCurrent(spareId);
+				Sessions::SetSessionBorn(spare.userId, spare.createdAt, true);
 			}
 			done(switchError);
 		});

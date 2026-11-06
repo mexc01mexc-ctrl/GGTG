@@ -186,6 +186,7 @@ object GgtgPackImporter {
             }
             result.onSuccess { userId ->
                 imported += userId
+                GgtgSessions.noteSessionBornIfNew(userId)
                 if (firstImportedSlot == null) firstImportedSlot = slot
                 FileLog.d("ggtg pack: activated slot=$slot userId=$userId")
 

@@ -415,7 +415,7 @@ object GgtgSessionJsonSupport {
                     }
                     uc.saveConfig(false)
                     imported.add(acc.userId)
-
+                    GgtgSessions.noteSessionBornIfNew(acc.userId)
                     if (createBackup) {
                         val id = "${System.currentTimeMillis()}_${(1000..9999).random()}"
                         val proxyJson = proxy.let {

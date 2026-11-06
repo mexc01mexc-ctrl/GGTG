@@ -604,6 +604,36 @@ object GgtgSessions {
         }
     }
 
+    // ggtg: when the session an account works on was made / added to the program is always on record
+    // (the same as Core::GgtgSessions::SessionBorn on Desktop): "made" = this app made it, else it was just added.
+    private fun bornFile() = File(GgtgDb.dir(), "session_born.json")
+
+    private fun loadBorn(): JSONObject = try {
+        val f = bornFile()
+        if (f.exists()) JSONObject(f.readText()) else JSONObject()
+    } catch (_: Throwable) { JSONObject() }
+
+    /** Unix seconds and whether this app made the session; 0 = not known. */
+    @Synchronized fun sessionBorn(userId: Long): Pair<Long, Boolean> {
+        val o = loadBorn().optJSONObject(userId.toString()) ?: return 0L to false
+        return o.optLong("at", 0L) to o.optBoolean("made", false)
+    }
+
+    @Synchronized fun setSessionBorn(userId: Long, at: Long, made: Boolean) {
+        if (userId == 0L || at <= 0L) return
+        val all = loadBorn()
+        all.put(userId.toString(), JSONObject().put("at", at).put("made", made))
+        try {
+            val tmp = File(bornFile().path + ".tmp")
+            tmp.writeText(all.toString())
+            tmp.renameTo(bornFile())
+        } catch (_: Throwable) { }
+    }
+
+    fun noteSessionBornIfNew(userId: Long) {
+        if (userId != 0L && sessionBorn(userId).first == 0L) setSessionBorn(userId, System.currentTimeMillis() / 1000, false)
+    }
+
     /** Swaps the working session on [slot] with its stored backup session */
     suspend fun swapToBackup(slot: Int, targetId: String? = null): Result<String> {
         val uc = UserConfig.getInstance(slot)
@@ -615,6 +645,8 @@ object GgtgSessions {
         if (target == null) return Result.failure(Exception("Сессия не найдена"))
 
         var formerId: String? = null
+        noteSessionBornIfNew(userId)
+        val workingBorn = sessionBorn(userId).first
         try {
             val currentAcc = TdataExportHelper.currentSession(slot)
             val oldId = "${System.currentTimeMillis()}_${(1000..9999).random()}"
@@ -636,9 +668,9 @@ object GgtgSessions {
                 role = "previous",
                 platform = "android",
                 source = "android",
-                note = "Бывшая рабочая от " + SimpleDateFormat("dd.MM.yyyy HH:mm", Locale.getDefault()).format(Date()),
+                note = "Бывшая рабочая" + (if (workingBorn > 0L) " (создана/добавлена " + SimpleDateFormat("dd.MM.yyyy HH:mm", Locale.getDefault()).format(Date(workingBorn * 1000)) + ")" else ""),
                 state = "ok",
-                createdAt = System.currentTimeMillis() / 1000,
+                createdAt = if (workingBorn > 0L) workingBorn else System.currentTimeMillis() / 1000,
                 hash = 0L,
                 phone = user?.phone.orEmpty(),
                 name = listOfNotNull(user?.first_name, user?.last_name).joinToString(" ").trim(),
@@ -733,6 +765,7 @@ object GgtgSessions {
         }
 
         markCurrent(target.id)
+        setSessionBorn(userId, target.createdAt, true)
         formerId?.let { pruneFormer(userId, it) }
         return Result.success("Аккаунт успешно переключён на выбранную сессию!")
     }

@@ -225,6 +225,9 @@ void Account::createSession(
 		local().readSelf(_session.get(), serialized, streamVersion);
 	}
 	_sessionValue = _session.get();
+	// ggtg: the date this session was added to the program is always on record
+	Core::GgtgSessions::NoteSessionBornIfNew(
+		QString::number(_session->userId().bare));
 	Data::TrackManualSends(_session.get());
 	Core::GgtgSync::SessionStarted(_session.get());
 	Settings::TrackSpamBotReplies(_session.get());

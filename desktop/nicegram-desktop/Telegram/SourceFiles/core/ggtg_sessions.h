@@ -17,6 +17,7 @@ For license and exceptions, see https://github.com/telegramdesktop/tdesktop/blob
 #include <QtCore/QJsonArray>
 #include <QtCore/QJsonDocument>
 #include <QtCore/QJsonObject>
+#include <QtCore/QFile>
 #include <QtCore/QSaveFile>
 
 #include <algorithm>
@@ -625,6 +626,59 @@ inline void UpdateStoredRole(
 
 // Exactly one session of an account is the current one. The user's own note
 // stays as it is; the old marker kept in the note text is cleared.
+// ---- When the session an account works on right now was made or added to the program ----
+//
+// Always written: for a session this app made it is the moment it was made, for an account that was bought,
+// imported or logged in it is the moment the program first saw it ("добавлена в программу"). It follows the
+// account through every swap, so a spare that was the working session keeps its real date.
+struct BornInfo {
+	qint64 at = 0;
+	bool made = false; // made by this app (exact), not just added
+};
+
+[[nodiscard]] inline QString BornPath() {
+	return Core::GgtgPaths::DbDir() + u"session_born.json"_q;
+}
+
+[[nodiscard]] inline QJsonObject LoadBorn() {
+	auto file = QFile(BornPath());
+	if (!file.open(QIODevice::ReadOnly)) {
+		return QJsonObject();
+	}
+	return QJsonDocument::fromJson(file.readAll()).object();
+}
+
+[[nodiscard]] inline BornInfo SessionBorn(const QString &userId) {
+	const auto entry = LoadBorn().value(userId).toObject();
+	return {
+		.at = entry.value("at").toString().toLongLong(),
+		.made = entry.value("made").toBool(),
+	};
+}
+
+inline void SetSessionBorn(const QString &userId, qint64 at, bool made) {
+	if (userId.isEmpty() || at <= 0) {
+		return;
+	}
+	auto all = LoadBorn();
+	all.insert(userId, QJsonObject{
+		{ "at", QString::number(at) },
+		{ "made", made },
+	});
+	QDir().mkpath(QFileInfo(BornPath()).absolutePath());
+	auto file = QSaveFile(BornPath());
+	if (file.open(QIODevice::WriteOnly)) {
+		file.write(QJsonDocument(all).toJson(QJsonDocument::Compact));
+		file.commit();
+	}
+}
+
+inline void NoteSessionBornIfNew(const QString &userId) {
+	if (!userId.isEmpty() && !SessionBorn(userId).at) {
+		SetSessionBorn(userId, QDateTime::currentSecsSinceEpoch(), false);
+	}
+}
+
 inline void MarkCurrent(const QString &id) {
 	auto entries = LoadVault();
 	auto userId = QString();

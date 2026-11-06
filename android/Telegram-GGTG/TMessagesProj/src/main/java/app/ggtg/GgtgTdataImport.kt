@@ -330,6 +330,7 @@ object TdataImportHelper {
             }
             result.onSuccess { userId ->
                 imported += userId
+                GgtgSessions.noteSessionBornIfNew(userId)
                 applySidecar(sidecar, userId, targetSlot)
                 if (firstImportedSlot == null) firstImportedSlot = targetSlot
                 FileLog.d("tdata duplicate: activated slot=$targetSlot userId=$userId mainDc=${account.mainDcId}")
