@@ -329,6 +329,7 @@ object GgtgRegistration {
     // HTTP Helpers
     // -----------------------------------------------------------------------------
     suspend fun fetchApiGet(urlString: String, headers: Map<String, String> = emptyMap()): Result<String> = withContext(Dispatchers.IO) {
+        val t0 = System.currentTimeMillis()
         try {
             val url = URL(urlString)
             val conn = url.openConnection() as HttpURLConnection
@@ -341,11 +342,16 @@ object GgtgRegistration {
             val stream = if (code in 200..299) conn.inputStream else conn.errorStream ?: conn.inputStream
             val response = BufferedReader(InputStreamReader(stream)).readText().trim()
             conn.disconnect()
+            // ggtg: every call to a number / captcha service is logged as the service answered (key hidden)
+            FileLog.d("GGTG reg API GET ${maskKey(urlString)} -> HTTP $code, ${System.currentTimeMillis() - t0} ms, answer: ${response.take(400)}")
             Result.success(response)
         } catch (t: Throwable) {
+            FileLog.d("GGTG reg API GET ${maskKey(urlString)} -> failed: ${t.javaClass.simpleName}: ${t.message}")
             Result.failure(t)
         }
     }
+
+    private fun maskKey(u: String) = u.replace(Regex("(api_?key|apiKey|key|clientKey)=([^&]{4})[^&]*"), "$1=$2***")
 
     suspend fun fetchApiPostJson(urlString: String, jsonBody: String, headers: Map<String, String> = emptyMap()): Result<String> = withContext(Dispatchers.IO) {
         try {

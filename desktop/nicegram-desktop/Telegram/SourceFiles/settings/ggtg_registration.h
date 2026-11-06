@@ -971,9 +971,26 @@ inline void SendApiGet(
 		request.setRawHeader(it.key(), it.value());
 	}
 	const auto reply = NetManager().get(request);
+	// ggtg: every call to a number / captcha service is written to the log exactly as the service answered
+	// (the key is hidden): the HTTP status, the body, and the error text, so an empty "Сервис ответил: ." is
+	// no longer a mystery
+	auto shownUrl = url.toString();
+	shownUrl.replace(QRegularExpression(u"(api_?key|apiKey|key|clientKey)=([^&]{4})[^&]*"_q), u"\\1=\\2***"_q);
+	const auto started = crl::now();
 	QObject::connect(reply, &QNetworkReply::finished, reply, [=] {
 		reply->deleteLater();
 		const auto raw = QString::fromUtf8(reply->readAll()).trimmed();
+		const auto status = reply->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt();
+		Core::GgtgLog::Info(
+			u"Регистрация"_q,
+			u"[API] GET %1 -> HTTP %2, %3 мс, ответ: «%4»%5"_q
+				.arg(shownUrl)
+				.arg(status)
+				.arg(int(crl::now() - started))
+				.arg(raw.left(400))
+				.arg(reply->error() == QNetworkReply::NoError
+					? QString()
+					: (u", ошибка сети: "_q + reply->errorString())));
 		if (reply->error() != QNetworkReply::NoError) {
 			if (done) done(raw, reply->errorString());
 			return;
@@ -2003,7 +2020,9 @@ inline void StartRefundSupervisor() {
 						RemoveRefundTask(actId);
 					} else if (attempts >= 15) {
 						if (logCb) {
-							logCb(u"[Автовозврат] Превышено число попыток возврата для ID: "_q + actId + u" ("_q + resp + u")"_q);
+							logCb(u"[Автовозврат] ВОЗВРАТ НЕ ВЫПОЛНЕН для +"_q + phone + u" (ID: "_q + actId + u", ответ сервиса: «"_q
+								+ (resp.isEmpty() ? (err.isEmpty() ? u"пусто"_q : err) : resp)
+								+ u"»). Верните деньги вручную в кабинете SMS-сервиса."_q);
 						}
 						RemoveRefundTask(actId);
 					} else {
@@ -3782,6 +3801,36 @@ private:
 		if (_cancelled) return;
 		_phoneCodeHash = qba(data.vphone_code_hash());
 		const auto &codeType = data.vtype();
+		{
+			// ggtg: what Telegram really answered to auth.sendCode - the way the code goes, what it would
+			// try next if this one does not arrive, and after how many seconds
+			const auto typeName = [](const MTPauth_SentCodeType &type) -> QString {
+				switch (type.type()) {
+				case mtpc_auth_sentCodeTypeApp: return u"в приложение Telegram на другом устройстве"_q;
+				case mtpc_auth_sentCodeTypeSms: return u"SMS"_q;
+				case mtpc_auth_sentCodeTypeCall: return u"голосовой звонок"_q;
+				case mtpc_auth_sentCodeTypeFlashCall: return u"flash-звонок"_q;
+				case mtpc_auth_sentCodeTypeMissedCall: return u"пропущенный звонок"_q;
+				case mtpc_auth_sentCodeTypeEmailCode: return u"код на почту"_q;
+				case mtpc_auth_sentCodeTypeSetUpEmailRequired: return u"нужно привязать почту"_q;
+				case mtpc_auth_sentCodeTypeFragmentSms: return u"SMS через Fragment"_q;
+				case mtpc_auth_sentCodeTypeFirebaseSms: return u"SMS через Firebase (push)"_q;
+				case mtpc_auth_sentCodeTypeSmsWord: return u"SMS со словом"_q;
+				case mtpc_auth_sentCodeTypeSmsPhrase: return u"SMS с фразой"_q;
+				}
+				return u"неизвестный тип "_q + QString::number(type.type());
+			};
+			auto line = u"Ответ Telegram на запрос кода: способ - "_q + typeName(codeType);
+			if (const auto next = data.vnext_type()) {
+				line += u"; если не придёт, дальше - "_q + typeName(*next);
+			} else {
+				line += u"; следующего способа Telegram не предлагает"_q;
+			}
+			if (const auto timeout = data.vtimeout()) {
+				line += u"; повторный запрос возможен через "_q + QString::number(timeout->v) + u" с"_q;
+			}
+			log(line);
+		}
 		if (codeType.type() == mtpc_auth_sentCodeTypeSetUpEmailRequired) {
 			log(u"Telegram требует подтверждения Email для номера +"_q + _phone);
 			handleEmailRequired();
