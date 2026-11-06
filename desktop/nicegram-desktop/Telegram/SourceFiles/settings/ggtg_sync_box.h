@@ -792,6 +792,22 @@ inline void FillGgtgSyncBox(
 			st::boxDividerLabel),
 		st::boxRowPadding);
 
+	const auto sendAccs = box->addRow(
+		object_ptr<Ggtg::ActionRow>(
+			box,
+			rpl::single(u"Отправить аккаунты на телефон…"_q),
+			u"→"_q),
+		st::boxRowPadding);
+	sendAccs->setClickedCallback([=] {
+		controller->show(MakeGgtgExportBox(controller, true));
+	});
+	box->addRow(
+		object_ptr<Ui::FlatLabel>(
+			box,
+			u"Выберите аккаунты: для каждого создаётся отдельная сессия и кладётся в «Избранное» главного аккаунта. Телефон заберёт её, когда вы нажмёте «Принять аккаунты с Desktop», даже если этот Desktop к тому времени выключен."_q,
+			st::boxDividerLabel),
+		st::boxRowPadding);
+
 	const auto peerAccs = box->addRow(
 		object_ptr<Ggtg::ActionRow>(
 			box,

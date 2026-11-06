@@ -45,38 +45,14 @@ class GgtgSyncAccountsActivity : BaseFragment() {
         fragmentView = frame
         val root = GgtgUi.page(context, frame)
 
-        GgtgUi.addCard(root, GgtgUi.infoCard(context, R.drawable.msg_info, "Отдельная сессия для телефона",
-            "Desktop создаёт для каждого аккаунта отдельную Desktop-сессию со своим устройством, языком и часовым поясом, телефон ставит её как есть. Сессия самого Desktop продолжает работать параллельно."), top = 10f)
+        GgtgUi.addCard(root, GgtgUi.infoCard(context, R.drawable.msg_info, "Аккаунты с Desktop",
+            "На Desktop выберите аккаунты и нажмите «Отправить на телефон» (Синхронизация). Для каждого Desktop создаёт отдельную сессию и кладёт её в «Избранное» главного аккаунта: она будет ждать здесь, даже если Desktop выключен. Телефон ставит её как есть."), top = 10f)
 
-        // Section: Accounts on Desktop (Mint on Android)
-        root.addView(GgtgUi.sectionLabel(context, "Доступные аккаунты с Desktop"))
-        val peerCard = GgtgUi.card(context)
-        val pp = GgtgPeerAccountPicker(context)
-        pp.setBackgroundColor(android.graphics.Color.TRANSPARENT)
-        peerCard.addView(pp, LinearLayout.LayoutParams(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT))
-        GgtgUi.addCard(root, peerCard)
-        peerPicker = pp
-
-        val mintButton = GgtgUi.button(context, "Получить сессии с Desktop") { mintSelected() }
-        mintButton.visibility = if (pp.selectedAccounts().isNotEmpty()) View.VISIBLE else View.GONE
-        GgtgUi.addButton(root, mintButton, top = 10f)
-        btnMint = mintButton
-
-        pp.onSelectionChanged = {
-            updateMintButton()
-        }
-
-        val readyRow = GgtgUi.actionCard(context, R.drawable.msg_download, "Готовые сессии от Desktop",
-            "Сессии, которые Desktop уже положил в «Избранное» главного аккаунта и которые никто не забрал: установить их на этот телефон") {
+        val readyRow = GgtgUi.actionCard(context, R.drawable.msg_download, "Принять аккаунты с Desktop",
+            "Установить на этот телефон все аккаунты, которые Desktop уже отправил и которые ещё никто не забрал") {
             installReady()
         }
-        GgtgUi.addCard(root, readyRow, top = 8f)
-
-        val refreshRow = GgtgUi.actionCard(context, R.drawable.msg_retry, "Обновить список с Desktop",
-            "Запросить свежий список доступных аккаунтов через главное синхро-облако") {
-            refreshPeerAccounts()
-        }
-        GgtgUi.addCard(root, refreshRow, top = 8f)
+        GgtgUi.addCard(root, readyRow, top = 10f)
 
         GgtgUi.addCard(root, GgtgUi.infoCard(context, R.drawable.msg_channel, "Аккаунты этого телефона на Desktop",
             "На Desktop: «Синхронизация» → «Аккаунты с телефона Android» → «Войти по QR». Телефон сам подтвердит вход этим аккаунтом, прокси, язык и время берутся с аккаунта."), top = 14f)
@@ -113,11 +89,11 @@ class GgtgSyncAccountsActivity : BaseFragment() {
         val activity = parentActivity ?: return
         GgtgSyncTransport.findIncoming { list, error ->
             if (error.isNotEmpty()) { toast(error); return@findIncoming }
-            if (list.isEmpty()) { toast("Готовых сессий от Desktop нет"); return@findIncoming }
+            if (list.isEmpty()) { toast("От Desktop пока ничего не отправлено"); return@findIncoming }
             AlertDialog.Builder(activity)
-                .setTitle("Готовые сессии от Desktop: ${list.size}")
-                .setMessage("Они будут установлены на этом телефоне и удалены из очереди. Одна сессия работает только на одном устройстве: не нажимайте, если их ждёт другой телефон.")
-                .setPositiveButton("Установить") { _, _ -> runInstallReady(list) }
+                .setTitle("Принять аккаунты с Desktop")
+                .setMessage("Будет принято отправок от Desktop: ${list.size}. Аккаунты установятся на этом телефоне и уйдут из очереди. Одна сессия работает только на одном устройстве: не принимайте, если их ждёт другой телефон.")
+                .setPositiveButton("Принять") { _, _ -> runInstallReady(list) }
                 .setNegativeButton("Отмена", null)
                 .show()
         }

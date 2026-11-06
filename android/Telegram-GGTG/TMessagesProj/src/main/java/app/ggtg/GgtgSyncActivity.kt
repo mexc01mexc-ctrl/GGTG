@@ -193,7 +193,7 @@ class GgtgSyncActivity : BaseFragment() {
 
         // ---- accounts between the devices ----
         GgtgUi.addCard(column, GgtgUi.actionCard(context, R.drawable.msg2_devices, "Синхронизация аккаунтов (по запросу)",
-            "Выбрать аккаунты с Desktop и получить их на телефон: Desktop создаёт для каждого отдельную сессию (своё устройство, язык, часовой пояс, прокси), телефон ставит её как есть.") {
+            "Принять аккаунты, которые Desktop отправил на телефон: каждому там создана отдельная сессия (своё устройство, язык, часовой пояс, прокси), телефон ставит её как есть.") {
             presentFragment(GgtgSyncAccountsActivity())
         })
 
