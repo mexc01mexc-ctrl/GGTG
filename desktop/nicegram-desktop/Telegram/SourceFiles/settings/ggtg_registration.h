@@ -3148,6 +3148,7 @@ private:
 	int _captchaRetries = 0;
 	Fn<void()> _sendCode;
 	QByteArray _phoneCodeHash;
+	QString _codeWayText; // how Telegram says the code goes (SMS, call, ...)
 	QString _firstName;
 	QString _lastName;
 	MobileDeviceProfile _currentMobileProfile;
@@ -3855,6 +3856,7 @@ private:
 				}
 				return u"неизвестный тип "_q + QString::number(type.type());
 			};
+			_codeWayText = typeName(codeType);
 			auto line = u"Ответ Telegram на запрос кода: способ - "_q + typeName(codeType);
 			if (const auto next = data.vnext_type()) {
 				line += u"; если не придёт, дальше - "_q + [&] {
@@ -3938,7 +3940,10 @@ private:
 			_pollSecondsLeft = _settings.smsWaitSeconds;
 			_pollTimer.start(3000);
 		} else {
-			status(u"Код отправлен Telegram! Введите код."_q, false);
+			status((_codeWayText.isEmpty()
+				? u"Запрос кода принят Telegram."_q
+				: (u"Код отправлен: "_q + _codeWayText + u" на +"_q + _phone + u"."_q))
+				+ u" Telegram доставку не подтверждает. Введите код, когда он придёт."_q, false);
 		}
 	}
 
