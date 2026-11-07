@@ -330,13 +330,20 @@ class GgtgAccountManagerActivity : BaseFragment() {
             3 -> list.sortedBy { name(it) }
             4 -> list.sortedWith(compareBy<Int>({ folderOf(it).lowercase() }, { name(it) }))
             5 -> list.sortedByDescending { GgtgSms.sentToday(it) }
+            // ggtg: by the optional fields (same values as the cards show)
+            6 -> list.sortedWith(compareBy<Int>({ GgtgTableCells.cell(it, GgtgTableLayout.Col.REGISTERED)?.key ?: Double.MAX_VALUE }, { name(it) }))
+            7 -> list.sortedWith(compareBy<Int>({ -(GgtgTableCells.cell(it, GgtgTableLayout.Col.SPAM)?.key ?: -1.0) }, { name(it) }))
+            8 -> list.sortedWith(compareBy<Int>({ -(GgtgTableCells.cell(it, GgtgTableLayout.Col.PREMIUM)?.key ?: 0.0) }, { name(it) }))
+            9 -> list.sortedWith(compareBy<Int>({ -(GgtgTableCells.cell(it, GgtgTableLayout.Col.LASTCHECK)?.key ?: 0.0) }, { name(it) }))
             else -> list
         }
     }
 
     private fun showSortDialog() {
         val context = context ?: return
-        val titles = arrayOf("Как в списке", "Проблемные сверху", "Свободные сверху", "По имени", "По папке", "По рассылке сегодня")
+        val titles = arrayOf(
+            "Как в списке", "Проблемные сверху", "Свободные сверху", "По имени", "По папке", "По рассылке сегодня",
+            "По дате регистрации", "По SpamBot (проблемные сверху)", "Premium сверху", "По последней проверке")
         val icons = IntArray(titles.size) { if (it == sortMode) R.drawable.msg_select else 0 }
         org.telegram.ui.ActionBar.AlertDialog.Builder(context)
             .setTitle("Сортировка")
@@ -424,8 +431,113 @@ class GgtgAccountManagerActivity : BaseFragment() {
 
         // the status is written on every account's card; no status filter chips
         statusFilter = STATUS_ALL
-        statusChips?.removeAllViews()
-        (statusChips?.parent as? View)?.visibility = View.GONE
+        rebuildLayoutBar()
+    }
+
+    // ggtg: the strip of the list settings, as on Desktop (Pilar): «Колонки N из M» with the checkbox list,
+    // the row density («Удобная / Обычная / Компактная») and «Восстановить» (the defaults).
+    private fun rebuildLayoutBar() {
+        val row = statusChips ?: return
+        val context = row.context
+        row.removeAllViews()
+        (row.parent as? View)?.visibility = View.VISIBLE
+        val accent = color(Theme.key_featuredStickers_addButton)
+        val layout = GgtgTableLayout.get()
+        fun barChip(text: String, active: Boolean, enabled: Boolean = true, onClick: () -> Unit) {
+            val v = TextView(context).apply {
+                this.text = text
+                textSize = 13f
+                setTypeface(null, if (active) Typeface.BOLD else Typeface.NORMAL)
+                setTextColor(when {
+                    active -> 0xFFFFFFFF.toInt()
+                    !enabled -> color(Theme.key_windowBackgroundWhiteGrayText)
+                    else -> color(Theme.key_windowBackgroundWhiteBlackText)
+                })
+                setPadding(dp(11f), dp(5.5f), dp(11f), dp(5.5f))
+                background = rounded(
+                    fill = if (active) accent else color(Theme.key_windowBackgroundWhite),
+                    radius = dp(14f).toFloat())
+                if (enabled) setOnClickListener { onClick() }
+            }
+            row.addView(v, LinearLayout.LayoutParams(LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT).apply { rightMargin = dp(6f) })
+        }
+        barChip("Колонки  ${GgtgTableLayout.countText(layout)}", false) { showColumnsDialog() }
+        for (d in GgtgTableLayout.Density.values()) {
+            barChip(d.title, layout.density == d) {
+                GgtgTableLayout.setDensity(d)
+                rebuildAll()
+            }
+        }
+        val changed = !GgtgTableLayout.isDefault(layout)
+        barChip("Восстановить", false, changed) {
+            GgtgTableLayout.reset()
+            rebuildAll()
+        }
+    }
+
+    // The fields of the card: a checkbox each and the arrows that move a field up or down.
+    private fun showColumnsDialog() {
+        val context = context ?: return
+        val content = LinearLayout(context).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(dp(16f), dp(4f), dp(8f), dp(4f))
+        }
+        val gray = color(Theme.key_windowBackgroundWhiteGrayIcon)
+        val counter = TextView(context).apply {
+            textSize = 13f
+            setTextColor(color(Theme.key_windowBackgroundWhiteGrayText))
+            setPadding(0, 0, 0, dp(6f))
+        }
+        content.addView(counter)
+        val rows = LinearLayout(context).apply { orientation = LinearLayout.VERTICAL }
+        content.addView(rows)
+        fun fill() {
+            rows.removeAllViews()
+            val layout = GgtgTableLayout.get()
+            counter.text = "Показано ${GgtgTableLayout.countText(layout)}"
+            val list = GgtgTableLayout.toggleable(layout)
+            for ((i, col) in list.withIndex()) {
+                val line = LinearLayout(context).apply {
+                    orientation = LinearLayout.HORIZONTAL
+                    gravity = Gravity.CENTER_VERTICAL
+                }
+                val check = GgtgUi.checkBox(context, layout.visible[col] == true).apply {
+                    text = col.title
+                    textSize = 15f
+                    setOnClickListener {
+                        GgtgTableLayout.setVisible(col, isChecked)
+                        rebuildAll()
+                        fill()
+                    }
+                }
+                line.addView(check, LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f))
+                fun arrow(up: Boolean, enabled: Boolean) {
+                    line.addView(android.widget.ImageView(context).apply {
+                        scaleType = android.widget.ImageView.ScaleType.CENTER
+                        setImageDrawable(GgtgUi.icon(context, R.drawable.msg_go_up, gray))
+                        rotation = if (up) 0f else 180f
+                        alpha = if (enabled) 1f else 0.25f
+                        if (enabled) setOnClickListener {
+                            GgtgTableLayout.move(col, up)
+                            rebuildAll()
+                            fill()
+                        }
+                    }, LinearLayout.LayoutParams(dp(40f), dp(40f)))
+                }
+                // NUMBER is a head field: it keeps its place, the others move among themselves
+                val movable = !col.isHead
+                arrow(true, movable && i > 1)
+                arrow(false, movable && i < list.size - 1)
+                rows.addView(line)
+            }
+        }
+        fill()
+        val scroll = ScrollView(context).apply { addView(content) }
+        org.telegram.ui.ActionBar.AlertDialog.Builder(context)
+            .setTitle("Колонки")
+            .setView(scroll)
+            .setPositiveButton("Готово", null)
+            .show()
     }
 
     // A change of the view (another folder, trash) drops the selection.
@@ -904,6 +1016,9 @@ class GgtgAccountManagerActivity : BaseFragment() {
         val accent = color(Theme.key_featuredStickers_addButton)
         val gray = color(Theme.key_windowBackgroundWhiteGrayText)
         val name = listOfNotNull(user?.first_name, user?.last_name).joinToString(" ").trim().ifEmpty { "Аккаунт $number" }
+        // ggtg: which fields of the card are shown, in which order (the same settings as Desktop's table columns)
+        val layout = GgtgTableLayout.get()
+        val fields = GgtgTableLayout.shown(layout)
 
         val card = LinearLayout(context).apply {
             orientation = LinearLayout.HORIZONTAL
@@ -913,9 +1028,14 @@ class GgtgAccountManagerActivity : BaseFragment() {
                 dp(12f).toFloat(),
                 if (isCurrent) dp(1.5f) else 0,
                 accent)
-            setPadding(dp(10f), dp(10f), dp(4f), dp(10f))
+            val vpad = when (layout.density) {
+                GgtgTableLayout.Density.COMFORTABLE -> 10f
+                GgtgTableLayout.Density.NORMAL -> 8f
+                GgtgTableLayout.Density.COMPACT -> 5f
+            }
+            setPadding(dp(10f), dp(vpad), dp(4f), dp(vpad))
             layoutParams = LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT).apply {
-                leftMargin = dp(10f); rightMargin = dp(10f); topMargin = dp(5f)
+                leftMargin = dp(10f); rightMargin = dp(10f); topMargin = dp(if (layout.density == GgtgTableLayout.Density.COMPACT) 3f else 5f)
             }
         }
 
@@ -950,6 +1070,15 @@ class GgtgAccountManagerActivity : BaseFragment() {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
         }
+        if (GgtgTableLayout.Col.NUMBER in fields) {
+            titleRow.addView(TextView(context).apply {
+                text = "№$number"
+                textSize = 12f
+                setTextColor(gray)
+            }, LinearLayout.LayoutParams(LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT).apply {
+                rightMargin = dp(6f)
+            })
+        }
         titleRow.addView(AccountNameView(context).apply {
             setAccount(slot, name)
             textSize = 15.5f
@@ -960,7 +1089,7 @@ class GgtgAccountManagerActivity : BaseFragment() {
             ellipsize = android.text.TextUtils.TruncateAt.END
         }, LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f))
         val sentToday = GgtgSms.sentToday(slot)
-        if (sentToday > 0) {
+        if (sentToday > 0 && GgtgTableLayout.Col.SMS24H in fields) {
             titleRow.addView(GgtgUi.withLeadingIcon(TextView(context), R.drawable.msg_send, gray, 11.5f, 3.5f).apply {
                 text = "$sentToday"
                 textSize = 12f
@@ -994,16 +1123,48 @@ class GgtgAccountManagerActivity : BaseFragment() {
                 rightMargin = dp(5f)
             })
         }
+        // the tags follow the order of the fields; "Обычная" keeps three of them, "Компактная" none
+        val tagCap = when (layout.density) {
+            GgtgTableLayout.Density.COMFORTABLE -> 99
+            GgtgTableLayout.Density.NORMAL -> 3
+            GgtgTableLayout.Density.COMPACT -> 0
+        }
+        var tagCount = 0
         if (isCurrent) addTag(tag(context, "текущий", accent))
-        addTag(tag(context, status.text, status.color))
         val folder = uc.ncgFolder.orEmpty()
         val folderOutsideGroup = folder.isNotEmpty() && !(filterFolder == null && query.isEmpty() && statusFilter == STATUS_ALL && !viewTrash)
-        if (folderOutsideGroup) addTag(tag(context, folder, gray, R.drawable.msg_folders))
-        val proxyColor = color(if (uc.ncgProxyEnabled) Theme.key_windowBackgroundWhiteBlueText4 else Theme.key_text_RedRegular)
-        val proxyText = if (uc.ncgProxyEnabled) "${uc.ncgProxyAddress}:${uc.ncgProxyPort}" else "без прокси"
-        addTag(tag(context, proxyText, proxyColor, if (uc.ncgProxyEnabled) R.drawable.msg_language else R.drawable.msg_warning) {
-            GgtgAccountMenus.editProxy(context, slot) { rebuildAll() }
-        }, weight = true)
+        for (col in fields) {
+            if (tagCount >= tagCap) break
+            when (col) {
+                GgtgTableLayout.Col.STATUS -> { addTag(tag(context, status.text, status.color)); tagCount++ }
+                GgtgTableLayout.Col.FOLDER -> if (folderOutsideGroup) { addTag(tag(context, folder, gray, R.drawable.msg_folders)); tagCount++ }
+                GgtgTableLayout.Col.PROXY -> {
+                    val proxyColor = color(if (uc.ncgProxyEnabled) Theme.key_windowBackgroundWhiteBlueText4 else Theme.key_text_RedRegular)
+                    val proxyText = if (uc.ncgProxyEnabled) "${uc.ncgProxyAddress}:${uc.ncgProxyPort}" else "без прокси"
+                    addTag(tag(context, proxyText, proxyColor, if (uc.ncgProxyEnabled) R.drawable.msg_language else R.drawable.msg_warning) {
+                        GgtgAccountMenus.editProxy(context, slot) { rebuildAll() }
+                    }, weight = true)
+                    tagCount++
+                }
+                GgtgTableLayout.Col.REGISTERED, GgtgTableLayout.Col.AGE, GgtgTableLayout.Col.DEVICE, GgtgTableLayout.Col.TWOFA,
+                GgtgTableLayout.Col.SPAM, GgtgTableLayout.Col.SESSIONS, GgtgTableLayout.Col.LASTCHECK, GgtgTableLayout.Col.PREMIUM -> {
+                    val cell = GgtgTableCells.cell(slot, col)
+                    if (cell != null) {
+                        val tint = when (cell.role) {
+                            1 -> 0xFF4CD964.toInt()
+                            2 -> 0xFFFF9F0A.toInt()
+                            3 -> color(Theme.key_text_RedRegular)
+                            4 -> accent
+                            else -> gray
+                        }
+                        addTag(tag(context, cell.text, tint))
+                        tagCount++
+                    }
+                }
+                else -> {}
+            }
+        }
+        if (tags.childCount == 0 || layout.density == GgtgTableLayout.Density.COMPACT) tags.visibility = View.GONE
         texts.addView(tags, LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT))
         card.addView(texts, LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f))
 

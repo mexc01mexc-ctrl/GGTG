@@ -23,27 +23,60 @@ import org.telegram.messenger.ApplicationLoader
 import org.telegram.messenger.R
 import org.telegram.messenger.UserConfig
 import org.telegram.messenger.UserObject
+import org.telegram.tgnet.ConnectionsManager
 import org.telegram.tgnet.TLRPC
 import org.telegram.ui.ActionBar.BaseFragment
 import org.telegram.ui.ActionBar.Theme
+import org.telegram.ui.Components.AccountFolderLogic
 import org.telegram.ui.Components.AvatarDrawable
 import org.telegram.ui.Components.BackupImageView
+import org.telegram.ui.LaunchActivity
 import org.telegram.ui.SessionsActivity
 
 // ggtg: the "i" of an account in "Менеджер аккаунтов": everything about one account on a screen of its own,
 // in cards that follow the theme (the old window was a white system dialog that clashed with a dark
 // theme): who it is, the connection (proxy, status, SpamBot), the device, the session. Like the
 // desktop's ShowAccountInfoBox. A tap on a value copies it; the proxy and SpamBot rows act.
-class GgtgAccountInfoActivity(private val slot: Int, private val onChanged: () -> Unit) : BaseFragment() {
+// ggtg: the account screen. SECTION_HUB is the header and a card per section (the way Telegram's Settings and
+// iOS Settings list things); every card opens this same fragment with one section: the profile, security and 2FA,
+// sessions and devices, proxy and network, folder and pin, status and SpamBot, actions. Desktop has the same
+// sections (ShowAccountInfoBox in bulk_accounts_actions.cpp).
+class GgtgAccountInfoActivity(
+    private val slot: Int,
+    private val onChanged: () -> Unit,
+    private val section: Int = SECTION_HUB
+) : BaseFragment() {
 
     companion object {
         private const val REQUEST_CODE_PICK_AVATAR = 1042
+        const val SECTION_HUB = 0
+        const val SECTION_PROFILE = 1
+        const val SECTION_SECURITY = 2
+        const val SECTION_SESSIONS = 3
+        const val SECTION_NETWORK = 4
+        const val SECTION_FOLDER = 5
+        const val SECTION_STATUS = 6
+        const val SECTION_ACTIONS = 7
+
+        private fun sectionTitle(section: Int) = when (section) {
+            SECTION_PROFILE -> "Профиль"
+            SECTION_SECURITY -> "Безопасность и 2FA"
+            SECTION_SESSIONS -> "Сессии и устройства"
+            SECTION_NETWORK -> "Прокси и сеть"
+            SECTION_FOLDER -> "Папка и закреп"
+            SECTION_STATUS -> "Статус и SpamBot"
+            SECTION_ACTIONS -> "Действия"
+            else -> "Аккаунт"
+        }
     }
+
+    // The saved 2FA password is not on screen until the person asks for it and confirms.
+    private var revealPassword = false
 
     private var column: LinearLayout? = null
 
     override fun createView(context: Context): View {
-        val (frame, col) = GgtgPageUi.page(this, context, "Информация об аккаунте")
+        val (frame, col) = GgtgPageUi.page(this, context, sectionTitle(section))
         column = col
         rebuild()
         return frame
@@ -304,6 +337,11 @@ class GgtgAccountInfoActivity(private val slot: Int, private val onChanged: () -
         return card
     }
 
+    // A group that is built only when its section is the one on screen (the other lines still run, into
+    // a group that is not attached to the page).
+    private fun groupIf(on: Boolean, context: Context, col: LinearLayout, title: String): LinearLayout =
+        if (on) group(context, col, title) else LinearLayout(context).apply { orientation = LinearLayout.VERTICAL }
+
     private fun rebuild() {
         val col = column ?: return
         val context = col.context
@@ -374,10 +412,15 @@ class GgtgAccountInfoActivity(private val slot: Int, private val onChanged: () -
         val status = st.text
         head.addView(GgtgUi.pill(context, status, 0xFFFFFFFF.toInt(), st.color),
             LinearLayout.LayoutParams(LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT).apply { topMargin = dp(10f) })
-        GgtgUi.addCard(col, head, top = 12f)
+        if (section == SECTION_HUB) {
+            GgtgUi.addCard(col, head, top = 12f)
+            addHub(context, col, uc, user)
+            col.addView(GgtgPageUi.gap(context, 24f))
+            return
+        }
 
         // the account
-        val account = group(context, col, "Аккаунт")
+        val account = groupIf(section == SECTION_PROFILE, context, col, "Аккаунт")
         val displayName = if (name.isNotEmpty()) name else "Без имени"
         line(context, account, "Имя и фамилия", displayName, hint = "Нажмите для редактирования · удерживайте для копирования", onLongClick = { copy(context, displayName) }) {
             promptEditName(user)
@@ -397,13 +440,13 @@ class GgtgAccountInfoActivity(private val slot: Int, private val onChanged: () -
         if (idDate.isNotEmpty()) {
             line(context, account, "Регистрация", idDate, onClick = { copy(context, idDate) })
         }
-        line(context, account, "Папка", uc.ncgFolder.orEmpty().ifEmpty { "—" })
 
         val hasBackup = GgtgSessions.hasBackup(uc.clientUserId)
         val backups = GgtgSessions.getSwitchableSessions(uc.clientUserId)
         val backupCount = backups.size
         val backupText = if (hasBackup) "Доступно сессий: $backupCount" else "Нет (нажмите, чтобы создать)"
-        line(context, account, "Сессии аккаунта", backupText, accent = true) {
+        val sessionsGroup = groupIf(section == SECTION_SESSIONS, context, col, "Резервные сессии")
+        line(context, sessionsGroup, "Сессии аккаунта", backupText, accent = true) {
             val act = context as? androidx.fragment.app.FragmentActivity ?: return@line
             // what the account runs on first, then making / switching spares, then protection and transfer
             val items = ArrayList<String>()
@@ -663,7 +706,7 @@ class GgtgAccountInfoActivity(private val slot: Int, private val onChanged: () -
         }
 
         // the connection
-        val connection = group(context, col, "Соединение")
+        val connection = groupIf(section == SECTION_NETWORK, context, col, "Прокси")
         line(context, connection, "Прокси",
             if (uc.ncgProxyEnabled) "${uc.ncgProxyAddress}:${uc.ncgProxyPort}" else "нет — аккаунт использует общий прокси",
             if (uc.ncgProxyEnabled) "нажмите, чтобы изменить" else "нажмите, чтобы задать свой", accent = true) {
@@ -674,8 +717,9 @@ class GgtgAccountInfoActivity(private val slot: Int, private val onChanged: () -
             !uc.ncgProxyEnabled -> "У аккаунта не задан прокси: он использует общий. Задайте свой в строке «Прокси»."
             else -> null
         }
-        line(context, connection, "Статус", status, explanation)
-        line(context, connection, "SpamBot", GgtgSpamStatus.statusText(uc.clientUserId), "нажмите, чтобы проверить сейчас", accent = true) {
+        val stat = groupIf(section == SECTION_STATUS, context, col, "Статус и SpamBot")
+        line(context, stat, "Статус", status, explanation)
+        line(context, stat, "SpamBot", GgtgSpamStatus.statusText(uc.clientUserId), "нажмите, чтобы проверить сейчас", accent = true) {
             Toast.makeText(context, "Спрашиваем @SpamBot…", Toast.LENGTH_SHORT).show()
             CoroutineScope(SupervisorJob() + Dispatchers.IO).launch {
                 val error = GgtgSpamStatus.check(slot)
@@ -686,9 +730,9 @@ class GgtgAccountInfoActivity(private val slot: Int, private val onChanged: () -
             }
         }
         val ggr = GgtgSpamStatus.calculateGgr(slot)
-        line(context, connection, "Рейтинг GGR", "${String.format(java.util.Locale.US, "%.1f", ggr.score)} (${ggr.tier})", "Индекс здоровья и уровня прогрева (1.0 – 10.0)")
+        line(context, stat, "Рейтинг GGR", "${String.format(java.util.Locale.US, "%.1f", ggr.score)} (${ggr.tier})", "Индекс здоровья и уровня прогрева (1.0 – 10.0)")
         if (GgtgSpamStatus.isBlocked(uc.clientUserId)) {
-            line(context, connection, "Авто-апелляция @SpamBot", "Подать апелляцию", "нажмите для автоматической отправки запроса в @SpamBot", accent = true) {
+            line(context, stat, "Авто-апелляция @SpamBot", "Подать апелляцию", "нажмите для автоматической отправки запроса в @SpamBot", accent = true) {
                 Toast.makeText(context, "Отправляем апелляцию в @SpamBot…", Toast.LENGTH_SHORT).show()
                 CoroutineScope(SupervisorJob() + Dispatchers.IO).launch {
                     val err = GgtgSpamStatus.autoAppeal(slot)
@@ -701,7 +745,7 @@ class GgtgAccountInfoActivity(private val slot: Int, private val onChanged: () -
         }
 
         // the device
-        val device = group(context, col, "Устройство")
+        val device = groupIf(section == SECTION_NETWORK, context, col, "Устройство")
         val devText = if (uc.ncgDeviceModel.isEmpty()) "по умолчанию" else {
             val base = GgtgDevice.phoneLabel(uc.ncgDeviceModel, uc.ncgSystemVersion)
             if (uc.ncgAppVersion.isNotEmpty()) "$base (${uc.ncgAppVersion})" else base
@@ -718,18 +762,113 @@ class GgtgAccountInfoActivity(private val slot: Int, private val onChanged: () -
         }
 
         // the session
-        val session = group(context, col, "Сессия")
+        val session = groupIf(section == SECTION_SESSIONS, context, col, "Сессия")
         line(context, session, "Сессия", if (slot == UserConfig.selectedAccount) "активна (текущий аккаунт)" else "активна", "нажмите, чтобы открыть активные сессии", accent = true) {
             presentFragment(SessionsActivity(0))
         }
         val breaks = GgtgSessionLog.forUser(uc.clientUserId)
-        line(context, session, "Разрывы сессии",
+        line(context, stat, "Разрывы сессии",
             if (breaks.isEmpty()) "не было"
             else "${breaks.size} (последний: " + java.text.SimpleDateFormat("dd.MM.yyyy HH:mm", java.util.Locale.getDefault()).format(java.util.Date(breaks.last().at * 1000)) +
                 ", Telegram закрыл сессию)")
-        if (uc.ncgTwoFactor.isNotEmpty()) line(context, session, "Пароль 2FA", uc.ncgTwoFactor, "нажмите, чтобы скопировать", accent = true) { copy(context, uc.ncgTwoFactor) }
-        else line(context, session, "Пароль 2FA", "не сохранён")
+        // security: the saved password stays hidden unless asked for
+        val security = groupIf(section == SECTION_SECURITY, context, col, "Облачный пароль (2FA)")
+        val password = uc.ncgTwoFactor.orEmpty()
+        if (password.isNotEmpty()) {
+            line(context, security, "Пароль 2FA", if (revealPassword) password else "•".repeat(password.length.coerceIn(6, 16)),
+                if (revealPassword) "нажмите, чтобы скрыть" else "нажмите, чтобы показать (с подтверждением)", accent = true) {
+                if (revealPassword) {
+                    revealPassword = false
+                    rebuild()
+                } else {
+                    GgtgPageUi.confirm(context, "Показать облачный пароль на экране? Его увидит каждый, кто смотрит в телефон.", "Показать") {
+                        revealPassword = true
+                        rebuild()
+                    }
+                }
+            }
+            line(context, security, "Скопировать пароль", "без показа на экране", accent = true) { copy(context, password) }
+        } else {
+            line(context, security, "Пароль 2FA", "не сохранён в программе")
+        }
+        line(context, security, "Защита от угона", "Анти-угон и резервные сессии: раздел «Сессии и устройства»", accent = true) {
+            presentFragment(GgtgAccountInfoActivity(slot, onChanged, SECTION_SESSIONS))
+        }
+
+        // folder and pin
+        val folderGroup = groupIf(section == SECTION_FOLDER, context, col, "Папка и закреп")
+        line(context, folderGroup, "Папка", uc.ncgFolder.orEmpty().ifEmpty { "без папки" }, "нажмите, чтобы выбрать другую", accent = true) {
+            AccountFolderLogic.showFolderMenu(context, slot, false) { onChanged(); rebuild() }
+        }
+        line(context, folderGroup, "Закрепить вверху списка", if (uc.ncgPinned) "да" else "нет", "нажмите, чтобы переключить", accent = true) {
+            uc.ncgPinned = !uc.ncgPinned
+            uc.saveConfig(false)
+            onChanged(); rebuild()
+        }
+
+        // actions: the dangerous ones are last
+        val actions = groupIf(section == SECTION_ACTIONS, context, col, "Действия")
+        if (!uc.ncgTrashed && slot != UserConfig.selectedAccount) {
+            line(context, actions, "Открыть аккаунт", "переключиться на него", accent = true) {
+                LaunchActivity.instance?.switchToAccount(slot, true)
+                onChanged()
+            }
+        }
+        if (!uc.ncgTrashed) {
+            line(context, actions, if (uc.ncgOffline) "В онлайн" else "В спящий режим", "нажмите, чтобы переключить", accent = true) {
+                uc.ncgOffline = !uc.ncgOffline
+                uc.saveConfig(false)
+                if (uc.ncgOffline) ConnectionsManager.getInstance(slot).cleanup(false) else ConnectionsManager.getInstance(slot).resumeNetworkMaybe()
+                onChanged(); rebuild()
+            }
+            line(context, actions, "Массовые действия", "все действия для этого аккаунта", accent = true) {
+                GgtgBulkActions(this) { onChanged(); rebuild() }.show(listOf(slot))
+            }
+        }
+        line(context, actions, if (uc.ncgTrashed) "Вернуть из корзины" else "В корзину", if (uc.ncgTrashed) "в обычный список" else "аккаунт пропадёт из списка Telegram, но останется в программе", accent = true) {
+            GgtgPageUi.confirm(context, if (uc.ncgTrashed) "Вернуть аккаунт в обычный список?" else "Переместить аккаунт в корзину?", if (uc.ncgTrashed) "Вернуть" else "В корзину") {
+                GgtgAccounts.setTrashed(listOf(slot), !uc.ncgTrashed)
+                onChanged(); rebuild()
+            }
+        }
         col.addView(GgtgPageUi.gap(context, 24f))
+    }
+
+    // The hub: quick actions and a card per section, with the current value under the title.
+    private fun addHub(context: Context, col: LinearLayout, uc: UserConfig, user: TLRPC.User) {
+        val quick = LinearLayout(context).apply { orientation = LinearLayout.HORIZONTAL }
+        fun quickButton(text: String, destructive: Boolean = false, onClick: () -> Unit) {
+            quick.addView(GgtgUi.button(context, text, destructive, onClick), LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f).apply { rightMargin = dp(6f) })
+        }
+        if (!uc.ncgTrashed && slot != UserConfig.selectedAccount) quickButton("Открыть") {
+            LaunchActivity.instance?.switchToAccount(slot, true)
+            onChanged()
+        }
+        if (!uc.ncgTrashed) quickButton("Проверка") {
+            Toast.makeText(context, "Спрашиваем @SpamBot…", Toast.LENGTH_SHORT).show()
+            CoroutineScope(SupervisorJob() + Dispatchers.IO).launch {
+                val error = GgtgSpamStatus.check(slot)
+                AndroidUtilities.runOnUIThread {
+                    Toast.makeText(context, error?.let { "SpamBot: $it" } ?: ("SpamBot: " + GgtgSpamStatus.statusText(uc.clientUserId)), Toast.LENGTH_SHORT).show()
+                    onChanged(); rebuild()
+                }
+            }
+        }
+        if (quick.childCount > 0) GgtgUi.addButton(col, quick, top = 10f)
+
+        fun card(res: Int, title: String, hint: String, target: Int) {
+            GgtgUi.addCard(col, GgtgUi.actionCard(context, res, title, hint) {
+                presentFragment(GgtgAccountInfoActivity(slot, onChanged, target))
+            })
+        }
+        val name = UserObject.getUserName(user).trim().ifEmpty { "Без имени" }
+        card(R.drawable.msg_openprofile, "Профиль", name, SECTION_PROFILE)
+        card(R.drawable.msg_secret, "Безопасность и 2FA", if (uc.ncgTwoFactor.isNullOrEmpty()) "пароль не сохранён" else "пароль сохранён", SECTION_SECURITY)
+        card(R.drawable.msg_recent, "Сессии и устройства", "активные сессии, резервные, анти-угон", SECTION_SESSIONS)
+        card(R.drawable.msg_language, "Прокси и сеть", if (uc.ncgProxyEnabled) "${uc.ncgProxyAddress}:${uc.ncgProxyPort}" else "нет прокси", SECTION_NETWORK)
+        card(R.drawable.msg_folders, "Папка и закреп", uc.ncgFolder.orEmpty().ifEmpty { "без папки" } + if (uc.ncgPinned) " · закреплён" else "", SECTION_FOLDER)
+        card(R.drawable.msg_warning, "Статус и SpamBot", GgtgAccountStatus.of(slot).text + " · " + GgtgSpamStatus.statusText(uc.clientUserId), SECTION_STATUS)
+        card(R.drawable.msg_settings, "Действия", "открыть, сон, массовые действия, корзина", SECTION_ACTIONS)
     }
 
     private fun showEditDeviceDialog(context: Context, slot: Int) {

@@ -174,3 +174,17 @@ Android: `filesDir/ggtg_bulk_db/id_calibration.json`.
 - Android → Mac (аккаунт есть на телефоне, на Mac создаётся новая сессия по QR): Mac показывает QR-вход и на каждый
   токен шлёт `{"type":"qr","userId":"…","link":"tg://login?token=…"}`; телефон принимает его `auth.acceptLoginToken`
   аккаунтом с этим `userId`. Прокси, язык и время Mac берёт с аккаунта на телефоне (список синхронизации и номер).
+
+## Таблица аккаунтов: колонки и плотность
+
+Настройки списка «Аккаунты → Список» (какие колонки видны, их порядок, ширины, плотность строк). Desktop:
+`tdata/ggtg_db/accounts_table.json` (`settings/ggtg_table_layout.h`), Android: SharedPreferences
+`ggtg_accounts_table`, ключ `layout` (`GgtgTableLayout.kt`). Ключи одинаковые:
+`{"version":1,"order":["number","account",…,"open","trash"],"visible":{"folder":true,…},"width":{"proxy":180},
+"pinFirst":true,"density":"comfortable|normal|compact"}`.
+Колонки: `number`, `account`, `folder`, `proxy`, `status`, `sms24h`, `registered`, `age`, `device`, `twofa`, `spam`,
+`sessions`, `lastcheck`, `premium`, `open`, `trash`. `number` и `account` всегда первые, `open` и `trash` всегда
+последние, `account`, `open` и `trash` скрыть нельзя. Неизвестные ключи игнорируются, новые колонки встают на своё
+место по умолчанию, битый файл даёт умолчания. `width` (пиксели при масштабе 100%) и `pinFirst` действуют только на
+Desktop: на телефоне список из карточек, колонка становится тегом карточки, порядок колонок = порядок тегов,
+плотность задаёт, сколько тегов и строк показано. Файл не синхронизируется между устройствами.
