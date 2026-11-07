@@ -10220,7 +10220,6 @@ void ShowAccountProfileBox(
 	const auto rawUserId = account->session().userId().bare;
 	const auto userId = QString::number(rawUserId);
 	const auto idDate = Ggtg::EstimateIdDate(rawUserId);
-	const auto password = account->twoFactorPassword();
 
 	show->showBox(Box([=](not_null<Ui::GenericBox*> box) {
 		box->setWidth(style::ConvertScale(540));
@@ -10394,8 +10393,11 @@ void ShowAccountProfileBox(
 		});
 
 		Ui::AddSkip(box->verticalLayout(), st::defaultVerticalListSkip);
-		Ui::AddSubsectionTitle(box->verticalLayout(), rpl::single(u"Информация об аккаунте"_q));
+		Ui::AddSubsectionTitle(box->verticalLayout(), rpl::single(u"Данные"_q));
 
+		// ggtg: only the profile's own data here. The proxy, device,
+		// 2FA, sessions and the status have their own screens (see
+		// ShowAccountInfoBox).
 		auto lines = InfoLines();
 		lines.emplace_back(u"Телефон"_q, OrDash(WithPlus(user->phone())), true);
 		lines.emplace_back(u"ID"_q, userId, false, [=] {
@@ -10407,89 +10409,14 @@ void ShowAccountProfileBox(
 				TextUtilities::SetClipboardText(TextForMimeData::Simple(idDate));
 				Ggtg::Notice(box->uiShow(), u"Дата регистрации скопирована"_q);
 			});
-		}
-		lines.emplace_back(u"Папка"_q, OrDash(account->folderTag()));
-		lines.emplace_back(
-			u"Прокси"_q,
-			ProxyText(account->proxyOverride()),
-			false,
-			[=] {
-				if (Main::AccountIsLive(account)
-					&& Core::GuardAllows(box->uiShow(), Core::GuardedAction::ReplaceProxy)) {
-					box->uiShow()->showBox(MakeAccountProxyBox(account));
-				}
-			});
-		{
-			const auto own = account->deviceOverride();
-			const auto devTitle = own.deviceModel.isEmpty()
-				? u"по умолчанию (нажмите, чтобы изменить)"_q
-				: (own.deviceModel + u" · "_q + OrDash(own.systemVersion)
-					+ (own.appVersion.isEmpty() ? QString() : (u" ("_q + own.appVersion + u")"_q))
-					+ (own.langPackName.isEmpty() ? QString() : (u" ["_q + own.langPackName + u"]"_q)));
-			lines.emplace_back(
-				u"Устройство"_q,
-				devTitle,
-				false,
-				[=] {
-					ShowEditDeviceBox(box->uiShow(), account, [=] {
-						ShowAccountProfileBox(box->uiShow(), account, current, onSaved);
-					});
-				});
-			if (IsAndroidSession(own)) {
+			const auto created = Ggtg::EstimateIdTime(rawUserId);
+			if (created > 0) {
 				lines.emplace_back(
-					u"Исправить профиль"_q,
-					u"У аккаунта профиль Android на компьютере. Нажмите, чтобы вернуть Mac/ПК"_q,
-					false,
-					[=] {
-						const auto resetDev = Platform::IsMac()
-							? RandomMacDeviceOverride()
-							: RandomDesktopDeviceOverride();
-						account->setDeviceOverride(resetDev);
-						Ggtg::Notice(box->uiShow(), u"Устройство сброшено на "_q + resetDev.deviceModel);
-						ShowAccountProfileBox(box->uiShow(), account, current, onSaved);
-					});
+					u"Возраст"_q,
+					Ggtg::FormatAccountAge(
+						created,
+						QDateTime::currentSecsSinceEpoch()));
 			}
-		}
-		lines.emplace_back(
-			u"Пароль 2FA"_q,
-			password.isEmpty() ? u"не сохранён"_q : password,
-			!password.isEmpty());
-		const auto status = LiveAccountStatus(account);
-		lines.emplace_back(u"Статус"_q, status.text);
-		lines.emplace_back(u"Что это значит"_q, status.detail);
-		lines.emplace_back(
-			u"Сессия"_q,
-			current ? u"активна (текущий аккаунт)"_q : u"активна"_q);
-		const auto spam = Data::FindAccountSpamStatus(user->id.value);
-		const auto isSpamBlocked = spam && (spam->state == Data::AccountSpamState::Permanent
-			|| (spam->state == Data::AccountSpamState::Temporary && spam->until > QDateTime::currentSecsSinceEpoch()));
-		lines.emplace_back(
-			u"SpamBot"_q,
-			Settings::AccountSpamStatusText(user->id.value) + (isSpamBlocked ? u" (нажмите для авто-апелляции)"_q : QString()),
-			false,
-			[=] {
-				Settings::AutoAppealSpamBot(account, [=](bool success, QString message) {
-					Ggtg::Notice(box->uiShow(), message.isEmpty()
-						? (success ? u"Апелляция успешно отправлена в @SpamBot"_q : u"Ошибка отправки апелляции"_q)
-						: message);
-					ShowAccountProfileBox(box->uiShow(), account, current, onSaved);
-				});
-			});
-		const auto ggr = Settings::CalculateAccountGgr(account);
-		lines.emplace_back(
-			u"Рейтинг GGR"_q,
-			QString::number(ggr.score, 'f', 1) + u" ("_q + ggr.tier + u")"_q);
-		const auto history = Sessions::ForUser(Sessions::Load(), userId);
-		if (history.empty()) {
-			lines.emplace_back(u"Разрывы сессии"_q, u"не было"_q);
-		} else {
-			const auto &last = history.back();
-			lines.emplace_back(
-				u"Разрывы сессии"_q,
-				u"%1 (последний: %2, %3)"_q
-					.arg(history.size())
-					.arg(StampText(last.at))
-					.arg(Sessions::ReasonTitle(last.reason)));
 		}
 
 		for (const auto &line : lines) {
@@ -10530,17 +10457,782 @@ void ShowAccountProfileBox(
 			});
 		}
 
-		AddSessionsSection(box, account);
-
 		box->addButton(tr::lng_close(), [=] { box->closeBox(); });
 	}));
+}
+
+// ---- The account screen: a header (avatar, name, @username, status) and
+// below it a card per section, each opening its own screen, the way Telegram's
+// own Settings and iOS Settings list things (title on the left, the current
+// value on the right, a chevron). Replaces the one long window that held the
+// profile, the info lines, the 2FA password in plain text and every session.
+
+struct AccountHubHooks {
+	Fn<void()> open; // switch to the account (empty: it is the current one)
+	Fn<void()> checkSpam;
+	Fn<void()> appeal;
+	Fn<void()> bulk;
+	Fn<void()> trash;
+	Fn<void()> restore;
+	Fn<void()> deleteForever;
+	Fn<void()> newFolder;
+	Fn<void()> changePassword;
+	Fn<void()> changed; // the list behind has to be rebuilt
+};
+
+class HubRow final : public Ui::AbstractButton {
+public:
+	HubRow(
+		not_null<QWidget*> parent,
+		const style::icon *icon,
+		const QString &title,
+		rpl::producer<QString> hint)
+	: AbstractButton(parent.get())
+	, _icon(icon)
+	, _title(title) {
+		resize(width(), style::ConvertScale(52));
+		std::move(hint) | rpl::on_next([=](QString value) {
+			_hint = std::move(value);
+			update();
+		}, lifetime());
+	}
+
+protected:
+	void paintEvent(QPaintEvent *e) override {
+		auto p = Painter(this);
+		auto hq = PainterHighQualityEnabler(p);
+		const auto radius = style::ConvertScale(10);
+		if (isOver() || isDown()) {
+			p.setPen(Qt::NoPen);
+			p.setBrush(st::windowBgOver);
+			p.drawRoundedRect(rect(), radius, radius);
+		}
+		const auto badge = style::ConvertScale(30);
+		const auto pad = style::ConvertScale(12);
+		const auto badgeRect = QRect(
+			pad,
+			(height() - badge) / 2,
+			badge,
+			badge);
+		auto fill = st::windowActiveTextFg->c;
+		fill.setAlphaF(0.16);
+		p.setPen(Qt::NoPen);
+		p.setBrush(fill);
+		p.drawRoundedRect(badgeRect, badge / 2., badge / 2.);
+		if (_icon) {
+			_icon->paintInCenter(p, badgeRect, st::windowActiveTextFg->c);
+		}
+		const auto chevron = style::ConvertScale(18);
+		const auto textLeft = badgeRect.right() + style::ConvertScale(12);
+		p.setFont(st::normalFont);
+		p.setPen(st::windowBoldFg);
+		const auto titleWidth = st::normalFont->width(_title);
+		p.drawText(
+			QRect(textLeft, 0, titleWidth + 2, height()),
+			Qt::AlignLeft | Qt::AlignVCenter,
+			_title);
+		const auto hintLeft = textLeft + titleWidth + style::ConvertScale(12);
+		const auto hintRight = width() - pad - chevron;
+		if (!_hint.isEmpty() && hintRight > hintLeft) {
+			p.setPen(st::windowSubTextFg);
+			p.drawText(
+				QRect(hintLeft, 0, hintRight - hintLeft, height()),
+				Qt::AlignRight | Qt::AlignVCenter,
+				st::normalFont->elided(_hint, hintRight - hintLeft));
+		}
+		const auto cx = width() - pad - style::ConvertScale(6);
+		const auto cy = height() / 2;
+		const auto s = style::ConvertScale(4);
+		p.setPen(QPen(st::windowSubTextFg->c, style::ConvertScale(1.5)));
+		p.drawLine(cx - s / 2, cy - s, cx + s / 2, cy);
+		p.drawLine(cx + s / 2, cy, cx - s / 2, cy + s);
+	}
+
+private:
+	const style::icon *_icon = nullptr;
+	QString _title;
+	QString _hint;
+
+};
+
+// Avatar, name, @username · phone, the status pill and the folder.
+class HubHeader final : public Ui::RpWidget {
+public:
+	HubHeader(
+		not_null<QWidget*> parent,
+		not_null<Main::Account*> account,
+		bool current)
+	: RpWidget(parent.get())
+	, _account(account)
+	, _current(current) {
+		resize(width(), style::ConvertScale(96 + 12 + 26 + 4 + 20 + 10 + 26 + 10 + 18));
+		Data::AccountSpamStatusChanges(
+		) | rpl::on_next([=](uint64) {
+			update();
+		}, lifetime());
+	}
+
+protected:
+	void paintEvent(QPaintEvent *e) override {
+		auto p = Painter(this);
+		if (!Main::AccountIsLive(_account)) {
+			return;
+		}
+		const auto user = _account->session().user();
+		const auto avatar = style::ConvertScale(96);
+		auto y = 0;
+		user->paintUserpicLeft(
+			p,
+			_view,
+			(width() - avatar) / 2,
+			y,
+			width(),
+			avatar);
+		y += avatar + style::ConvertScale(12);
+
+		auto name = user->name();
+		if (name.isEmpty()) {
+			name = u"Без имени"_q;
+		}
+		p.setFont(st::boxTitleFont);
+		p.setPen(st::windowBoldFg);
+		p.drawText(
+			QRect(0, y, width(), style::ConvertScale(26)),
+			Qt::AlignHCenter | Qt::AlignVCenter,
+			st::boxTitleFont->elided(name, width() - style::ConvertScale(24)));
+		y += style::ConvertScale(26 + 4);
+
+		const auto username = user->username();
+		auto phone = user->phone();
+		if (!phone.isEmpty() && !phone.startsWith('+')) {
+			phone = '+' + phone;
+		}
+		const auto handle = username.isEmpty()
+			? QString()
+			: (u"@"_q + username);
+		const auto sep = (!handle.isEmpty() && !phone.isEmpty())
+			? u"  ·  "_q
+			: QString();
+		p.setFont(st::normalFont);
+		const auto total = st::normalFont->width(handle + sep + phone);
+		auto x = (width() - total) / 2;
+		const auto line = QRect(0, y, width(), style::ConvertScale(20));
+		const auto drawPart = [&](const QString &text, QColor color) {
+			if (text.isEmpty()) {
+				return;
+			}
+			p.setPen(color);
+			p.drawText(
+				QRect(x, line.y(), st::normalFont->width(text) + 2, line.height()),
+				Qt::AlignLeft | Qt::AlignVCenter,
+				text);
+			x += st::normalFont->width(text);
+		};
+		drawPart(handle, QColor(56, 189, 248));
+		drawPart(sep, st::windowSubTextFg->c);
+		drawPart(phone, st::windowSubTextFg->c);
+		y += line.height() + style::ConvertScale(10);
+
+		// The status pill, in the status' own colour.
+		const auto status = LiveAccountStatus(_account);
+		const auto pillH = style::ConvertScale(26);
+		const auto pillPad = style::ConvertScale(12);
+		p.setFont(st::semiboldFont);
+		const auto text = _current
+			? (status.text + u" · активен"_q)
+			: status.text;
+		const auto pillW = st::semiboldFont->width(text) + 2 * pillPad;
+		const auto pill = QRect((width() - pillW) / 2, y, pillW, pillH);
+		{
+			auto hq = PainterHighQualityEnabler(p);
+			auto fill = status.color;
+			fill.setAlphaF(0.18);
+			p.setPen(Qt::NoPen);
+			p.setBrush(fill);
+			p.drawRoundedRect(pill, pillH / 2., pillH / 2.);
+		}
+		p.setPen(status.color);
+		p.drawText(pill, Qt::AlignCenter, text);
+		y += pillH + style::ConvertScale(10);
+
+		p.setFont(st::normalFont);
+		p.setPen(st::windowSubTextFg);
+		const auto folder = _account->folderTag();
+		auto info = folder.isEmpty()
+			? u"Без папки"_q
+			: (u"Папка: "_q + folder);
+		if (_account->pinned()) {
+			info += u"  ·  закреплён"_q;
+		}
+		p.drawText(
+			QRect(0, y, width(), style::ConvertScale(18)),
+			Qt::AlignHCenter | Qt::AlignVCenter,
+			info);
+	}
+
+private:
+	const not_null<Main::Account*> _account;
+	const bool _current;
+	Ui::PeerUserpicView _view;
+
+};
+
+// One screen of the account: a title, a column of rows and a close button.
+void ShowAccountSectionBox(
+		std::shared_ptr<Ui::Show> show,
+		const QString &title,
+		Fn<void(not_null<Ui::GenericBox*>)> fill) {
+	show->showBox(Box([=](not_null<Ui::GenericBox*> box) {
+		box->setWidth(st::accountsBoxWidth);
+		box->setTitle(rpl::single(title));
+		fill(box);
+		box->addButton(tr::lng_close(), [=] { box->closeBox(); });
+	}));
+}
+
+void AddHubActionRow(
+		not_null<Ui::GenericBox*> box,
+		const QString &text,
+		const style::icon *icon,
+		Fn<void()> callback) {
+	box->addRow(object_ptr<Ggtg::ActionRow>(
+		box,
+		rpl::single(text),
+		QString(),
+		icon)
+	)->setClickedCallback(std::move(callback));
+}
+
+[[nodiscard]] bool SpamBlocked(uint64 userId) {
+	const auto spam = Data::FindAccountSpamStatus(userId);
+	return spam
+		&& (spam->state == Data::AccountSpamState::Permanent
+			|| (spam->state == Data::AccountSpamState::Temporary
+				&& spam->until > QDateTime::currentSecsSinceEpoch()));
+}
+
+// «Безопасность и 2FA»: the saved cloud password is never on screen unless
+// the person asks for it and confirms.
+void ShowAccountSecurityBox(
+		std::shared_ptr<Ui::Show> show,
+		not_null<Main::Account*> account,
+		const AccountHubHooks &hooks) {
+	ShowAccountSectionBox(show, u"Безопасность и 2FA"_q, [=](
+			not_null<Ui::GenericBox*> box) {
+		const auto password = account->twoFactorPassword();
+		Ui::AddSkip(box->verticalLayout());
+		box->addRow(object_ptr<Ui::FlatLabel>(
+			box,
+			password.isEmpty()
+				? u"Облачный пароль (2FA): не сохранён в программе"_q
+				: u"Облачный пароль (2FA): сохранён в программе"_q,
+			st::boxLabel));
+		if (!password.isEmpty()) {
+			const auto shown = box->lifetime().make_state<bool>(false);
+			const auto label = box->addRow(
+				object_ptr<Ui::FlatLabel>(
+					box,
+					QString(u"Пароль: "_q) + QString(password.size(), QChar(0x2022)),
+					st::boxLabel),
+				style::margins(
+					st::boxRowPadding.left(),
+					st::defaultVerticalListSkip,
+					st::boxRowPadding.right(),
+					0));
+			const auto buttons = box->addRow(
+				object_ptr<Ui::RpWidget>(box),
+				style::margins(
+					st::boxRowPadding.left(),
+					st::defaultVerticalListSkip,
+					st::boxRowPadding.right(),
+					0));
+			const auto toggle = Ui::CreateChild<Ui::LinkButton>(
+				buttons,
+				u"Показать"_q);
+			const auto copy = Ui::CreateChild<Ui::LinkButton>(
+				buttons,
+				u"Скопировать"_q);
+			toggle->moveToLeft(0, 0);
+			copy->moveToLeft(
+				toggle->width() + style::ConvertScale(16),
+				0);
+			buttons->resize(buttons->width(), toggle->height());
+			toggle->setClickedCallback([=] {
+				if (*shown) {
+					*shown = false;
+					label->setText(QString(u"Пароль: "_q)
+						+ QString(password.size(), QChar(0x2022)));
+					toggle->setText(u"Показать"_q);
+					return;
+				}
+				box->uiShow()->showBox(Ui::MakeConfirmBox({
+					.text = u"Показать облачный пароль на экране? Его "
+						"увидит каждый, кто смотрит в монитор."_q,
+					.confirmed = [=](Fn<void()> &&close) {
+						close();
+						*shown = true;
+						label->setText(u"Пароль: "_q + password);
+						toggle->setText(u"Скрыть"_q);
+					},
+				}));
+			});
+			copy->setClickedCallback([=] {
+				TextUtilities::SetClipboardText(
+					TextForMimeData::Simple(password));
+				Ggtg::Notice(box->uiShow(), u"Пароль скопирован"_q);
+			});
+		}
+		Ui::AddSkip(box->verticalLayout());
+		Ui::AddDivider(box->verticalLayout());
+		Ui::AddSkip(box->verticalLayout());
+		Ui::AddSubsectionTitle(box->verticalLayout(), rpl::single(u"Действия"_q));
+		if (hooks.changePassword) {
+			AddHubActionRow(
+				box,
+				u"Сменить или убрать пароль..."_q,
+				&st::menuIconLock,
+				hooks.changePassword);
+		}
+		AddHubActionRow(
+			box,
+			u"Защита от кражи..."_q,
+			&st::menuIconBlock,
+			[=] { ShowAccountAntiTheftBox(box->uiShow(), account); });
+	});
+}
+
+// «Сессии и устройства»: the live list with its own end-session buttons.
+void ShowAccountSessionsBox(
+		std::shared_ptr<Ui::Show> show,
+		not_null<Main::Account*> account) {
+	ShowAccountSectionBox(show, u"Сессии и устройства"_q, [=](
+			not_null<Ui::GenericBox*> box) {
+		AddSessionsSection(box, account);
+	});
+}
+
+// «Прокси и сеть»: the proxy and the device the account shows to Telegram.
+void ShowAccountNetworkBox(
+		std::shared_ptr<Ui::Show> show,
+		not_null<Main::Account*> account,
+		const AccountHubHooks &hooks) {
+	auto lines = InfoLines();
+	lines.emplace_back(
+		u"Прокси"_q,
+		ProxyText(account->proxyOverride()),
+		false,
+		[=] {
+			if (Main::AccountIsLive(account)
+				&& Core::GuardAllows(show, Core::GuardedAction::ReplaceProxy)) {
+				show->showBox(MakeAccountProxyBox(account));
+			}
+		});
+	const auto own = account->deviceOverride();
+	const auto devTitle = own.deviceModel.isEmpty()
+		? u"по умолчанию (нажмите, чтобы изменить)"_q
+		: (own.deviceModel + u" · "_q + OrDash(own.systemVersion)
+			+ (own.appVersion.isEmpty() ? QString() : (u" ("_q + own.appVersion + u")"_q))
+			+ (own.langPackName.isEmpty() ? QString() : (u" ["_q + own.langPackName + u"]"_q)));
+	lines.emplace_back(u"Устройство"_q, devTitle, false, [=] {
+		ShowEditDeviceBox(show, account, [] {});
+	});
+	if (IsAndroidSession(own)) {
+		lines.emplace_back(
+			u"Исправить профиль"_q,
+			u"У аккаунта профиль Android на компьютере. Нажмите, чтобы вернуть Mac/ПК"_q,
+			false,
+			[=] {
+				const auto resetDev = Platform::IsMac()
+					? RandomMacDeviceOverride()
+					: RandomDesktopDeviceOverride();
+				account->setDeviceOverride(resetDev);
+				Ggtg::Notice(show, u"Устройство сброшено на "_q + resetDev.deviceModel);
+			});
+	}
+	ShowInfoBox(
+		show,
+		u"Прокси и сеть"_q,
+		std::move(lines),
+		nullptr,
+		u"Каждый аккаунт работает только через свой прокси. Язык и часовой "
+			"пояс подбираются по стране прокси."_q,
+		nullptr);
+}
+
+// «Папка и закреп»: one folder for the account (radio buttons), pinning.
+void ShowAccountFolderBox(
+		std::shared_ptr<Ui::Show> show,
+		not_null<Main::Account*> account,
+		const AccountHubHooks &hooks) {
+	ShowAccountSectionBox(show, u"Папка и закреп"_q, [=](
+			not_null<Ui::GenericBox*> box) {
+		auto folders = std::vector<QString>();
+		for (const auto &acc : Core::App().domain().orderedAccounts()) {
+			const auto tag = acc->folderTag();
+			if (!tag.isEmpty() && !ranges::contains(folders, tag)) {
+				folders.push_back(tag);
+			}
+		}
+		Ui::AddSkip(box->verticalLayout());
+		Ui::AddSubsectionTitle(box->verticalLayout(), rpl::single(u"Папка"_q));
+		const auto current = account->folderTag();
+		auto selected = 0;
+		for (auto i = 0; i != int(folders.size()); ++i) {
+			if (folders[i] == current) {
+				selected = i + 1;
+			}
+		}
+		const auto group = std::make_shared<Ui::RadiobuttonGroup>(selected);
+		box->addRow(object_ptr<Ui::Radiobutton>(
+			box,
+			group,
+			0,
+			u"Без папки"_q,
+			st::defaultCheckbox), st::ggtgChoiceRowPadding);
+		for (auto i = 0; i != int(folders.size()); ++i) {
+			box->addRow(object_ptr<Ui::Radiobutton>(
+				box,
+				group,
+				i + 1,
+				folders[i],
+				st::defaultCheckbox), st::ggtgChoiceRowPadding);
+		}
+		group->setChangedCallback([=](int value) {
+			account->setFolderTag(
+				(value > 0 && value <= int(folders.size()))
+					? folders[value - 1]
+					: QString());
+			if (hooks.changed) {
+				hooks.changed();
+			}
+		});
+		if (hooks.newFolder) {
+			AddHubActionRow(
+				box,
+				u"Новая папка..."_q,
+				&st::menuIconPin,
+				hooks.newFolder);
+		}
+		Ui::AddSkip(box->verticalLayout());
+		Ui::AddDivider(box->verticalLayout());
+		Ui::AddSkip(box->verticalLayout());
+		Ui::AddSubsectionTitle(box->verticalLayout(), rpl::single(u"Закреп"_q));
+		const auto pinGroup = std::make_shared<Ui::RadiobuttonGroup>(
+			account->pinned() ? 1 : 0);
+		box->addRow(object_ptr<Ui::Radiobutton>(
+			box,
+			pinGroup,
+			0,
+			u"Обычный порядок"_q,
+			st::defaultCheckbox), st::ggtgChoiceRowPadding);
+		box->addRow(object_ptr<Ui::Radiobutton>(
+			box,
+			pinGroup,
+			1,
+			u"Закрепить вверху списка аккаунтов"_q,
+			st::defaultCheckbox), st::ggtgChoiceRowPadding);
+		pinGroup->setChangedCallback([=](int value) {
+			account->setPinned(value == 1);
+			if (hooks.changed) {
+				hooks.changed();
+			}
+		});
+	});
+}
+
+// «Статус и SpamBot»: the verdict, what it means, the last check, history.
+void ShowAccountStatusBox(
+		std::shared_ptr<Ui::Show> show,
+		not_null<Main::Account*> account,
+		bool current,
+		const AccountHubHooks &hooks) {
+	namespace Sessions = Core::GgtgSessions;
+	const auto user = account->session().user();
+	const auto userId = QString::number(account->session().userId().bare);
+	const auto status = LiveAccountStatus(account);
+	const auto spam = Data::FindAccountSpamStatus(user->id.value);
+	const auto blocked = SpamBlocked(user->id.value);
+	auto lines = InfoLines();
+	lines.emplace_back(u"Статус"_q, status.text);
+	if (!status.detail.isEmpty()) {
+		lines.emplace_back(u"Что это значит"_q, status.detail);
+	}
+	lines.emplace_back(u"Сессия"_q, current ? u"активна (текущий аккаунт)"_q : u"активна"_q);
+	lines.emplace_back(
+		u"SpamBot"_q,
+		Settings::AccountSpamStatusText(user->id.value));
+	lines.emplace_back(
+		u"Последняя проверка"_q,
+		spam ? StampText(spam->checkedAt) : u"не было"_q);
+	const auto ggr = Settings::CalculateAccountGgr(account);
+	lines.emplace_back(
+		u"Рейтинг GGR"_q,
+		QString::number(ggr.score, 'f', 1) + u" ("_q + ggr.tier + u")"_q);
+	const auto history = Sessions::ForUser(Sessions::Load(), userId);
+	if (history.empty()) {
+		lines.emplace_back(u"Разрывы сессии"_q, u"не было"_q);
+	} else {
+		const auto &last = history.back();
+		lines.emplace_back(
+			u"Разрывы сессии"_q,
+			u"%1 (последний: %2, %3)"_q
+				.arg(history.size())
+				.arg(StampText(last.at))
+				.arg(Sessions::ReasonTitle(last.reason)));
+	}
+	ShowInfoBox(
+		show,
+		u"Статус и SpamBot"_q,
+		std::move(lines),
+		[=](not_null<Ui::GenericBox*> box) {
+			Ui::AddSkip(box->verticalLayout());
+			Ui::AddDivider(box->verticalLayout());
+			Ui::AddSkip(box->verticalLayout());
+			if (hooks.checkSpam) {
+				AddHubActionRow(
+					box,
+					u"Проверить сейчас"_q,
+					&st::menuIconFactcheck,
+					hooks.checkSpam);
+			}
+			if (blocked && hooks.appeal) {
+				AddHubActionRow(
+					box,
+					u"Подать апелляцию"_q,
+					&st::menuIconSend,
+					hooks.appeal);
+			}
+		},
+		QString(),
+		nullptr);
+}
+
+// «Действия»: everything that does something to the account. The dangerous
+// ones are last.
+void ShowAccountActionsBox(
+		std::shared_ptr<Ui::Show> show,
+		not_null<Main::Account*> account,
+		bool current,
+		const AccountHubHooks &hooks) {
+	ShowAccountSectionBox(show, u"Действия"_q, [=](
+			not_null<Ui::GenericBox*> box) {
+		const auto inTrash = account->trashed();
+		const auto live = Main::AccountIsLive(account);
+		Ui::AddSkip(box->verticalLayout());
+		if (!inTrash) {
+			if (!current && hooks.open) {
+				AddHubActionRow(box, u"Открыть аккаунт"_q, &st::menuIconShowInChat, [=] {
+					box->closeBox();
+					hooks.open();
+				});
+			}
+			if (live) {
+				const auto offline = account->alwaysOffline();
+				AddHubActionRow(
+					box,
+					offline ? u"В онлайн"_q : u"В спящий режим"_q,
+					offline ? &st::menuIconUnmute : &st::menuIconMute,
+					[=] {
+						account->setAlwaysOffline(!offline);
+						Ggtg::Notice(show, !offline
+							? u"Аккаунт переведён в спящий режим"_q
+							: u"Аккаунт пробуждён"_q);
+						if (hooks.changed) {
+							hooks.changed();
+						}
+						box->closeBox();
+					});
+			}
+			if (hooks.bulk) {
+				AddHubActionRow(
+					box,
+					u"Массовые действия..."_q,
+					&st::menuIconSettings,
+					hooks.bulk);
+			}
+		}
+		Ui::AddSkip(box->verticalLayout());
+		Ui::AddDivider(box->verticalLayout());
+		Ui::AddSkip(box->verticalLayout());
+		if (inTrash) {
+			if (hooks.restore) {
+				AddHubActionRow(box, u"Восстановить из корзины"_q, &st::menuIconRestore, [=] {
+					box->closeBox();
+					hooks.restore();
+				});
+			}
+			if (hooks.deleteForever) {
+				AddHubActionRow(box, u"Удалить навсегда..."_q, &st::menuIconDeleteAttention, [=] {
+					hooks.deleteForever();
+				});
+			}
+		} else if (hooks.trash) {
+			AddHubActionRow(box, u"В корзину"_q, &st::menuIconDeleteAttention, [=] {
+				box->closeBox();
+				hooks.trash();
+			});
+		}
+	});
 }
 
 void ShowAccountInfoBox(
 		std::shared_ptr<Ui::Show> show,
 		not_null<Main::Account*> account,
-		bool current) {
-	ShowAccountProfileBox(std::move(show), account, current, nullptr);
+		bool current,
+		AccountHubHooks hooks = {}) {
+	if (!Main::AccountIsLive(account)) {
+		Ggtg::Notice(show, u"Аккаунт больше не залогинен"_q);
+		return;
+	}
+	show->showBox(Box([=](not_null<Ui::GenericBox*> box) {
+		box->setWidth(st::accountsBoxWidth);
+		box->setTitle(rpl::single(u"Аккаунт"_q));
+		box->addRow(
+			object_ptr<HubHeader>(box, account, current),
+			style::margins(0, st::defaultVerticalListSkip, 0, 0));
+
+		// Three quick actions under the header.
+		const auto inTrash = account->trashed();
+		struct Quick {
+			QString text;
+			Fn<void()> callback;
+			bool active = false;
+		};
+		auto quick = std::vector<Quick>();
+		if (inTrash) {
+			if (hooks.restore) {
+				quick.push_back({ u"Восстановить"_q, [=] {
+					box->closeBox();
+					hooks.restore();
+				}, true });
+			}
+			if (hooks.deleteForever) {
+				quick.push_back({ u"Удалить навсегда"_q, hooks.deleteForever });
+			}
+		} else {
+			if (!current && hooks.open) {
+				quick.push_back({ u"Открыть"_q, [=] {
+					box->closeBox();
+					hooks.open();
+				}, true });
+			}
+			if (hooks.checkSpam) {
+				quick.push_back({ u"Проверка"_q, hooks.checkSpam, current });
+			}
+			if (hooks.trash) {
+				quick.push_back({ u"В корзину"_q, [=] {
+					box->closeBox();
+					hooks.trash();
+				} });
+			}
+		}
+		if (!quick.empty()) {
+			const auto wrap = box->addRow(
+				object_ptr<Ui::RpWidget>(box),
+				style::margins(
+					st::boxRowPadding.left(),
+					st::defaultVerticalListSkip,
+					st::boxRowPadding.right(),
+					0));
+			auto buttons = std::vector<not_null<Ui::RoundButton*>>();
+			for (const auto &item : quick) {
+				const auto button = Ui::CreateChild<Ui::RoundButton>(
+					wrap,
+					rpl::single(item.text),
+					item.active
+						? st::defaultActiveButton
+						: st::defaultBoxButton);
+				button->setTextTransform(
+					Ui::RoundButtonTextTransform::NoTransform);
+				button->setClickedCallback(item.callback);
+				buttons.push_back(button);
+			}
+			wrap->resize(wrap->width(), buttons.front()->height());
+			wrap->widthValue(
+			) | rpl::on_next([=](int width) {
+				const auto gap = style::ConvertScale(8);
+				const auto count = int(buttons.size());
+				const auto each = (width - gap * (count - 1)) / count;
+				for (auto i = 0; i != count; ++i) {
+					buttons[i]->setFullWidth(each);
+					buttons[i]->moveToLeft(i * (each + gap), 0);
+				}
+			}, wrap->lifetime());
+		}
+
+		Ui::AddSkip(box->verticalLayout());
+		Ui::AddDivider(box->verticalLayout());
+		Ui::AddSkip(box->verticalLayout());
+
+		const auto rowSkip = style::margins(
+			style::ConvertScale(8), 0, style::ConvertScale(8), 0);
+		const auto addRow = [&](
+				const style::icon *icon,
+				const QString &title,
+				rpl::producer<QString> hint,
+				Fn<void()> callback) {
+			box->addRow(
+				object_ptr<HubRow>(box, icon, title, std::move(hint)),
+				rowSkip
+			)->setClickedCallback(std::move(callback));
+		};
+		const auto user = account->session().user();
+		const auto hubShow = show;
+		const auto userId = user->id.value;
+
+		addRow(
+			&st::menuIconProfile,
+			u"Профиль"_q,
+			rpl::single(user->name()),
+			[=] {
+				ShowAccountProfileBox(hubShow, account, current, hooks.changed);
+			});
+		addRow(
+			&st::menuIconLock,
+			u"Безопасность и 2FA"_q,
+			rpl::single(account->twoFactorPassword().isEmpty()
+				? u"пароль не сохранён"_q
+				: u"пароль сохранён"_q),
+			[=] { ShowAccountSecurityBox(hubShow, account, hooks); });
+		addRow(
+			&st::menuIconDevices,
+			u"Сессии и устройства"_q,
+			account->session().api().authorizations().totalValue(
+			) | rpl::map([](int total) {
+				return total > 0
+					? (QString::number(total) + u" активных"_q)
+					: QString();
+			}),
+			[=] { ShowAccountSessionsBox(hubShow, account); });
+		const auto proxy = account->proxyOverride();
+		addRow(
+			&st::menuIconSettings,
+			u"Прокси и сеть"_q,
+			rpl::single(MTP::HasRealProxy(proxy)
+				? (proxy.host + ':' + QString::number(proxy.port))
+				: u"нет прокси"_q),
+			[=] { ShowAccountNetworkBox(hubShow, account, hooks); });
+		addRow(
+			&st::menuIconPin,
+			u"Папка и закреп"_q,
+			rpl::single(account->folderTag().isEmpty()
+				? u"без папки"_q
+				: account->folderTag()),
+			[=] { ShowAccountFolderBox(hubShow, account, hooks); });
+		addRow(
+			&st::menuIconFactcheck,
+			u"Статус и SpamBot"_q,
+			rpl::single(LiveAccountStatus(account).text),
+			[=] { ShowAccountStatusBox(hubShow, account, current, hooks); });
+		addRow(
+			&st::menuIconShowInChat,
+			u"Действия"_q,
+			rpl::single(QString()),
+			[=] { ShowAccountActionsBox(hubShow, account, current, hooks); });
+		Ui::AddSkip(box->verticalLayout());
+
+		box->addButton(tr::lng_close(), [=] { box->closeBox(); });
+	}));
 }
 
 // Spares of an account that is no longer in the app: one tap brings it back
@@ -11254,6 +11946,81 @@ object_ptr<Ui::BoxContent> MakeAccountManagerBox(
 			(*folderMenu)->popup(QCursor::pos());
 		};
 
+		// ggtg: what the account screen (ShowAccountInfoBox) can do to the
+		// list behind it.
+		const auto makeHubHooks = [=](not_null<Main::Account*> account) {
+			auto hooks = AccountHubHooks();
+			hooks.open = [=] {
+				Ui::PostponeCall(box, [=] {
+					const auto all = Core::App().domain().orderedAccounts();
+					if (ranges::find(all, account) != end(all)) {
+						Core::App().domain().maybeActivate(account);
+					}
+				});
+			};
+			hooks.checkSpam = [=] {
+				if (CurrentBulkRun()) {
+					OpenBulkActions(controller);
+					return;
+				}
+				RunBulkAction(controller, { account }, [=](
+						not_null<Main::Account*> account,
+						StepDone done) {
+					StepCheckSpam(account, done);
+				}, BulkOptions{
+					.title = u"Проверка SpamBot"_q,
+					.failPrefix = QString(),
+				});
+			};
+			hooks.appeal = [=] {
+				if (CurrentBulkRun()) {
+					OpenBulkActions(controller);
+					return;
+				}
+				RunBulkAction(controller, { account }, [=](
+						not_null<Main::Account*> account,
+						StepDone done) {
+					StepAutoAppealSpam(account, done);
+				}, BulkOptions{
+					.title = u"Авто-апелляция @SpamBot"_q,
+					.failPrefix = QString(),
+				});
+			};
+			hooks.bulk = [=] {
+				if (CurrentBulkRun()) {
+					OpenBulkActions(controller);
+					return;
+				}
+				show()->showBox(MakeBulkActionsChooserBox(controller, { account }));
+			};
+			hooks.trash = [=] {
+				MoveAccountsToTrash({ account });
+				Ggtg::Notice(show(), u"Аккаунт перемещён в корзину"_q);
+				state->rebuildCards();
+				state->rebuildTable();
+			};
+			hooks.restore = [=] {
+				RestoreAccountsFromTrash({ account });
+				Ggtg::Notice(show(), u"Аккаунт восстановлен"_q);
+				state->rebuildCards();
+				state->rebuildTable();
+			};
+			hooks.deleteForever = [=] {
+				ConfirmDeleteAccountsForever(show(), { account });
+			};
+			hooks.newFolder = [=] {
+				ShowBulkMoveToFolderBox(controller, { account });
+			};
+			hooks.changePassword = [=] {
+				ShowBulkPasswordBox(controller, { account });
+			};
+			hooks.changed = [=] {
+				state->rebuildCards();
+				state->rebuildTable();
+			};
+			return hooks;
+		};
+
 		const auto showAccountContextMenu = [=](not_null<Main::Account*> account, QPoint pos) {
 			*accountContextMenu = base::make_unique_q<Ui::PopupMenu>(box, st::folderContextMenu);
 			const auto menu = accountContextMenu->get();
@@ -11278,7 +12045,7 @@ object_ptr<Ui::BoxContent> MakeAccountManagerBox(
 			}
 
 			menu->addAction(u"Информация об аккаунте"_q, [=] {
-				ShowAccountInfoBox(show(), account, isCurrent);
+				ShowAccountInfoBox(show(), account, isCurrent, makeHubHooks(account));
 			});
 			if (isLive && !inTrash) {
 				menu->addAction(u"Редактировать профиль..."_q, [=] {
@@ -11924,7 +12691,8 @@ object_ptr<Ui::BoxContent> MakeAccountManagerBox(
 						ShowAccountInfoBox(
 							show(),
 							account,
-							account.get() == currentAccount);
+							account.get() == currentAccount,
+							makeHubHooks(account));
 					},
 					state->trash,
 					[=] {
