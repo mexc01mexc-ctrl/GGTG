@@ -45,6 +45,10 @@ void TestMove() {
 	const auto shown = Shown(s);
 	CHECK(shown[2] == Col::Status);
 	CHECK(shown[3] == Col::Folder);
+	MoveBefore(s, Col::Proxy, Col::Number); // before the head: first movable
+	CHECK(s.order[2] == Col::Proxy);
+	MoveBefore(s, Col::Account, Col::Proxy); // head does not move
+	CHECK(s.order[1] == Col::Account);
 	MoveBefore(s, Col::Open, Col::Number); // tail does not move
 	CHECK(s.order[kColCount - 2] == Col::Open);
 	MoveBefore(s, Col::Age, Col::Trash); // ends before the tail
@@ -87,7 +91,8 @@ void TestBadData() {
 		"\"visible\":{\"number\":false,\"zzz\":true}}");
 	const auto s = FromJson(old);
 	CHECK(int(s.order.size()) == kColCount);
-	CHECK(s.order[0] == Col::Account);
+	CHECK(s.order[0] == Col::Number);
+	CHECK(s.order[1] == Col::Account);
 	CHECK(s.order[kColCount - 1] == Col::Trash);
 	CHECK(!s.visible[int(Col::Number)]);
 	CHECK(s.visible[int(Col::Account)]);

@@ -34,6 +34,11 @@ For license and exceptions, see https://github.com/telegramdesktop/tdesktop/blob
 
 namespace Settings::TableLayout {
 
+// Qt 5 (Windows) has no QString(const char16_t*), fromUtf16 works in both.
+[[nodiscard]] inline QString Str(const char16_t *text) {
+	return QString::fromUtf16(text);
+}
+
 enum class Col {
 	Number,
 	Account,
@@ -78,13 +83,13 @@ struct ColInfo {
 		{ Col::Proxy, u"proxy", u"Прокси", 140, 90, true, false },
 		{ Col::Status, u"status", u"Статус", 110, 75, true, false },
 		{ Col::Sms24h, u"sms24h", u"За 24 ч", 56, 46, true, false },
-		{ Col::Registered, u"registered", u"Регистрация", 96, 70, false, false },
-		{ Col::Age, u"age", u"Возраст", 70, 50, false, false },
-		{ Col::Device, u"device", u"Устройство", 120, 80, false, false },
+		{ Col::Registered, u"registered", u"Регистрация", 130, 80, false, false },
+		{ Col::Age, u"age", u"Возраст", 120, 70, false, false },
+		{ Col::Device, u"device", u"Устройство", 130, 80, false, false },
 		{ Col::TwoFa, u"twofa", u"2FA", 50, 40, false, false },
-		{ Col::SpamRating, u"spam", u"SpamBot", 90, 60, false, false },
+		{ Col::SpamRating, u"spam", u"SpamBot", 100, 60, false, false },
 		{ Col::Sessions, u"sessions", u"Сессии", 64, 46, false, false },
-		{ Col::LastCheck, u"lastcheck", u"Проверка", 96, 70, false, false },
+		{ Col::LastCheck, u"lastcheck", u"Проверка", 100, 70, false, false },
 		{ Col::Premium, u"premium", u"Премиум", 64, 50, false, false },
 		{ Col::Open, u"open", u"Открыть", 76, 76, true, true },
 		{ Col::Trash, u"trash", u"Корзина", 72, 72, true, true },
@@ -119,7 +124,7 @@ struct ColInfo {
 	switch (d) {
 	case Density::Comfortable: return 4;
 	case Density::Normal: return 3;
-	case Density::Compact: return 1;
+	case Density::Compact: return 2;
 	}
 	return 4;
 }
@@ -135,30 +140,37 @@ struct State {
 	Density density = Density::Comfortable;
 };
 
-// Open and Trash are always the last two, Account never leaves the front
-// part: only the middle can be shuffled.
+// Number and Account are always the first two (the pinned part), Open and
+// Trash the last two: only the middle can be shuffled.
+[[nodiscard]] inline bool IsHead(Col id) {
+	return (id == Col::Number) || (id == Col::Account);
+}
+[[nodiscard]] inline bool IsTail(Col id) {
+	return (id == Col::Open) || (id == Col::Trash);
+}
+
 inline void Normalize(State &state) {
 	auto seen = std::array<bool, kColCount>{};
-	auto fixed = std::vector<Col>();
+	auto middle = std::vector<Col>();
 	for (const auto id : state.order) {
 		const auto i = static_cast<int>(id);
 		if (i < 0 || i >= kColCount || seen[i]) {
 			continue;
 		}
 		seen[i] = true;
-		fixed.push_back(id);
-	}
-	for (const auto &info : Infos()) {
-		if (!seen[static_cast<int>(info.id)]) {
-			fixed.push_back(info.id);
+		if (!IsHead(id) && !IsTail(id)) {
+			middle.push_back(id);
 		}
 	}
-	const auto isTail = [](Col id) {
-		return (id == Col::Open) || (id == Col::Trash);
-	};
-	fixed.erase(
-		std::remove_if(fixed.begin(), fixed.end(), isTail),
-		fixed.end());
+	for (const auto &info : Infos()) {
+		if (!seen[static_cast<int>(info.id)]
+			&& !IsHead(info.id)
+			&& !IsTail(info.id)) {
+			middle.push_back(info.id);
+		}
+	}
+	auto fixed = std::vector<Col>{ Col::Number, Col::Account };
+	fixed.insert(fixed.end(), middle.begin(), middle.end());
 	fixed.push_back(Col::Open);
 	fixed.push_back(Col::Trash);
 	state.order = std::move(fixed);
@@ -237,17 +249,17 @@ inline void SetVisible(State &state, Col id, bool shown) {
 	state.visible[static_cast<int>(id)] = shown;
 }
 
-// Moves `id` so that it sits right before `before` (or at the end of the
-// movable part when `before` is the tail).
+// Moves `id` so that it sits right before `before`. The head and the tail
+// stay where they are; moving before the head means the first movable place.
 inline void MoveBefore(State &state, Col id, Col before) {
-	const auto isTail = [](Col c) {
-		return (c == Col::Open) || (c == Col::Trash);
-	};
-	if (isTail(id) || id == before) {
+	if (IsHead(id) || IsTail(id) || id == before) {
 		return;
 	}
 	auto &order = state.order;
 	order.erase(std::remove(order.begin(), order.end(), id), order.end());
+	if (IsHead(before)) {
+		before = order[2];
+	}
 	auto at = std::find(order.begin(), order.end(), before);
 	order.insert(at, id);
 	Normalize(state);
@@ -261,7 +273,7 @@ inline void MoveBefore(State &state, Col id, Col before) {
 
 inline void SetWidth(State &state, Col id, int width) {
 	const auto &info = Info(id);
-	if (info.id == Col::Open || info.id == Col::Trash) {
+	if (IsTail(info.id)) {
 		return;
 	}
 	state.width[static_cast<int>(id)] = std::max(width, info.minWidth);
@@ -283,7 +295,7 @@ inline void SetWidth(State &state, Col id, int width) {
 	auto visible = QJsonObject();
 	auto width = QJsonObject();
 	for (const auto id : state.order) {
-		const auto key = QString(Info(id).key);
+		const auto key = Str(Info(id).key);
 		order.push_back(key);
 		visible.insert(key, state.visible[static_cast<int>(id)]);
 		if (state.width[static_cast<int>(id)] > 0) {
@@ -296,7 +308,7 @@ inline void SetWidth(State &state, Col id, int width) {
 	root.insert(u"visible"_q, visible);
 	root.insert(u"width"_q, width);
 	root.insert(u"pinFirst"_q, state.pinFirst);
-	root.insert(u"density"_q, QString(DensityKey(state.density)));
+	root.insert(u"density"_q, Str(DensityKey(state.density)));
 	return QJsonDocument(root).toJson(QJsonDocument::Compact);
 }
 
@@ -311,7 +323,7 @@ inline void SetWidth(State &state, Col id, int width) {
 	const auto root = doc.object();
 	const auto keyToId = [](const QString &key, Col &out) {
 		for (const auto &info : Infos()) {
-			if (key == QString(info.key)) {
+			if (key == Str(info.key)) {
 				out = info.id;
 				return true;
 			}
@@ -344,7 +356,7 @@ inline void SetWidth(State &state, Col id, int width) {
 	result.pinFirst = root.value(u"pinFirst"_q).toBool(true);
 	const auto density = root.value(u"density"_q).toString();
 	for (const auto d : { Density::Comfortable, Density::Normal, Density::Compact }) {
-		if (density == QString(DensityKey(d))) {
+		if (density == Str(DensityKey(d))) {
 			result.density = d;
 		}
 	}

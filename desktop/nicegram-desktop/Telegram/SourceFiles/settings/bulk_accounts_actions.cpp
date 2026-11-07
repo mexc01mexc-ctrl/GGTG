@@ -7,6 +7,8 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
 #include "settings/bulk_accounts_actions.h"
 #include "settings/ggtg_warmup.h"
+#include "settings/ggtg_table_layout.h"
+#include "core/ggtg_paths.h"
 #include "settings/ggtg_android_profiles.h"
 #include "settings/ggtg_ios_profiles.h"
 #include "core/ggtg_id_date.h"
@@ -5886,13 +5888,80 @@ struct ManagerColumns {
 	int trashWidth = 0;
 	int totalWidth = 0;
 	int rowHeight = 0;
+	// ggtg: every column by its id, for the cells the named fields above
+	// do not cover (registration, 2FA, devices...). Width 0 = hidden.
+	std::array<int, TableLayout::kColCount> x{};
+	std::array<int, TableLayout::kColCount> w{};
+	// The photo's size follows the row density.
+	int photoSize = 0;
+	// The pinned part (check, №, photo, account) ends here.
+	int pinnedRight = 0;
+	int accountLines = 4;
 };
 
-// Four lines (name, @username, phone, ID) in a row.
+// ggtg: the table's layout (shown columns, order, widths, density), loaded
+// on first use and saved in tdata/ggtg_db/accounts_table.json.
+[[nodiscard]] QString ManagerLayoutPath() {
+	const auto dir = Core::GgtgPaths::DbDir();
+	return dir.isEmpty() ? QString() : (dir + u"accounts_table.json"_q);
+}
+[[nodiscard]] TableLayout::State &ManagerLayout() {
+	static auto result = [] {
+		const auto path = ManagerLayoutPath();
+		if (path.isEmpty()) {
+			return TableLayout::Defaults();
+		}
+		auto file = QFile(path);
+		if (!file.open(QIODevice::ReadOnly)) {
+			return TableLayout::Defaults();
+		}
+		return TableLayout::FromJson(file.readAll());
+	}();
+	return result;
+}
+void SaveManagerLayout() {
+	const auto path = ManagerLayoutPath();
+	if (path.isEmpty()) {
+		return;
+	}
+	QDir().mkpath(QFileInfo(path).absolutePath());
+	auto file = QFile(path);
+	if (file.open(QIODevice::WriteOnly | QIODevice::Truncate)) {
+		file.write(TableLayout::ToJson(ManagerLayout()));
+	}
+}
+
+// How far the table is scrolled sideways: the pinned part is drawn
+// shifted by it, so it stays in view.
+[[nodiscard]] int &ManagerScrollX() {
+	static auto result = 0;
+	return result;
+}
+
+[[nodiscard]] int PinnedShift() {
+	return (ManagerLayout().pinFirst && ManagerScrollX() > 0)
+		? ManagerScrollX()
+		: 0;
+}
+
+// Name, @username, phone, ID: fewer lines in the denser modes.
 [[nodiscard]] int ManagerRowHeight() {
+	const auto lines = TableLayout::DensityLines(ManagerLayout().density);
 	return st::semiboldFont->height
-		+ 3 * st::normalFont->height
-		+ style::ConvertScale(16);
+		+ (lines - 1) * st::normalFont->height
+		+ style::ConvertScale(
+			ManagerLayout().density == TableLayout::Density::Compact
+				? 12
+				: 16);
+}
+
+[[nodiscard]] int ManagerPhotoSize() {
+	switch (ManagerLayout().density) {
+	case TableLayout::Density::Comfortable: return style::ConvertScale(50);
+	case TableLayout::Density::Normal: return style::ConvertScale(40);
+	case TableLayout::Density::Compact: return style::ConvertScale(28);
+	}
+	return style::ConvertScale(50);
 }
 
 // The width the table has to fill, set by MakeAccountManagerBox as its
@@ -5956,148 +6025,172 @@ struct ManagerContentWidths {
 	};
 }
 
-// Lays the columns out for the current viewport: with room to spare the
-// extra width goes to the text columns, with too little they shrink towards
-// their minimum, then "№" drops out, and only below that does the table
-// start scrolling sideways.
+// Lays the columns out for the current viewport: the shown columns in the
+// user's order (see TableLayout). A column the user has resized keeps that
+// width; the others share what is left in proportion to their content, and
+// with too little room shrink towards their minimum. Only when even the
+// minimums do not fit does the table scroll sideways.
 [[nodiscard]] ManagerColumns ComputeManagerColumns() {
+	namespace TL = TableLayout;
 	const auto scaled = [](int value) { return style::ConvertScale(value); };
+	const auto &layout = ManagerLayout();
 	const auto pad = scaled(12);
 	const auto gap = scaled(8);
-	struct Flex {
-		int preferred;
-		int minimum;
-		int width;
+	struct Item {
+		TL::Col id;
+		int preferred = 0;
+		int minimum = 0;
+		bool flex = false;
+		int width = 0;
 	};
 	const auto content = ManagerContent();
-	const auto accountWidth = content.account > 0
-		? content.account
-		: scaled(170);
-	const auto statusWidth = content.status > 0
-		? content.status
-		: scaled(110);
-	auto account = Flex{
-		accountWidth,
-		std::min(accountWidth, scaled(105)),
-		0 };
-	auto folder = Flex{ scaled(100), scaled(65), 0 };
-	auto proxy = Flex{ scaled(140), scaled(90), 0 };
-	auto status = Flex{
-		statusWidth,
-		std::min(statusWidth, scaled(75)),
-		0 };
-	auto sms = Flex{ scaled(56), scaled(46), 0 };
-	auto flex = std::array<Flex*, 5>{ &account, &folder, &proxy, &status, &sms };
+	auto items = std::vector<Item>();
+	for (const auto id : TL::Shown(layout)) {
+		const auto &info = TL::Info(id);
+		auto item = Item{ id };
+		item.preferred = scaled(info.defaultWidth);
+		item.minimum = scaled(info.minWidth);
+		item.flex = !TL::IsTail(id) && (id != TL::Col::Number);
+		const auto user = layout.width[int(id)];
+		if (id == TL::Col::Open) {
+			item.preferred = item.minimum = ManagerOpenWidth();
+		} else if (id == TL::Col::Trash) {
+			item.preferred = item.minimum = ManagerTrashWidth();
+		} else if (user > 0) {
+			item.preferred = scaled(user);
+			item.minimum = std::min(item.minimum, item.preferred);
+			item.flex = false;
+		} else if (id == TL::Col::Account && content.account > 0) {
+			item.preferred = content.account;
+			item.minimum = std::min(item.preferred, scaled(105));
+		} else if (id == TL::Col::Status && content.status > 0) {
+			item.preferred = content.status;
+			item.minimum = std::min(item.preferred, scaled(75));
+		}
+		item.width = item.preferred;
+		items.push_back(item);
+	}
+	const auto photoSize = ManagerPhotoSize();
+	const auto photoWidth = photoSize - scaled(2);
+	// pad + check + photo + gaps between the cells
+	auto fixed = pad + scaled(30) + gap + photoWidth + gap
+		+ std::max(int(items.size()) - 1, 0) * gap;
+	auto sumPreferred = 0;
+	auto sumMinimal = 0;
+	for (const auto &item : items) {
+		if (item.flex) {
+			sumPreferred += item.preferred;
+			sumMinimal += item.minimum;
+		} else {
+			fixed += item.preferred;
+		}
+	}
 	const auto available = ManagerViewportWidth();
-
-	const auto fixedFor = [&](bool number, bool showSms) {
-		// pad + check + photo + open + trash + gaps + pad
-		auto total = pad + scaled(24) + scaled(30) + scaled(48)
-			+ ManagerOpenWidth() + ManagerTrashWidth();
-		auto columns = (showSms ? 5 : 4) + 2;
-		if (number) {
-			total += scaled(34);
-			++columns;
-		}
-		return total + columns * gap;
-	};
-	const auto sum = [&](bool minimum, bool showSms) {
-		auto result = 0;
-		const auto count = showSms ? 5 : 4;
-		for (auto i = 0; i != count; ++i) {
-			result += minimum ? flex[i]->minimum : flex[i]->preferred;
-		}
-		return result;
-	};
-	auto showNumber = true;
-	auto showSms = true;
-	auto fixed = fixedFor(true, true);
-	if (available > 0 && fixed + sum(true, true) > available) {
-		showNumber = false;
-		fixed = fixedFor(false, true);
-	}
-	if (available > 0 && fixed + sum(true, true) > available) {
-		showSms = false;
-		fixed = fixedFor(false, false);
-	}
-	const auto activeFlexCount = showSms ? 5 : 4;
-	const auto sumPreferred = sum(false, showSms);
-	const auto sumMinimal = sum(true, showSms);
-	const auto preferred = fixed + sumPreferred;
+	const auto preferredTotal = fixed + sumPreferred;
 	const auto minimal = fixed + sumMinimal;
-	auto total = preferred;
+	auto total = preferredTotal;
 	if (available > 0) {
 		total = std::max(available, minimal);
 	}
-	// Distribute: from the preferred widths, the difference to `total`
-	// grows or shrinks every text column in proportion to its preferred
-	// width (shrinking never goes below the minimum).
 	const auto room = total - fixed;
-	if (room >= sumPreferred) {
-		// Spare room is shared out between the text columns in proportion
-		// to their content, so the table always spans the whole window.
-		const auto extra = room - sumPreferred;
-		const auto base = std::max(sumPreferred, 1);
-		auto given = 0;
-		for (auto i = 0; i != activeFlexCount; ++i) {
-			const auto add = extra * flex[i]->preferred / base;
-			flex[i]->width = flex[i]->preferred + add;
-			given += add;
+	if (sumPreferred > 0) {
+		if (room >= sumPreferred) {
+			const auto extra = room - sumPreferred;
+			auto given = 0;
+			Item *first = nullptr;
+			for (auto &item : items) {
+				if (!item.flex) {
+					continue;
+				}
+				const auto add = extra * item.preferred / sumPreferred;
+				item.width = item.preferred + add;
+				given += add;
+				if (!first) {
+					first = &item;
+				}
+			}
+			if (first) {
+				first->width += extra - given;
+			}
+		} else {
+			const auto lack = sumPreferred - room;
+			const auto slack = sumPreferred - sumMinimal;
+			auto taken = 0;
+			Item *first = nullptr;
+			for (auto &item : items) {
+				if (!item.flex) {
+					continue;
+				}
+				const auto cut = slack
+					? lack * (item.preferred - item.minimum) / slack
+					: 0;
+				item.width = item.preferred - cut;
+				taken += cut;
+				if (!first) {
+					first = &item;
+				}
+			}
+			if (first) {
+				first->width = std::max(
+					first->width - std::max(lack - taken, 0),
+					first->minimum);
+			}
 		}
-		flex[0]->width += extra - given;
-	} else {
-		const auto lack = sumPreferred - room;
-		const auto slack = sumPreferred - sumMinimal;
-		auto taken = 0;
-		for (auto i = 0; i != activeFlexCount; ++i) {
-			const auto cut = slack
-				? lack * (flex[i]->preferred - flex[i]->minimum) / slack
-				: 0;
-			flex[i]->width = flex[i]->preferred - cut;
-			taken += cut;
-		}
-		flex[0]->width -= std::max(lack - taken, 0);
-		flex[0]->width = std::max(flex[0]->width, flex[0]->minimum);
-	}
-	if (!showSms) {
-		sms.width = 0;
 	}
 
 	auto result = ManagerColumns();
+	result.photoSize = photoSize;
+	result.accountLines = TL::DensityLines(layout.density);
 	auto x = pad;
 	result.check = x;
 	x += scaled(30) + gap;
-	result.number = x;
-	result.numberWidth = showNumber ? scaled(34) : 0;
-	if (showNumber) {
-		x += result.numberWidth + gap;
+	for (const auto &item : items) {
+		const auto i = int(item.id);
+		result.x[i] = x;
+		result.w[i] = item.width;
+		switch (item.id) {
+		case TL::Col::Number:
+			result.number = x;
+			result.numberWidth = item.width;
+			break;
+		case TL::Col::Account:
+			result.photo = x;
+			result.photoWidth = photoWidth;
+			x += photoWidth + gap;
+			result.x[i] = x;
+			result.account = x;
+			result.accountWidth = item.width;
+			result.pinnedRight = x + item.width;
+			break;
+		case TL::Col::Folder:
+			result.folder = x;
+			result.folderWidth = item.width;
+			break;
+		case TL::Col::Proxy:
+			result.proxy = x;
+			result.proxyWidth = item.width;
+			break;
+		case TL::Col::Status:
+			result.status = x;
+			result.statusWidth = item.width;
+			break;
+		case TL::Col::Sms24h:
+			result.sms = x;
+			result.smsWidth = item.width;
+			break;
+		case TL::Col::Open:
+			result.open = x;
+			result.openWidth = item.width;
+			break;
+		case TL::Col::Trash:
+			result.trash = x;
+			result.trashWidth = item.width;
+			break;
+		default: break;
+		}
+		x += item.width + gap;
 	}
-	result.photo = x;
-	result.photoWidth = scaled(48);
-	x += result.photoWidth + gap;
-	result.account = x;
-	result.accountWidth = account.width;
-	x += account.width + gap;
-	result.folder = x;
-	result.folderWidth = folder.width;
-	x += folder.width + gap;
-	result.proxy = x;
-	result.proxyWidth = proxy.width;
-	x += proxy.width + gap;
-	result.status = x;
-	result.statusWidth = status.width;
-	x += status.width + gap;
-	result.sms = x;
-	result.smsWidth = showSms ? sms.width : 0;
-	if (showSms) {
-		x += result.smsWidth + gap;
-	}
-	result.open = x;
-	result.openWidth = ManagerOpenWidth();
-	x += result.openWidth + gap;
-	result.trash = x;
-	result.trashWidth = ManagerTrashWidth();
-	x += result.trashWidth;
+	x -= gap;
 	result.totalWidth = std::max(total, x);
 	result.rowHeight = ManagerRowHeight();
 	return result;
@@ -6116,13 +6209,14 @@ void PaintAccountCell(
 		const QString &id,
 		UserData *user = nullptr,
 		Ui::PeerBadge *badge = nullptr,
-		Fn<void()> repaint = nullptr) {
+		Fn<void()> repaint = nullptr,
+		int lines = 4) {
 	if (width <= 0) {
 		return;
 	}
 	const auto &bold = st::semiboldFont;
 	const auto &normal = st::normalFont;
-	auto y = (height - bold->height - 3 * normal->height) / 2;
+	auto y = (height - bold->height - (lines - 1) * normal->height) / 2;
 	const auto line = [&](
 			const style::font &font,
 			QColor color,
@@ -6152,8 +6246,12 @@ void PaintAccountCell(
 			repaint);
 	}
 	line(normal, usernameColor, username);
-	line(normal, st::windowBoldFg->c, phone);
-	line(normal, st::windowSubTextFg->c, id);
+	if (lines >= 3) {
+		line(normal, st::windowBoldFg->c, phone);
+	}
+	if (lines >= 4) {
+		line(normal, st::windowSubTextFg->c, id);
+	}
 }
 
 
@@ -6876,6 +6974,160 @@ private:
 
 };
 
+// ggtg: the cells of the optional columns (registration, age, device, 2FA,
+// SpamBot, sessions, last check, Premium). Everything is read from what the
+// app already holds, nothing here goes to the network: the sessions count
+// and the device are known once the account has loaded its session list.
+struct ExtraCellsCache {
+	crl::time at = 0;
+	QString device;
+	int sessions = 0;
+};
+
+struct ExtraCell {
+	QString text;
+	QColor color;
+	double key = 0; // for sorting
+};
+
+[[nodiscard]] QString AgoText(qint64 time) {
+	if (time <= 0) {
+		return u"—"_q;
+	}
+	const auto delta = QDateTime::currentSecsSinceEpoch() - time;
+	if (delta < 60) {
+		return u"только что"_q;
+	} else if (delta < 3600) {
+		return u"%1 мин назад"_q.arg(delta / 60);
+	} else if (delta < 86400) {
+		return u"%1 ч назад"_q.arg(delta / 3600);
+	}
+	return QDateTime::fromSecsSinceEpoch(time).toString(u"dd.MM.yy"_q);
+}
+
+[[nodiscard]] ExtraCell ExtraCellFor(
+		TableLayout::Col id,
+		not_null<Main::Account*> account,
+		UserData *user,
+		ExtraCellsCache &cache) {
+	namespace TL = TableLayout;
+	const auto none = u"—"_q;
+	const auto sub = st::windowSubTextFg->c;
+	const auto bold = st::windowBoldFg->c;
+	if (!cache.at || (crl::now() - cache.at) > 5000) {
+		cache.at = crl::now();
+		cache.device = QString();
+		cache.sessions = 0;
+		if (account->sessionExists()) {
+			const auto &auth = account->session().api().authorizations();
+			cache.sessions = auth.total();
+			const auto list = auth.list();
+			for (const auto &entry : list) {
+				if (entry.hash == 0) {
+					cache.device = entry.name.simplified();
+					break;
+				}
+			}
+		}
+	}
+	const auto spam = user
+		? Data::FindAccountSpamStatus(user->id.value)
+		: std::optional<Data::AccountSpamStatus>();
+	switch (id) {
+	case TL::Col::Registered: {
+		const auto text = user
+			? Ggtg::EstimateIdDate(user->id.value)
+			: QString();
+		const auto time = user ? Ggtg::EstimateIdTime(user->id.value) : 0;
+		return { text.isEmpty() ? none : text, bold, double(time) };
+	}
+	case TL::Col::Age: {
+		const auto time = user ? Ggtg::EstimateIdTime(user->id.value) : 0;
+		const auto text = (time > 0)
+			? Ggtg::FormatAccountAge(
+				time,
+				QDateTime::currentSecsSinceEpoch())
+			: QString();
+		return { text.isEmpty() ? none : text, bold, -double(time) };
+	}
+	case TL::Col::Device:
+		return {
+			cache.device.isEmpty() ? none : cache.device,
+			cache.device.isEmpty() ? sub : bold,
+			0 };
+	case TL::Col::TwoFa: {
+		const auto has = !account->twoFactorPassword().isEmpty();
+		return { has ? u"Задан"_q : none, has ? bold : sub, has ? 1. : 0. };
+	}
+	case TL::Col::SpamRating: {
+		if (!spam) {
+			return { none, sub, -1 };
+		}
+		switch (spam->state) {
+		case Data::AccountSpamState::Clear:
+			return { u"Чисто"_q, QColor(52, 199, 89), 0 };
+		case Data::AccountSpamState::Temporary:
+			return { u"Временный"_q, QColor(255, 159, 10), 1 };
+		case Data::AccountSpamState::Permanent:
+			return { u"Постоянный"_q, QColor(255, 69, 58), 2 };
+		}
+		return { none, sub, -1 };
+	}
+	case TL::Col::Sessions:
+		return {
+			cache.sessions > 0 ? QString::number(cache.sessions) : none,
+			cache.sessions > 0 ? bold : sub,
+			double(cache.sessions) };
+	case TL::Col::LastCheck: {
+		const auto at = spam ? spam->checkedAt : 0;
+		return { AgoText(at), at ? bold : sub, double(at) };
+	}
+	case TL::Col::Premium: {
+		const auto premium = user && user->isPremium();
+		return {
+			premium ? u"Да"_q : none,
+			premium ? QColor(10, 132, 255) : sub,
+			premium ? 1. : 0. };
+	}
+	default: break;
+	}
+	return { QString(), sub, 0 };
+}
+
+void PaintExtraCells(
+		QPainter &p,
+		const ManagerColumns &columns,
+		int height,
+		not_null<Main::Account*> account,
+		UserData *user,
+		ExtraCellsCache &cache) {
+	namespace TL = TableLayout;
+	p.setFont(st::normalFont);
+	for (const auto id : {
+		TL::Col::Registered,
+		TL::Col::Age,
+		TL::Col::Device,
+		TL::Col::TwoFa,
+		TL::Col::SpamRating,
+		TL::Col::Sessions,
+		TL::Col::LastCheck,
+		TL::Col::Premium }) {
+		const auto w = columns.w[int(id)];
+		if (w <= 0) {
+			continue;
+		}
+		const auto cell = ExtraCellFor(id, account, user, cache);
+		p.setPen(cell.color);
+		const auto centered = (id == TL::Col::TwoFa)
+			|| (id == TL::Col::Sessions)
+			|| (id == TL::Col::Premium);
+		p.drawText(
+			QRect(columns.x[int(id)], 0, w, height),
+			(centered ? Qt::AlignHCenter : Qt::AlignLeft) | Qt::AlignVCenter,
+			st::normalFont->elided(cell.text, w));
+	}
+}
+
 enum class AccountSortMode {
 	NumberAsc,
 	NumberDesc,
@@ -6892,7 +7144,15 @@ enum class AccountSortMode {
 	StatusWorst,
 	SmsDesc,
 	SmsAsc,
+	// ggtg: the optional columns, which one is in ManagerSortColumn().
+	ColumnAsc,
+	ColumnDesc,
 };
+
+[[nodiscard]] TableLayout::Col &ManagerSortColumn() {
+	static auto result = TableLayout::Col::Registered;
+	return result;
+}
 
 [[nodiscard]] inline int AccountPersistentIndex(not_null<Main::Account*> account) {
 	for (const auto &entry : Core::App().domain().accounts()) {
@@ -6911,10 +7171,12 @@ public:
 		not_null<QWidget*> parent,
 		Fn<void(bool)> onSelectAll,
 		Fn<void(AccountSortMode)> onSort,
-		Fn<void(QPoint)> onContextMenu)
+		Fn<void(QPoint)> onContextMenu,
+		Fn<void(bool)> onLayout = nullptr)
 	: RpWidget(parent.get())
 	, _onSort(std::move(onSort))
-	, _onContextMenu(std::move(onContextMenu)) {
+	, _onContextMenu(std::move(onContextMenu))
+	, _onLayout(std::move(onLayout)) {
 		setMouseTracking(true);
 		const auto columns = ComputeManagerColumns();
 		resize(columns.totalWidth, style::ConvertScale(34));
@@ -6962,22 +7224,81 @@ public:
 		update();
 	}
 
+	// The layout changed (columns, widths, sideways scroll).
+	void relayout() {
+		const auto columns = ComputeManagerColumns();
+		resize(columns.totalWidth, height());
+		_checkbox->moveToLeft(
+			columns.check + style::ConvertScale(5) + PinnedShift(),
+			(height() - _checkbox->height()) / 2);
+		update();
+	}
+
 protected:
-	void mousePressEvent(QMouseEvent *e) override {
-		if (e->button() == Qt::RightButton) {
-			if (_onContextMenu) {
-				_onContextMenu(e->globalPos());
+	using Col = TableLayout::Col;
+
+	// x in the table's own coordinates: the pinned part, drawn shifted
+	// by the sideways scroll, is hit where it is seen.
+	[[nodiscard]] int unshifted(int x) const {
+		const auto shift = PinnedShift();
+		const auto columns = ComputeManagerColumns();
+		if (shift > 0 && x >= shift && x < shift + columns.pinnedRight) {
+			return x - shift;
+		}
+		return x;
+	}
+
+	[[nodiscard]] std::optional<Col> columnAt(int x) const {
+		const auto columns = ComputeManagerColumns();
+		x = unshifted(x);
+		for (const auto id : TableLayout::Shown(ManagerLayout())) {
+			const auto left = (id == Col::Account)
+				? (columns.x[int(id)] - columns.photoWidth - style::ConvertScale(8))
+				: columns.x[int(id)];
+			const auto right = columns.x[int(id)] + columns.w[int(id)];
+			if (x >= left && x < right) {
+				return id;
 			}
+		}
+		return std::nullopt;
+	}
+
+	// The border at the right of a resizable column under `x`.
+	[[nodiscard]] std::optional<Col> edgeAt(int x) const {
+		const auto columns = ComputeManagerColumns();
+		const auto shift = PinnedShift();
+		const auto slop = style::ConvertScale(4);
+		const auto gap = style::ConvertScale(8);
+		for (const auto id : TableLayout::Shown(ManagerLayout())) {
+			if (TableLayout::IsTail(id)) {
+				continue;
+			}
+			auto edge = columns.x[int(id)] + columns.w[int(id)] + gap / 2;
+			if (shift > 0 && columns.x[int(id)] < columns.pinnedRight) {
+				edge += shift;
+			}
+			if (std::abs(x - edge) <= slop) {
+				return id;
+			}
+		}
+		return std::nullopt;
+	}
+
+	[[nodiscard]] static bool Movable(Col id) {
+		return !TableLayout::IsHead(id) && !TableLayout::IsTail(id);
+	}
+
+	void sortBy(Col id) {
+		if (!_onSort) {
 			return;
 		}
-		if (e->button() != Qt::LeftButton || !_onSort) {
-			return;
-		}
-		if (_numberRect.contains(e->pos())) {
+		switch (id) {
+		case Col::Number:
 			_onSort((_sortMode == AccountSortMode::NumberAsc)
 				? AccountSortMode::NumberDesc
 				: AccountSortMode::NumberAsc);
-		} else if (_accountRect.contains(e->pos())) {
+			break;
+		case Col::Account:
 			if (_sortMode == AccountSortMode::NameAsc) {
 				_onSort(AccountSortMode::NameDesc);
 			} else if (_sortMode == AccountSortMode::NameDesc) {
@@ -6993,7 +7314,8 @@ protected:
 			} else {
 				_onSort(AccountSortMode::NameAsc);
 			}
-		} else if (_folderRect.contains(e->pos())) {
+			break;
+		case Col::Folder:
 			if (_sortMode == AccountSortMode::FolderAsc) {
 				_onSort(AccountSortMode::FolderDesc);
 			} else if (_sortMode == AccountSortMode::FolderDesc) {
@@ -7001,11 +7323,13 @@ protected:
 			} else {
 				_onSort(AccountSortMode::FolderAsc);
 			}
-		} else if (_proxyRect.contains(e->pos())) {
+			break;
+		case Col::Proxy:
 			_onSort((_sortMode == AccountSortMode::ProxyAsc)
 				? AccountSortMode::NumberAsc
 				: AccountSortMode::ProxyAsc);
-		} else if (_statusRect.contains(e->pos())) {
+			break;
+		case Col::Status:
 			if (_sortMode == AccountSortMode::StatusBest) {
 				_onSort(AccountSortMode::StatusWorst);
 			} else if (_sortMode == AccountSortMode::StatusWorst) {
@@ -7013,7 +7337,8 @@ protected:
 			} else {
 				_onSort(AccountSortMode::StatusBest);
 			}
-		} else if (_smsRect.contains(e->pos())) {
+			break;
+		case Col::Sms24h:
 			if (_sortMode == AccountSortMode::SmsDesc) {
 				_onSort(AccountSortMode::SmsAsc);
 			} else if (_sortMode == AccountSortMode::SmsAsc) {
@@ -7021,54 +7346,150 @@ protected:
 			} else {
 				_onSort(AccountSortMode::SmsDesc);
 			}
+			break;
+		case Col::Open:
+		case Col::Trash:
+			break;
+		default: {
+			// The optional columns: ascending, descending, back to №.
+			const auto same = (ManagerSortColumn() == id);
+			ManagerSortColumn() = id;
+			if (same && _sortMode == AccountSortMode::ColumnAsc) {
+				_onSort(AccountSortMode::ColumnDesc);
+			} else if (same && _sortMode == AccountSortMode::ColumnDesc) {
+				_onSort(AccountSortMode::NumberAsc);
+			} else {
+				_onSort(AccountSortMode::ColumnAsc);
+			}
+		} break;
 		}
 	}
 
-	void mouseMoveEvent(QMouseEvent *e) override {
+	void mousePressEvent(QMouseEvent *e) override {
+		if (e->button() == Qt::RightButton) {
+			if (_onContextMenu) {
+				_onContextMenu(e->globalPos());
+			}
+			return;
+		}
+		if (e->button() != Qt::LeftButton) {
+			return;
+		}
 		const auto columns = ComputeManagerColumns();
-		_numberRect = QRect(columns.number, 0, columns.numberWidth, height());
-		_accountRect = QRect(columns.account, 0, columns.accountWidth, height());
-		_folderRect = QRect(columns.folder, 0, columns.folderWidth, height());
-		_proxyRect = QRect(columns.proxy, 0, columns.proxyWidth, height());
-		_statusRect = QRect(columns.status, 0, columns.statusWidth, height());
-		_smsRect = QRect(columns.sms, 0, columns.smsWidth, height());
+		if (const auto edge = edgeAt(e->pos().x())) {
+			_drag = Drag::Resize;
+			_dragCol = *edge;
+			_dragFrom = e->pos().x();
+			_dragWidth = columns.w[int(*edge)];
+			return;
+		}
+		const auto checkMaxX = columns.check + style::ConvertScale(28)
+			+ PinnedShift();
+		if (e->pos().x() < checkMaxX) {
+			return;
+		}
+		if (const auto id = columnAt(e->pos().x())) {
+			_drag = Drag::Press;
+			_dragCol = *id;
+			_dragFrom = e->pos().x();
+			_dropBefore = std::nullopt;
+		}
+	}
 
-		const auto overStatus = _statusRect.contains(e->pos());
-		const auto isSortable = _numberRect.contains(e->pos())
-			|| _accountRect.contains(e->pos())
-			|| _folderRect.contains(e->pos())
-			|| _proxyRect.contains(e->pos())
-			|| overStatus
-			|| _smsRect.contains(e->pos());
+	void mouseDoubleClickEvent(QMouseEvent *e) override {
+		if (e->button() == Qt::LeftButton) {
+			if (const auto edge = edgeAt(e->pos().x())) {
+				// Double click on a border: back to the default width.
+				ManagerLayout().width[int(*edge)] = 0;
+				_drag = Drag::None;
+				if (_onLayout) {
+					_onLayout(true);
+				}
+				return;
+			}
+		}
+		mousePressEvent(e);
+	}
+
+	void mouseMoveEvent(QMouseEvent *e) override {
+		const auto x = e->pos().x();
+		if (_drag == Drag::Resize) {
+			const auto ratio = style::ConvertScale(100) / 100.;
+			const auto px = _dragWidth + (x - _dragFrom);
+			TableLayout::SetWidth(
+				ManagerLayout(),
+				_dragCol,
+				int(std::lround(px / ratio)));
+			if (_onLayout) {
+				_onLayout(false);
+			}
+			return;
+		}
+		if (_drag == Drag::Press
+			&& Movable(_dragCol)
+			&& std::abs(x - _dragFrom) > style::ConvertScale(6)) {
+			_drag = Drag::Move;
+		}
+		if (_drag == Drag::Move) {
+			updateDropTarget(x);
+			setCursor(style::cur_pointer);
+			update();
+			return;
+		}
+		const auto columns = ComputeManagerColumns();
+		const auto edge = edgeAt(x);
+		const auto id = columnAt(x);
+		const auto checkMaxX = columns.check + style::ConvertScale(28)
+			+ PinnedShift();
+		if (edge) {
+			setCursor(style::cur_sizehor);
+			setToolTip(u"Потяните, чтобы изменить ширину. Двойной клик: по умолчанию"_q);
+			Ui::Tooltip::Hide();
+			return;
+		}
+		const auto isSortable = id
+			&& (*id != Col::Open)
+			&& (*id != Col::Trash)
+			&& (x >= checkMaxX);
 		setCursor(isSortable ? style::cur_pointer : style::cur_default);
-
-		if (overStatus && _tooltip) {
+		if (id && *id == Col::Status && _tooltip) {
 			Ui::Tooltip::Show(400, this);
 		} else {
 			Ui::Tooltip::Hide();
 		}
-
-		const auto checkMaxX = columns.check + style::ConvertScale(28);
-		if (e->pos().x() < checkMaxX) {
+		if (x < checkMaxX) {
 			setToolTip(u"Выбрать все / снять выделение"_q);
-		} else if (_numberRect.contains(e->pos())) {
-			setToolTip(u"Порядковый номер аккаунта (клик: 1→9 / 9→1, ПКМ: меню)"_q);
-		} else if (columns.photoWidth > 0 && e->pos().x() < columns.photo + columns.photoWidth) {
-			setToolTip(u"Аватар профиля"_q);
-		} else if (_accountRect.contains(e->pos())) {
-			setToolTip(u"Аккаунт: имя, @username, телефон (клик: сортировка, ПКМ: меню)"_q);
-		} else if (_folderRect.contains(e->pos())) {
-			setToolTip(u"Папка аккаунта (клик: сортировка по папке, ПКМ: меню)"_q);
-		} else if (_proxyRect.contains(e->pos())) {
-			setToolTip(u"Прокси-сервер (клик: сортировка, ПКМ: меню)"_q);
-		} else if (overStatus) {
-			setToolTip(u"Статус SpamBot (клик: сортировка, ПКМ: меню)"_q);
-		} else if (_smsRect.contains(e->pos())) {
-			setToolTip(u"Отправлено сообщений за 24 ч (клик: сортировка, ПКМ: меню)"_q);
-		} else if (columns.openWidth > 0 && e->pos().x() < columns.open + columns.openWidth) {
-			setToolTip(u"Открыть аккаунт (переключиться)"_q);
+		} else if (id) {
+			setToolTip(describe(*id));
 		} else {
-			setToolTip(u"Действия с аккаунтом (корзина / удаление)"_q);
+			setToolTip(QString());
+		}
+	}
+
+	void mouseReleaseEvent(QMouseEvent *e) override {
+		const auto was = _drag;
+		_drag = Drag::None;
+		if (e->button() != Qt::LeftButton) {
+			return;
+		}
+		if (was == Drag::Resize) {
+			if (_onLayout) {
+				_onLayout(true);
+			}
+		} else if (was == Drag::Move) {
+			if (_dropBefore) {
+				TableLayout::MoveBefore(
+					ManagerLayout(),
+					_dragCol,
+					*_dropBefore);
+				_dropBefore = std::nullopt;
+				if (_onLayout) {
+					_onLayout(true);
+				}
+			}
+			update();
+		} else if (was == Drag::Press) {
+			sortBy(_dragCol);
 		}
 	}
 
@@ -7076,126 +7497,204 @@ protected:
 		Ui::Tooltip::Hide();
 	}
 
+	[[nodiscard]] QString describe(Col id) const {
+		const auto tail = u" (клик: сортировка, перетащить: порядок)"_q;
+		switch (id) {
+		case Col::Number: return u"Порядковый номер аккаунта (клик: 1→9 / 9→1)"_q;
+		case Col::Account: return u"Аккаунт: имя, @username, телефон, ID (клик: сортировка)"_q;
+		case Col::Folder: return u"Папка аккаунта"_q + tail;
+		case Col::Proxy: return u"Прокси-сервер"_q + tail;
+		case Col::Status: return u"Статус SpamBot"_q + tail;
+		case Col::Sms24h: return u"Отправлено сообщений за 24 ч"_q + tail;
+		case Col::Registered: return u"Дата регистрации, оценка по ID"_q + tail;
+		case Col::Age: return u"Возраст аккаунта, оценка по ID"_q + tail;
+		case Col::Device: return u"Устройство текущей сессии"_q + tail;
+		case Col::TwoFa: return u"Облачный пароль (2FA) сохранён в программе"_q + tail;
+		case Col::SpamRating: return u"Последний вердикт SpamBot"_q + tail;
+		case Col::Sessions: return u"Число активных сессий"_q + tail;
+		case Col::LastCheck: return u"Когда проверяли SpamBot"_q + tail;
+		case Col::Premium: return u"Telegram Premium"_q + tail;
+		case Col::Open: return u"Открыть аккаунт (переключиться)"_q;
+		case Col::Trash: return u"Действия с аккаунтом (корзина / удаление)"_q;
+		}
+		return QString();
+	}
+
+	// Where a dragged header would land: before the column the cursor is
+	// over (left half) or before the next one (right half).
+	void updateDropTarget(int x) {
+		const auto columns = ComputeManagerColumns();
+		x = unshifted(x);
+		_dropBefore = std::nullopt;
+		const auto shown = TableLayout::Shown(ManagerLayout());
+		for (auto i = 0; i != int(shown.size()); ++i) {
+			const auto id = shown[i];
+			if (TableLayout::IsHead(id)) {
+				continue;
+			}
+			const auto mid = columns.x[int(id)] + columns.w[int(id)] / 2;
+			if (x < mid || TableLayout::IsTail(id)) {
+				_dropBefore = id;
+				break;
+			}
+		}
+		if (_dropBefore == _dragCol) {
+			_dropBefore = std::nullopt;
+		}
+		if (!_dropBefore) {
+			// Past the last movable one: the end of the middle.
+			_dropBefore = Col::Open;
+		}
+	}
+
+	[[nodiscard]] QString titleFor(Col id) const {
+		const auto arrow = [&](bool asc, bool desc) {
+			return asc ? u" ▲"_q : desc ? u" ▼"_q : QString();
+		};
+		const auto base = TableLayout::Str(TableLayout::Info(id).title);
+		switch (id) {
+		case Col::Number:
+			return base + arrow(
+				_sortMode == AccountSortMode::NumberAsc,
+				_sortMode == AccountSortMode::NumberDesc);
+		case Col::Account:
+			if (_sortMode == AccountSortMode::NameAsc) return u"Имя ▲"_q;
+			if (_sortMode == AccountSortMode::NameDesc) return u"Имя ▼"_q;
+			if (_sortMode == AccountSortMode::UsernameAsc) return u"Юзернейм ▲"_q;
+			if (_sortMode == AccountSortMode::UsernameDesc) return u"Юзернейм ▼"_q;
+			if (_sortMode == AccountSortMode::PhoneAsc) return u"Телефон ▲"_q;
+			if (_sortMode == AccountSortMode::PhoneDesc) return u"Телефон ▼"_q;
+			return base;
+		case Col::Folder:
+			return base + arrow(
+				_sortMode == AccountSortMode::FolderAsc,
+				_sortMode == AccountSortMode::FolderDesc);
+		case Col::Proxy:
+			return base + arrow(_sortMode == AccountSortMode::ProxyAsc, false);
+		case Col::Status:
+			return base + arrow(
+				_sortMode == AccountSortMode::StatusBest,
+				_sortMode == AccountSortMode::StatusWorst);
+		case Col::Sms24h:
+			return base + arrow(
+				_sortMode == AccountSortMode::SmsAsc,
+				_sortMode == AccountSortMode::SmsDesc);
+		case Col::Trash:
+			return _trashMode ? u"Действия"_q : base;
+		case Col::Open:
+			return base;
+		default:
+			if (ManagerSortColumn() == id) {
+				return base + arrow(
+					_sortMode == AccountSortMode::ColumnAsc,
+					_sortMode == AccountSortMode::ColumnDesc);
+			}
+			return base;
+		}
+	}
+
+	void paintLabels(QPainter &p, const ManagerColumns &columns, bool headOnly) {
+		p.setFont(st::semiboldFont);
+		p.setPen(st::windowSubTextFg);
+		for (const auto id : TableLayout::Shown(ManagerLayout())) {
+			if (headOnly && !TableLayout::IsHead(id)) {
+				continue;
+			}
+			const auto x = columns.x[int(id)];
+			const auto w = columns.w[int(id)];
+			if (w <= 0) {
+				continue;
+			}
+			const auto align = (id == Col::Number
+				|| id == Col::Status
+				|| id == Col::Sms24h
+				|| id == Col::Open
+				|| id == Col::Trash
+				|| id == Col::TwoFa
+				|| id == Col::Sessions
+				|| id == Col::Premium)
+				? Qt::AlignHCenter
+				: Qt::AlignLeft;
+			if (_drag == Drag::Move && id == _dragCol) {
+				auto tint = st::windowBgActive->c;
+				tint.setAlphaF(0.16);
+				p.fillRect(QRect(x - style::ConvertScale(4), 0, w + style::ConvertScale(8), height()), tint);
+			}
+			if (id == Col::Number && _selectedCount > 0) {
+				const auto text = QString::number(_selectedCount);
+				const auto tx = columns.check + style::ConvertScale(30);
+				p.setPen(st::windowActiveTextFg);
+				p.drawText(
+					QRect(
+						tx,
+						0,
+						std::max(
+							columns.account - tx - style::ConvertScale(4),
+							st::semiboldFont->width(text)),
+						height()),
+					Qt::AlignLeft | Qt::AlignVCenter,
+					text);
+				p.setPen(st::windowSubTextFg);
+				continue;
+			}
+			p.drawText(
+				QRect(x, 0, w, height()),
+				align | Qt::AlignVCenter,
+				st::semiboldFont->elided(titleFor(id), w));
+		}
+	}
+
 	void paintEvent(QPaintEvent *e) override {
 		auto p = QPainter(this);
 		const auto columns = ComputeManagerColumns();
-		_numberRect = QRect(columns.number, 0, columns.numberWidth, height());
-		_accountRect = QRect(columns.account, 0, columns.accountWidth, height());
-		_folderRect = QRect(columns.folder, 0, columns.folderWidth, height());
-		_proxyRect = QRect(columns.proxy, 0, columns.proxyWidth, height());
-		_statusRect = QRect(columns.status, 0, columns.statusWidth, height());
-		_smsRect = QRect(columns.sms, 0, columns.smsWidth, height());
-
 		p.fillRect(
 			0,
 			height() - st::lineWidth,
 			width(),
 			st::lineWidth,
 			st::shadowFg);
-		p.setFont(st::semiboldFont);
-		p.setPen(st::windowSubTextFg);
-		const auto label = [&](int x, int w, const QString &text, int align) {
-			if (w > 0) {
-				p.drawText(
-					QRect(x, 0, w, height()),
-					align | Qt::AlignVCenter,
-					text);
-			}
-		};
-
-		QString numberTitle = u"№"_q;
-		if (_sortMode == AccountSortMode::NumberAsc) {
-			numberTitle += u" ▲"_q;
-		} else if (_sortMode == AccountSortMode::NumberDesc) {
-			numberTitle += u" ▼"_q;
+		paintLabels(p, columns, false);
+		const auto shift = PinnedShift();
+		if (shift > 0) {
+			p.save();
+			p.setClipRect(QRect(shift, 0, columns.pinnedRight, height()));
+			p.fillRect(0, 0, columns.pinnedRight + shift, height(), st::boxBg);
+			p.fillRect(
+				0,
+				height() - st::lineWidth,
+				columns.pinnedRight + shift,
+				st::lineWidth,
+				st::shadowFg);
+			p.translate(shift, 0);
+			paintLabels(p, columns, true);
+			p.restore();
 		}
-
-		QString accountTitle = u"Аккаунт"_q;
-		if (_sortMode == AccountSortMode::NameAsc) {
-			accountTitle = u"Имя ▲"_q;
-		} else if (_sortMode == AccountSortMode::NameDesc) {
-			accountTitle = u"Имя ▼"_q;
-		} else if (_sortMode == AccountSortMode::UsernameAsc) {
-			accountTitle = u"Юзернейм ▲"_q;
-		} else if (_sortMode == AccountSortMode::UsernameDesc) {
-			accountTitle = u"Юзернейм ▼"_q;
-		} else if (_sortMode == AccountSortMode::PhoneAsc) {
-			accountTitle = u"Телефон ▲"_q;
-		} else if (_sortMode == AccountSortMode::PhoneDesc) {
-			accountTitle = u"Телефон ▼"_q;
+		if (_drag == Drag::Move && _dropBefore) {
+			const auto x = (*_dropBefore == Col::Open)
+				? (columns.x[int(Col::Open)] - style::ConvertScale(4))
+				: (columns.x[int(*_dropBefore)] - style::ConvertScale(4));
+			p.fillRect(
+				QRect(x - 1, style::ConvertScale(4), style::ConvertScale(2), height() - style::ConvertScale(8)),
+				st::windowBgActive);
 		}
-
-		QString folderTitle = u"Папка"_q;
-		if (_sortMode == AccountSortMode::FolderAsc) {
-			folderTitle += u" ▲"_q;
-		} else if (_sortMode == AccountSortMode::FolderDesc) {
-			folderTitle += u" ▼"_q;
-		}
-
-		QString proxyTitle = u"Прокси"_q;
-		if (_sortMode == AccountSortMode::ProxyAsc) {
-			proxyTitle += u" ▲"_q;
-		}
-
-		QString statusTitle = u"Статус"_q;
-		if (_sortMode == AccountSortMode::StatusBest) {
-			statusTitle += u" ▲"_q;
-		} else if (_sortMode == AccountSortMode::StatusWorst) {
-			statusTitle += u" ▼"_q;
-		}
-
-		QString smsTitle = u"За 24 ч"_q;
-		if (_sortMode == AccountSortMode::SmsDesc) {
-			smsTitle += u" ▼"_q;
-		} else if (_sortMode == AccountSortMode::SmsAsc) {
-			smsTitle += u" ▲"_q;
-		}
-
-		if (_selectedCount > 0) {
-			const auto text = QString::number(_selectedCount);
-			const auto x = columns.check + style::ConvertScale(30);
-			p.setPen(st::windowActiveTextFg);
-			p.drawText(
-				QRect(
-					x,
-					0,
-					std::max(
-						columns.account - x - style::ConvertScale(4),
-						st::semiboldFont->width(text)),
-					height()),
-				Qt::AlignLeft | Qt::AlignVCenter,
-				text);
-			p.setPen(st::windowSubTextFg);
-		} else {
-			label(columns.number, columns.numberWidth, numberTitle, Qt::AlignHCenter);
-		}
-		label(columns.account, columns.accountWidth, accountTitle, Qt::AlignLeft);
-		label(columns.folder, columns.folderWidth, folderTitle, Qt::AlignLeft);
-		label(columns.proxy, columns.proxyWidth, proxyTitle, Qt::AlignLeft);
-		label(columns.status, columns.statusWidth, statusTitle, Qt::AlignHCenter);
-		label(columns.sms, columns.smsWidth, smsTitle, Qt::AlignHCenter);
-		label(columns.open, columns.openWidth, u"Открыть"_q, Qt::AlignHCenter);
-		label(
-			columns.trash,
-			columns.trashWidth,
-			_trashMode ? u"Действия"_q : u"Корзина"_q,
-			Qt::AlignHCenter);
 	}
 
 private:
+	enum class Drag { None, Press, Resize, Move };
+
 	Fn<void(AccountSortMode)> _onSort;
 	Fn<void(QPoint)> _onContextMenu;
+	Fn<void(bool)> _onLayout;
 	ManagerCheck *_checkbox = nullptr;
 	Fn<QString()> _tooltip;
 	AccountSortMode _sortMode = AccountSortMode::NumberAsc;
 	bool _trashMode = false;
 	int _selectedCount = 0;
-	QRect _numberRect;
-	QRect _accountRect;
-	QRect _folderRect;
-	QRect _proxyRect;
-	QRect _statusRect;
-	QRect _smsRect;
+	Drag _drag = Drag::None;
+	Col _dragCol = Col::Number;
+	int _dragFrom = 0;
+	int _dragWidth = 0;
+	std::optional<Col> _dropBefore;
 
 };
 
@@ -7280,6 +7779,18 @@ public:
 		) | rpl::on_next([=](uint64) {
 			update();
 		}, lifetime());
+	}
+
+	// The table's layout changed (columns, density, sideways scroll).
+	void relayout() {
+		const auto columns = ComputeManagerColumns();
+		resize(columns.totalWidth, columns.rowHeight);
+		const auto shift = PinnedShift();
+		_checkbox->moveToLeft(
+			columns.check + style::ConvertScale(5) + shift,
+			(columns.rowHeight - _checkbox->height()) / 2);
+		_checkAreaRight = columns.check + style::ConvertScale(30) + shift;
+		update();
 	}
 
 	void setSelected(bool selected) {
@@ -7439,75 +7950,99 @@ protected:
 				style::ConvertScale(6),
 				style::ConvertScale(6));
 		};
-		if (_hoverZone == HoverZone::Account) {
-			paintHoverHighlight(_accountRect);
-		}
-
-		p.setFont(st::boxTitleFont);
-		p.setPen(st::windowBoldFg);
-		if (columns.numberWidth > 0) {
-			p.drawText(
-				QRect(columns.number, 0, columns.numberWidth, baseHeight),
-				Qt::AlignHCenter | Qt::AlignVCenter,
-				QString::number(_index));
-		}
-
-		if (user && columns.photoWidth > 0) {
-			const auto size = style::ConvertScale(50);
-			const auto photoY = (baseHeight - size) / 2;
-			_photoRect = QRect(columns.photo, photoY, size, size);
-			user->paintUserpicLeft(
-				p,
-				_view,
-				columns.photo,
-				photoY,
-				width(),
-				size);
-			if (_hoverZone == HoverZone::Photo) {
-				auto hq = PainterHighQualityEnabler(p);
-				p.setBrush(Qt::NoBrush);
-				auto ring = st::windowBgActive->c;
-				ring.setAlphaF(0.45);
-				p.setPen(QPen(ring, style::ConvertScale(2)));
-				p.drawEllipse(_photoRect.adjusted(
-					style::ConvertScale(1),
-					style::ConvertScale(1),
-					-style::ConvertScale(1),
-					-style::ConvertScale(1)));
+		// The pinned part (№, photo, account) is painted by this: in place,
+		// and once more over the scrolled table shifted by `dx`, so it
+		// stays in view (the pinned first column).
+		const auto paintLeft = [&](int dx) {
+			if (dx) {
+				p.save();
+				p.setClipRect(QRect(dx, 0, columns.pinnedRight, height()));
+				p.fillRect(0, 0, columns.pinnedRight, height(), st::boxBg);
+				if (_selected) {
+					auto tint = st::windowBgActive->c;
+					tint.setAlphaF(0.14);
+					p.fillRect(0, 0, columns.pinnedRight, height(), tint);
+				} else if (isOver()) {
+					p.fillRect(0, 0, columns.pinnedRight, height(), st::windowBgOver);
+				}
+				p.fillRect(0, height() - st::lineWidth, columns.pinnedRight, st::lineWidth, st::shadowFg);
+				p.translate(dx, 0);
 			}
-		} else {
-			_photoRect = QRect();
-		}
+			if (_hoverZone == HoverZone::Account) {
+				paintHoverHighlight(QRect(columns.account, 0, columns.accountWidth, baseHeight));
+			}
 
-		auto name = user ? user->name() : u"(нет сессии)"_q;
-		if (name.isEmpty()) {
-			name = u"Без имени"_q;
-		}
-		if (_current) {
-			name += u" (текущий)"_q;
-		}
-		const auto username = user ? user->username() : QString();
-		auto phone = user ? user->phone() : QString();
-		if (!phone.isEmpty() && !phone.startsWith('+')) {
-			phone = '+' + phone;
-		}
-		PaintAccountCell(
-			p,
-			columns.account,
-			columns.accountWidth,
-			baseHeight,
-			name,
-			username.isEmpty() ? u"@no_user"_q : (u"@"_q + username),
-			username.isEmpty() ? st::windowSubTextFg->c : QColor(56, 189, 248),
-			phone.isEmpty() ? u"—"_q : phone,
-			user ? u"ID "_q + QString::number(user->id.value) : QString(),
-			user,
-			&_premiumBadge,
-			[=] { update(); });
-		// Click anywhere on this cell to edit name/@username - see
-		// ShowEditAccountBox.
-		_accountRect = QRect(
-			columns.account, 0, columns.accountWidth, baseHeight);
+			p.setFont(st::boxTitleFont);
+			p.setPen(st::windowBoldFg);
+			if (columns.numberWidth > 0) {
+				p.drawText(
+					QRect(columns.number, 0, columns.numberWidth, baseHeight),
+					Qt::AlignHCenter | Qt::AlignVCenter,
+					QString::number(_index));
+			}
+
+			if (user && columns.photoWidth > 0) {
+				const auto size = columns.photoSize;
+				const auto photoY = (baseHeight - size) / 2;
+				_photoRect = QRect(columns.photo + dx, photoY, size, size);
+				user->paintUserpicLeft(
+					p,
+					_view,
+					columns.photo,
+					photoY,
+					width(),
+					size);
+				if (_hoverZone == HoverZone::Photo) {
+					auto hq = PainterHighQualityEnabler(p);
+					p.setBrush(Qt::NoBrush);
+					auto ring = st::windowBgActive->c;
+					ring.setAlphaF(0.45);
+					p.setPen(QPen(ring, style::ConvertScale(2)));
+					p.drawEllipse(_photoRect.adjusted(
+						style::ConvertScale(1),
+						style::ConvertScale(1),
+						-style::ConvertScale(1),
+						-style::ConvertScale(1)));
+				}
+			} else {
+				_photoRect = QRect();
+			}
+
+			auto name = user ? user->name() : u"(нет сессии)"_q;
+			if (name.isEmpty()) {
+				name = u"Без имени"_q;
+			}
+			if (_current) {
+				name += u" (текущий)"_q;
+			}
+			const auto username = user ? user->username() : QString();
+			auto phone = user ? user->phone() : QString();
+			if (!phone.isEmpty() && !phone.startsWith('+')) {
+				phone = '+' + phone;
+			}
+			PaintAccountCell(
+				p,
+				columns.account,
+				columns.accountWidth,
+				baseHeight,
+				name,
+				username.isEmpty() ? u"@no_user"_q : (u"@"_q + username),
+				username.isEmpty() ? st::windowSubTextFg->c : QColor(56, 189, 248),
+				phone.isEmpty() ? u"—"_q : phone,
+				user ? u"ID "_q + QString::number(user->id.value) : QString(),
+				user,
+				&_premiumBadge,
+				[=] { update(); },
+				columns.accountLines);
+			// Click anywhere on this cell to edit name/@username - see
+			// ShowEditAccountBox.
+			_accountRect = QRect(
+				columns.account + dx, 0, columns.accountWidth, baseHeight);
+			if (dx) {
+				p.restore();
+			}
+		};
+		paintLeft(0);
 
 		_folderRect = PaintFolderCell(
 			p,
@@ -7628,6 +8163,13 @@ protected:
 					attention);
 			}
 		}
+
+		// The extra columns, then the pinned part over everything.
+		PaintExtraCells(p, columns, baseHeight, _account, user, _extra);
+		const auto shift = PinnedShift();
+		if (shift > 0) {
+			paintLeft(shift);
+		}
 	}
 
 private:
@@ -7651,6 +8193,7 @@ private:
 	QRect _openRect;
 	QRect _trashRect;
 	QRect _deleteRect;
+	ExtraCellsCache _extra;
 	HoverZone _hoverZone = HoverZone::None;
 
 };
@@ -7693,7 +8236,7 @@ protected:
 
 		// A disc in the status colour with "!" where the photo would be.
 		if (columns.photoWidth > 0) {
-			const auto size = style::ConvertScale(50);
+			const auto size = columns.photoSize;
 			auto fill = red;
 			fill.setAlphaF(0.2);
 			auto hq = PainterHighQualityEnabler(p);
@@ -7950,6 +8493,222 @@ private:
 // longer fit next to it, wrapping further if even one row of buttons
 // doesn't fit, the same reflow behaviour FolderCardsRow above already
 // uses for folder cards on a narrow window.
+// ggtg: the strip above the table, as in the reference (Pilar): the
+// «Колонки 5 из 13» button with the checkbox menu, the row density switch
+// («Удобная / Обычная / Компактная») and «Восстановить» (the defaults).
+class ManagerLayoutBar final : public Ui::RpWidget {
+public:
+	ManagerLayoutBar(
+		not_null<QWidget*> parent,
+		Fn<void(QPoint)> onColumns,
+		Fn<void()> onChanged)
+	: RpWidget(parent.get())
+	, _onColumns(std::move(onColumns))
+	, _onChanged(std::move(onChanged)) {
+		setMouseTracking(true);
+		resize(width(), style::ConvertScale(36));
+	}
+
+	void refresh() {
+		update();
+	}
+
+protected:
+	struct Rects {
+		QRect columns;
+		QRect segment[3];
+		QRect restore;
+	};
+
+	[[nodiscard]] Rects rects() const {
+		const auto h = style::ConvertScale(28);
+		const auto top = (height() - h) / 2;
+		const auto gap = style::ConvertScale(8);
+		const auto padding = style::ConvertScale(12);
+		const auto &font = st::normalFont;
+		auto result = Rects();
+		auto right = width();
+		const auto restoreW = font->width(u"Восстановить"_q) + 2 * padding;
+		result.restore = QRect(right - restoreW, top, restoreW, h);
+		right -= restoreW + gap;
+		const auto densities = {
+			TableLayout::Density::Comfortable,
+			TableLayout::Density::Normal,
+			TableLayout::Density::Compact };
+		auto total = 0;
+		auto widths = std::array<int, 3>();
+		auto i = 0;
+		for (const auto d : densities) {
+			widths[i] = font->width(TableLayout::DensityTitle(d)) + 2 * padding;
+			total += widths[i++];
+		}
+		auto x = right - total;
+		for (i = 0; i != 3; ++i) {
+			result.segment[i] = QRect(x, top, widths[i], h);
+			x += widths[i];
+		}
+		right -= total + gap;
+		const auto text = u"Колонки  "_q + TableLayout::CountText(ManagerLayout());
+		const auto colW = font->width(text) + 2 * padding + style::ConvertScale(16);
+		result.columns = QRect(right - colW, top, colW, h);
+		return result;
+	}
+
+	void paintEvent(QPaintEvent *e) override {
+		auto p = QPainter(this);
+		auto hq = PainterHighQualityEnabler(p);
+		const auto r = rects();
+		const auto &layout = ManagerLayout();
+		const auto line = st::shadowFg->c;
+		const auto radius = style::ConvertScale(8);
+		const auto outline = [&](QRect rect) {
+			p.setPen(QPen(line, st::lineWidth));
+			p.setBrush(Qt::NoBrush);
+			p.drawRoundedRect(QRectF(rect).adjusted(0.5, 0.5, -0.5, -0.5), radius, radius);
+		};
+		p.setFont(st::normalFont);
+
+		// «Колонки N из M» + chevron.
+		if (_hover == Hover::Columns) {
+			p.setPen(Qt::NoPen);
+			p.setBrush(st::windowBgOver);
+			p.drawRoundedRect(r.columns, radius, radius);
+		}
+		outline(r.columns);
+		p.setPen(st::windowBoldFg);
+		const auto title = u"Колонки"_q;
+		const auto padding = style::ConvertScale(12);
+		p.drawText(
+			QRect(r.columns.x() + padding, r.columns.y(), r.columns.width(), r.columns.height()),
+			Qt::AlignLeft | Qt::AlignVCenter,
+			title);
+		p.setPen(st::windowSubTextFg);
+		p.drawText(
+			QRect(
+				r.columns.x() + padding + st::normalFont->width(title + u"  "_q),
+				r.columns.y(),
+				r.columns.width(),
+				r.columns.height()),
+			Qt::AlignLeft | Qt::AlignVCenter,
+			TableLayout::CountText(layout));
+		{
+			const auto cx = r.columns.right() - padding;
+			const auto cy = r.columns.center().y();
+			const auto s = style::ConvertScale(3);
+			p.setPen(QPen(st::windowSubTextFg->c, style::ConvertScale(1.5)));
+			p.drawLine(cx - s, cy - s / 2, cx, cy + s / 2);
+			p.drawLine(cx, cy + s / 2, cx + s, cy - s / 2);
+		}
+
+		// Density: three segments in one rounded track.
+		const auto track = r.segment[0].united(r.segment[2]);
+		p.setPen(Qt::NoPen);
+		p.setBrush(st::windowBgOver);
+		p.drawRoundedRect(track, radius, radius);
+		const auto densities = {
+			TableLayout::Density::Comfortable,
+			TableLayout::Density::Normal,
+			TableLayout::Density::Compact };
+		auto i = 0;
+		for (const auto d : densities) {
+			const auto active = (layout.density == d);
+			const auto rect = r.segment[i].adjusted(2, 2, -2, -2);
+			if (active) {
+				p.setPen(Qt::NoPen);
+				p.setBrush(st::boxBg);
+				p.drawRoundedRect(rect, radius - 2, radius - 2);
+				p.setPen(QPen(line, st::lineWidth));
+				p.setBrush(Qt::NoBrush);
+				p.drawRoundedRect(rect, radius - 2, radius - 2);
+			}
+			p.setPen(active ? st::windowBoldFg : st::windowSubTextFg);
+			p.drawText(r.segment[i], Qt::AlignCenter, TableLayout::DensityTitle(d));
+			++i;
+		}
+
+		// «Восстановить»: live only when something differs from the defaults.
+		const auto changed = !TableLayout::IsDefault(layout);
+		if (changed && _hover == Hover::Restore) {
+			p.setPen(Qt::NoPen);
+			p.setBrush(st::windowBgOver);
+			p.drawRoundedRect(r.restore, radius, radius);
+		}
+		outline(r.restore);
+		p.setPen(changed ? st::windowActiveTextFg : st::windowSubTextFg);
+		p.drawText(r.restore, Qt::AlignCenter, u"Восстановить"_q);
+	}
+
+	enum class Hover { None, Columns, Segment, Restore };
+
+	[[nodiscard]] Hover hoverAt(QPoint pos) const {
+		const auto r = rects();
+		if (r.columns.contains(pos)) {
+			return Hover::Columns;
+		} else if (r.segment[0].united(r.segment[2]).contains(pos)) {
+			return Hover::Segment;
+		} else if (r.restore.contains(pos)
+			&& !TableLayout::IsDefault(ManagerLayout())) {
+			return Hover::Restore;
+		}
+		return Hover::None;
+	}
+
+	void mouseMoveEvent(QMouseEvent *e) override {
+		const auto hover = hoverAt(e->pos());
+		if (_hover != hover) {
+			_hover = hover;
+			setCursor(hover == Hover::None
+				? style::cur_default
+				: style::cur_pointer);
+			update();
+		}
+	}
+
+	void leaveEventHook(QEvent *e) override {
+		_hover = Hover::None;
+		update();
+	}
+
+	void mouseReleaseEvent(QMouseEvent *e) override {
+		if (e->button() != Qt::LeftButton) {
+			return;
+		}
+		const auto r = rects();
+		auto &layout = ManagerLayout();
+		if (r.columns.contains(e->pos())) {
+			if (_onColumns) {
+				_onColumns(mapToGlobal(r.columns.bottomLeft()));
+			}
+			return;
+		}
+		for (auto i = 0; i != 3; ++i) {
+			if (r.segment[i].contains(e->pos())) {
+				const auto d = TableLayout::Density(i);
+				if (layout.density != d) {
+					layout.density = d;
+					if (_onChanged) {
+						_onChanged();
+					}
+				}
+				return;
+			}
+		}
+		if (r.restore.contains(e->pos())
+			&& !TableLayout::IsDefault(layout)) {
+			layout = TableLayout::Defaults();
+			if (_onChanged) {
+				_onChanged();
+			}
+		}
+	}
+
+private:
+	Fn<void(QPoint)> _onColumns;
+	Fn<void()> _onChanged;
+	Hover _hover = Hover::None;
+
+};
+
 class SelectionBarRow final : public Ui::RpWidget {
 public:
 	explicit SelectionBarRow(not_null<QWidget*> parent)
@@ -10195,6 +10954,58 @@ object_ptr<Ui::BoxContent> MakeAccountManagerBox(
 			state->searchTimer.callOnce(150);
 		}, search->lifetime());
 
+		// ggtg: the table settings strip (columns, density, defaults).
+		const auto layoutMenu = box->lifetime().make_state<
+			base::unique_qptr<Ui::PopupMenu>>();
+		const auto layoutBar = std::make_shared<ManagerLayoutBar*>(nullptr);
+		const auto applyLayout = [=](bool save) {
+			if (save) {
+				SaveManagerLayout();
+			}
+			if (state->relayout) {
+				state->relayout();
+			}
+			if (save && state->rebuildTable) {
+				state->rebuildTable();
+			}
+			if (*layoutBar) {
+				(*layoutBar)->refresh();
+			}
+		};
+		const auto showColumnsMenu = std::make_shared<Fn<void(QPoint)>>();
+		*showColumnsMenu = [=](QPoint globalPos) {
+			*layoutMenu = base::make_unique_q<Ui::PopupMenu>(
+				box,
+				st::folderContextMenu);
+			const auto &layout = ManagerLayout();
+			for (const auto id : layout.order) {
+				const auto &info = TableLayout::Info(id);
+				if (info.alwaysOn) {
+					continue;
+				}
+				const auto shown = layout.visible[int(id)];
+				(*layoutMenu)->addAction(TableLayout::Str(info.title), [=] {
+					TableLayout::SetVisible(ManagerLayout(), id, !shown);
+					applyLayout(true);
+					// Stays open, like the reference's dropdown.
+					crl::on_main(box, [=] { (*showColumnsMenu)(globalPos); });
+				}, shown ? &st::mediaPlayerMenuCheck : nullptr);
+			}
+			(*layoutMenu)->addSeparator();
+			(*layoutMenu)->addAction(u"Закрепить «Аккаунт»"_q, [=] {
+				ManagerLayout().pinFirst = !ManagerLayout().pinFirst;
+				applyLayout(true);
+				crl::on_main(box, [=] { (*showColumnsMenu)(globalPos); });
+			}, layout.pinFirst ? &st::mediaPlayerMenuCheck : nullptr);
+			(*layoutMenu)->popup(globalPos);
+		};
+		*layoutBar = pinned->add(
+			object_ptr<ManagerLayoutBar>(
+				pinned,
+				[=](QPoint globalPos) { (*showColumnsMenu)(globalPos); },
+				[=] { applyLayout(true); }),
+			st::boxRowPadding);
+
 		const auto bar = pinned->add(
 			object_ptr<SelectionBarRow>(pinned),
 			st::boxRowPadding);
@@ -10672,6 +11483,9 @@ object_ptr<Ui::BoxContent> MakeAccountManagerBox(
 				},
 				[=](QPoint globalPos) {
 					showSortMenu(globalPos);
+				},
+				[=](bool save) {
+					applyLayout(save);
 				})).data();
 		state->header->setSortMode(state->sortMode);
 		state->header->setTrashMode(state->trash);
@@ -10712,13 +11526,11 @@ object_ptr<Ui::BoxContent> MakeAccountManagerBox(
 			const auto columns = ComputeManagerColumns();
 			const auto total = columns.totalWidth;
 			if (state->header) {
-				state->header->resize(total, state->header->height());
-				state->header->update();
+				state->header->relayout();
 			}
 			// Rows are resized before the layout re-flows around them.
 			for (const auto &row : state->rows) {
-				row->resize(total, columns.rowHeight);
-				row->update();
+				row->relayout();
 			}
 			table->resizeToWidth(total);
 		};
@@ -10732,7 +11544,10 @@ object_ptr<Ui::BoxContent> MakeAccountManagerBox(
 			ManagerViewportWidth() = width;
 			state->relayout();
 		}, rowsWrap->lifetime());
-		box->lifetime().add([] { ManagerViewportWidth() = 0; });
+		box->lifetime().add([] {
+			ManagerViewportWidth() = 0;
+			ManagerScrollX() = 0;
+		});
 		box->addRow(std::move(rowsWrapOwned), style::margins());
 		Ui::AddSkip(box->verticalLayout());
 
@@ -10762,6 +11577,24 @@ object_ptr<Ui::BoxContent> MakeAccountManagerBox(
 				}
 			}
 		}, box->lifetime());
+
+		// The pinned first column: the rows and the header draw it shifted
+		// by how far the table is scrolled sideways.
+		QObject::connect(
+			rowsScroll->horizontalScrollBar(),
+			&QScrollBar::valueChanged,
+			[=](int value) {
+				if (ManagerScrollX() == value) {
+					return;
+				}
+				ManagerScrollX() = value;
+				if (state->header) {
+					state->header->relayout();
+				}
+				for (const auto &row : state->rows) {
+					row->relayout();
+				}
+			});
 
 		const auto inScrollSync = std::make_shared<bool>(false);
 		QObject::connect(
@@ -11162,6 +11995,23 @@ object_ptr<Ui::BoxContent> MakeAccountManagerBox(
 				return LiveAccountStatus(a).rank;
 			};
 
+			// The optional columns' sort values, read once per sort.
+			auto extraKeys = std::map<Main::Account*, ExtraCell>();
+			if (state->sortMode == AccountSortMode::ColumnAsc
+				|| state->sortMode == AccountSortMode::ColumnDesc) {
+				for (const auto &account : state->shown) {
+					auto cache = ExtraCellsCache();
+					const auto user = account->sessionExists()
+						? account->session().user().get()
+						: nullptr;
+					extraKeys[account.get()] = ExtraCellFor(
+						ManagerSortColumn(),
+						account,
+						user,
+						cache);
+				}
+			}
+
 			const auto compareAccounts = [&](
 					not_null<Main::Account*> a,
 					not_null<Main::Account*> b) -> bool {
@@ -11258,6 +12108,20 @@ object_ptr<Ui::BoxContent> MakeAccountManagerBox(
 					const auto sA = getAccountSms(a);
 					const auto sB = getAccountSms(b);
 					if (sA != sB) return sA < sB;
+					return idxA < idxB;
+				}
+				case AccountSortMode::ColumnAsc:
+				case AccountSortMode::ColumnDesc: {
+					const auto &kA = extraKeys[a.get()];
+					const auto &kB = extraKeys[b.get()];
+					const auto asc = (state->sortMode == AccountSortMode::ColumnAsc);
+					if (kA.key != kB.key) {
+						return asc ? (kA.key < kB.key) : (kA.key > kB.key);
+					}
+					const auto c = QString::localeAwareCompare(kA.text, kB.text);
+					if (c != 0) {
+						return asc ? (c < 0) : (c > 0);
+					}
 					return idxA < idxB;
 				}
 				}
